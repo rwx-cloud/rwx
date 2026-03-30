@@ -993,6 +993,9 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 		if cfg.DefinitionPath != "" {
 			params.Set("definition_path", cfg.DefinitionPath)
 		}
+		if cfg.CommitSha != "" {
+			params.Set("commit_sha", cfg.CommitSha)
+		}
 		endpoint = "/mint/api/results/latest?" + params.Encode()
 	}
 	result := RunStatusResult{}

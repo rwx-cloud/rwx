@@ -16,6 +16,7 @@ var (
 	ResultsBranch     string
 	ResultsRepo       string
 	ResultsDefinition string
+	ResultsSha        string
 
 	resultsCmd = &cobra.Command{
 		GroupID: "outputs",
@@ -38,6 +39,7 @@ var (
 					BranchName:     ResultsBranch,
 					RepositoryName: ResultsRepo,
 					DefinitionPath: ResultsDefinition,
+					CommitSha:      ResultsSha,
 				})
 				if err != nil {
 					return err
@@ -110,4 +112,5 @@ func init() {
 	resultsCmd.Flags().StringVar(&ResultsBranch, "branch", "", "get results for a specific branch instead of the current git branch")
 	resultsCmd.Flags().StringVar(&ResultsRepo, "repo", "", "get results for a specific repository instead of the current git repository")
 	resultsCmd.Flags().StringVar(&ResultsDefinition, "definition", "", "get results for a specific definition path")
+	resultsCmd.Flags().StringVar(&ResultsSha, "sha", "", "get results for a specific commit SHA")
 }

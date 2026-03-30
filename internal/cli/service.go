@@ -233,6 +233,7 @@ type ResolveRunIDConfig struct {
 	BranchName     string
 	RepositoryName string
 	DefinitionPath string
+	CommitSha      string
 }
 
 // ResolveRunIDFromGitContext resolves the latest run ID by looking up the
@@ -261,10 +262,14 @@ func (s Service) ResolveRunIDFromGitContext(overrides ...ResolveRunIDConfig) (st
 		BranchName:     branchName,
 		RepositoryName: repositoryName,
 		DefinitionPath: cfg.DefinitionPath,
+		CommitSha:      cfg.CommitSha,
 	})
 	notFoundMsg := fmt.Sprintf("no run found for %s repository on branch %s", repositoryName, branchName)
 	if cfg.DefinitionPath != "" {
 		notFoundMsg += fmt.Sprintf(" with definition %s", cfg.DefinitionPath)
+	}
+	if cfg.CommitSha != "" {
+		notFoundMsg += fmt.Sprintf(" at commit %s", cfg.CommitSha)
 	}
 
 	if err != nil {
