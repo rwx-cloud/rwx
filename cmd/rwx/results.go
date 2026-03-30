@@ -100,9 +100,15 @@ var (
 				}
 			}
 
-			if ResultsOpen && result.RunURL != "" {
-				if err := open.Run(result.RunURL); err != nil {
-					fmt.Fprintf(os.Stderr, "Failed to open browser.\n")
+			if ResultsOpen {
+				openURL := result.RunURL
+				if result.TaskURL != "" {
+					openURL = result.TaskURL
+				}
+				if openURL != "" {
+					if err := open.Run(openURL); err != nil {
+						fmt.Fprintf(os.Stderr, "Failed to open browser.\n")
+					}
 				}
 			}
 
