@@ -21,6 +21,7 @@ var (
 		GroupID: "outputs",
 		Use:     "results [run-id]",
 		Short:   "Get results for a run",
+		Long:    "Get results for a run.\n\nThis is an alias for rwx runs results.",
 		Args:    cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return requireAccessToken()
