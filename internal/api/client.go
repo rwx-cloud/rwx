@@ -87,7 +87,11 @@ func (c Client) GetSkillLatestVersion() (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return "", errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return "", errors.New(msg)
 	}
 
 	var result struct {
@@ -137,7 +141,11 @@ func (c Client) GetDebugConnectionInfo(debugKey string) (DebugConnectionInfo, er
 		}
 		return connectionInfo, errors.ErrGone
 	default:
-		return connectionInfo, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return connectionInfo, errors.New(msg)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&connectionInfo); err != nil {
@@ -194,7 +202,11 @@ func (c Client) GetSandboxConnectionInfo(runID, scopedToken string) (SandboxConn
 		}
 		return connectionInfo, errors.ErrGone
 	default:
-		return connectionInfo, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return connectionInfo, errors.New(msg)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&connectionInfo); err != nil {
@@ -340,15 +352,11 @@ func (c Client) InitiateDispatch(cfg InitiateDispatchConfig) (*InitiateDispatchR
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 201 {
-		errorStruct := struct {
-			Error string `json:"error,omitempty"`
-		}{}
-
-		if err := json.NewDecoder(resp.Body).Decode(&errorStruct); err != nil {
-			return nil, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
 		}
-
-		return nil, errors.New(errorStruct.Error)
+		return nil, errors.New(msg)
 	}
 
 	respBody := struct {
@@ -381,7 +389,11 @@ func (c Client) GetDispatch(cfg GetDispatchConfig) (*GetDispatchResult, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
 	}
 
 	respBody := struct {
@@ -428,7 +440,11 @@ func (c Client) ObtainAuthCode(cfg ObtainAuthCodeConfig) (*ObtainAuthCodeResult,
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 201 {
-		return nil, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
 	}
 
 	respBody := ObtainAuthCodeResult{}
@@ -454,7 +470,11 @@ func (c Client) AcquireToken(tokenUrl string) (*AcquireTokenResult, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, errors.New(fmt.Sprintf("Unable to query the token URL - %s", resp.Status))
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to query the token URL - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
 	}
 
 	respBody := AcquireTokenResult{}
@@ -483,7 +503,11 @@ func (c Client) Whoami() (*WhoamiResult, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
 	}
 
 	respBody := WhoamiResult{}
@@ -511,7 +535,11 @@ func (c Client) CreateDocsToken() (*DocsTokenResult, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 201 && resp.StatusCode != 200 {
-		return nil, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
 	}
 
 	respBody := DocsTokenResult{}
@@ -992,6 +1020,9 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 		params.Set("repository_name", cfg.RepositoryName)
 		if cfg.DefinitionPath != "" {
 			params.Set("definition_path", cfg.DefinitionPath)
+		}
+		if cfg.CommitSha != "" {
+			params.Set("commit_sha", cfg.CommitSha)
 		}
 		endpoint = "/mint/api/results/latest?" + params.Encode()
 	}
