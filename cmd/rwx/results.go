@@ -3,16 +3,19 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/git"
 
+	"github.com/skratchdot/open-golang/open"
 	"github.com/spf13/cobra"
 )
 
 var (
 	ResultsWait       bool
 	ResultsFailFast   bool
+	ResultsOpen       bool
 	ResultsBranch     string
 	ResultsRepo       string
 	ResultsDefinition string
@@ -97,6 +100,12 @@ var (
 				}
 			}
 
+			if ResultsOpen && result.RunURL != "" {
+				if err := open.Run(result.RunURL); err != nil {
+					fmt.Fprintf(os.Stderr, "Failed to open browser.\n")
+				}
+			}
+
 			if result.Completed && result.ResultStatus != "succeeded" {
 				return HandledError
 			}
@@ -107,6 +116,7 @@ var (
 )
 
 func init() {
+	resultsCmd.Flags().BoolVar(&ResultsOpen, "open", false, "open the run in a browser")
 	resultsCmd.Flags().BoolVar(&ResultsWait, "wait", false, "poll for the run to complete and report the result status")
 	resultsCmd.Flags().BoolVar(&ResultsFailFast, "fail-fast", false, "stop waiting when failures are available (only has an effect when used with --wait)")
 	resultsCmd.Flags().StringVar(&ResultsBranch, "branch", "", "get results for a specific branch instead of the current git branch")
