@@ -7,6 +7,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	semver "github.com/Masterminds/semver/v3"
+	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/skill"
 	"github.com/spf13/cobra"
 )
@@ -22,7 +24,7 @@ var (
 		Use:   "status",
 		Short: "Show the status of RWX agent skill installations",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := skill.Detect()
+			result, err := service.SkillStatus()
 			if err != nil {
 				return err
 			}
@@ -41,13 +43,21 @@ func init() {
 	skillCmd.AddCommand(skillStatusCmd)
 }
 
-func outputSkillStatusJSON(result *skill.DetectResult) error {
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(result.Installations)
+type skillStatusJSON struct {
+	Installations []skill.Installation `json:"Installations"`
+	LatestVersion string               `json:"LatestVersion,omitempty"`
 }
 
-func outputSkillStatusText(result *skill.DetectResult) {
+func outputSkillStatusJSON(result *cli.SkillStatusResult) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(skillStatusJSON{
+		Installations: result.Installations,
+		LatestVersion: result.LatestVersion,
+	})
+}
+
+func outputSkillStatusText(result *cli.SkillStatusResult) {
 	var detected []skill.Installation
 	var notDetected []skill.Installation
 
@@ -83,8 +93,55 @@ func outputSkillStatusText(result *skill.DetectResult) {
 		fmt.Fprintln(os.Stdout)
 	}
 
-	fmt.Fprintln(os.Stdout, "To install:")
-	fmt.Fprintln(os.Stdout, "  npx skills add rwx-cloud/skills")
+	if !result.AnyFound {
+		fmt.Fprintln(os.Stdout, "To install:")
+		fmt.Fprintln(os.Stdout, "  npx skills add rwx-cloud/skills")
+		return
+	}
+
+	// Show upgrade instructions if any detected installation is outdated.
+	if result.LatestVersion == "" {
+		return
+	}
+	latestVersion, err := semver.NewVersion(result.LatestVersion)
+	if err != nil {
+		return
+	}
+
+	var highestOutdated *semver.Version
+	outdatedSources := make(map[string]bool)
+	for _, inst := range detected {
+		if inst.Version == "" {
+			outdatedSources[inst.Source] = true
+			continue
+		}
+		v, err := semver.NewVersion(inst.Version)
+		if err != nil {
+			continue
+		}
+		if latestVersion.GreaterThan(v) {
+			outdatedSources[inst.Source] = true
+			if highestOutdated == nil || v.GreaterThan(highestOutdated) {
+				highestOutdated = v
+			}
+		}
+	}
+
+	if len(outdatedSources) == 0 {
+		return
+	}
+
+	if highestOutdated != nil {
+		fmt.Fprintf(os.Stdout, "A new version of the RWX agent skill is available: v%s → v%s\n", highestOutdated, latestVersion)
+	} else {
+		fmt.Fprintf(os.Stdout, "A new version of the RWX agent skill is available: v%s\n", latestVersion)
+	}
+	if outdatedSources["agents"] {
+		fmt.Fprintln(os.Stdout, "To upgrade: npx skills update rwx")
+	}
+	if outdatedSources["marketplace"] {
+		fmt.Fprintln(os.Stdout, "To upgrade the Claude Code marketplace: claude plugin marketplace update rwx && claude plugin update rwx@rwx")
+	}
 }
 
 func shortenPath(path string) string {

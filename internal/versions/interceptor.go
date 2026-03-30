@@ -9,7 +9,7 @@ import (
 
 const latestVersionHeader = "X-Rwx-Cli-Latest-Version"
 
-const skillVersionCacheTTL = 2 * time.Hour
+const SkillVersionCacheTTL = 2 * time.Hour
 
 type versionInterceptor struct {
 	http.RoundTripper
@@ -40,7 +40,7 @@ type skillLatestVersionResponse struct {
 func (vi versionInterceptor) fetchSkillLatestVersion() {
 	if vi.skillBackend != nil {
 		if modTime, err := vi.skillBackend.ModTime(); err == nil {
-			if time.Since(modTime) < skillVersionCacheTTL {
+			if time.Since(modTime) < SkillVersionCacheTTL {
 				return
 			}
 		}

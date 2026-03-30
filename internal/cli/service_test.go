@@ -2,10 +2,12 @@ package cli_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/mocks"
@@ -148,5 +150,115 @@ func TestOutputOutdatedSkillMessage(t *testing.T) {
 		require.Contains(t, output, "A new version of the RWX agent skill is available: v1.1.0 → v2.0.0")
 		require.Contains(t, output, "To upgrade: npx skills update rwx")
 		require.Contains(t, output, "To upgrade the Claude Code marketplace: claude plugin marketplace update rwx && claude plugin update rwx@rwx")
+	})
+}
+
+func TestSkillStatus(t *testing.T) {
+	t.Run("fetches latest version from API when cache is empty", func(t *testing.T) {
+		s := setupSkillTest(t)
+		seedSkillFile(t, s.tmp, "1.0.0")
+
+		s.mockAPI.MockGetSkillLatestVersion = func() (string, error) {
+			return "2.0.0", nil
+		}
+
+		// Suppress the nag from NewService so it does not interfere.
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillStatus()
+		require.NoError(t, err)
+		require.True(t, result.AnyFound)
+		require.Equal(t, "2.0.0", result.LatestVersion)
+	})
+
+	t.Run("uses cached version when fresh", func(t *testing.T) {
+		s := setupSkillTest(t)
+		seedSkillFile(t, s.tmp, "1.0.0")
+
+		backend := versions.NewMemoryBackend()
+		_ = backend.Set("3.0.0")
+		s.config.SkillVersionsBackend = backend
+
+		// API should not be called.
+		s.mockAPI.MockGetSkillLatestVersion = func() (string, error) {
+			t.Fatal("API should not be called when cache is fresh")
+			return "", nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillStatus()
+		require.NoError(t, err)
+		require.Equal(t, "3.0.0", result.LatestVersion)
+	})
+
+	t.Run("fetches from API when cache is stale", func(t *testing.T) {
+		s := setupSkillTest(t)
+		seedSkillFile(t, s.tmp, "1.0.0")
+
+		backend := versions.NewMemoryBackend()
+		_ = backend.Set("1.5.0")
+		backend.SetModTime(time.Now().Add(-3 * time.Hour))
+		s.config.SkillVersionsBackend = backend
+
+		s.mockAPI.MockGetSkillLatestVersion = func() (string, error) {
+			return "2.0.0", nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillStatus()
+		require.NoError(t, err)
+		require.Equal(t, "2.0.0", result.LatestVersion)
+	})
+
+	t.Run("returns empty latest version when API fails", func(t *testing.T) {
+		s := setupSkillTest(t)
+		seedSkillFile(t, s.tmp, "1.0.0")
+
+		s.mockAPI.MockGetSkillLatestVersion = func() (string, error) {
+			return "", fmt.Errorf("network error")
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillStatus()
+		require.NoError(t, err)
+		require.True(t, result.AnyFound)
+		require.Empty(t, result.LatestVersion)
+	})
+
+	t.Run("no skill installed", func(t *testing.T) {
+		s := setupSkillTest(t)
+
+		s.mockAPI.MockGetSkillLatestVersion = func() (string, error) {
+			return "2.0.0", nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillStatus()
+		require.NoError(t, err)
+		require.False(t, result.AnyFound)
 	})
 }

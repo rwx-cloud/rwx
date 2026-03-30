@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	semver "github.com/Masterminds/semver/v3"
 	"github.com/rwx-cloud/rwx/internal/api"
@@ -142,6 +143,56 @@ func (s Service) outputOutdatedSkillMessage() {
 		fmt.Fprintln(w, "To upgrade the Claude Code marketplace: claude plugin marketplace update rwx && claude plugin update rwx@rwx")
 	}
 	fmt.Fprintln(w)
+}
+
+type SkillStatusResult struct {
+	Installations []skill.Installation
+	AnyFound      bool
+	LatestVersion string
+}
+
+// SkillStatus detects installed skills and fetches the latest available version.
+// The API call is skipped if the file cache is fresh or if the fetch fails.
+func (s Service) SkillStatus() (*SkillStatusResult, error) {
+	result, err := skill.Detect()
+	if err != nil {
+		return nil, err
+	}
+
+	latestVersion := s.fetchLatestSkillVersion()
+
+	return &SkillStatusResult{
+		Installations: result.Installations,
+		AnyFound:      result.AnyFound,
+		LatestVersion: latestVersion,
+	}, nil
+}
+
+// fetchLatestSkillVersion returns the latest skill version, fetching from the
+// API if the file cache is stale. Returns empty string if unavailable.
+func (s Service) fetchLatestSkillVersion() string {
+	// Check whether the file cache is still fresh.
+	if s.SkillVersionsBackend != nil {
+		if modTime, err := s.SkillVersionsBackend.ModTime(); err == nil {
+			if time.Since(modTime) < versions.SkillVersionCacheTTL {
+				versions.LoadLatestSkillVersionFromFile(s.SkillVersionsBackend)
+				v := versions.GetSkillLatestVersion()
+				if !v.Equal(versions.EmptyVersion) {
+					return v.String()
+				}
+			}
+		}
+	}
+
+	// Cache is stale or empty — call the API.
+	versionStr, err := s.APIClient.GetSkillLatestVersion()
+	if err != nil || versionStr == "" {
+		return ""
+	}
+
+	_ = versions.SetSkillLatestVersion(versionStr)
+	versions.SaveLatestSkillVersionToFile(s.SkillVersionsBackend)
+	return versionStr
 }
 
 // recordTelemetry enqueues a telemetry event if a collector is configured.
