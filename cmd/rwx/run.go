@@ -179,6 +179,7 @@ var (
 
 		},
 		Short: "Launch a run from a local RWX definitions file",
+		Long:  "Launch a run from a local RWX definitions file.\n\nThis is an alias for rwx runs create.",
 		Use:   "run <file> [flags]",
 	}
 )
