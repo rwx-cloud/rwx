@@ -978,7 +978,7 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 	var endpoint string
 	failFast := fmt.Sprintf("%t", cfg.FailFast)
 	if cfg.RunID != "" {
-		endpoint = fmt.Sprintf("/mint/api/runs/%s?fail_fast=%s", url.PathEscape(cfg.RunID), failFast)
+		endpoint = fmt.Sprintf("/mint/api/runs/%s/status?fail_fast=%s", url.PathEscape(cfg.RunID), failFast)
 	} else {
 		params := url.Values{}
 		params.Set("fail_fast", failFast)

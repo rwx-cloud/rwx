@@ -46,7 +46,9 @@ func (s Service) GetRunStatus(cfg GetRunStatusConfig) (*GetRunStatusResult, erro
 		}
 
 		status := ""
-		if statusResult.Status != nil {
+		if statusResult.TaskStatus != nil {
+			status = statusResult.TaskStatus.Result
+		} else if statusResult.Status != nil {
 			status = statusResult.Status.Result
 		}
 

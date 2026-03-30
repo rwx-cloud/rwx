@@ -891,7 +891,7 @@ func TestAPIClient_RunStatus(t *testing.T) {
 		bodyBytes, _ := json.Marshal(body)
 
 		roundTrip := func(req *http.Request) (*http.Response, error) {
-			require.Equal(t, "/mint/api/runs/run-123", req.URL.Path)
+			require.Equal(t, "/mint/api/runs/run-123/status", req.URL.Path)
 			require.Equal(t, "true", req.URL.Query().Get("fail_fast"))
 			require.Equal(t, http.MethodGet, req.Method)
 			return &http.Response{
@@ -951,7 +951,7 @@ func TestAPIClient_RunStatus(t *testing.T) {
 		bodyBytes, _ := json.Marshal(body)
 
 		roundTrip := func(req *http.Request) (*http.Response, error) {
-			require.Equal(t, "/mint/api/runs/run-456", req.URL.Path)
+			require.Equal(t, "/mint/api/runs/run-456/status", req.URL.Path)
 			require.Equal(t, http.MethodGet, req.Method)
 			return &http.Response{
 				Status:     "200 OK",

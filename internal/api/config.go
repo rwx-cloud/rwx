@@ -340,11 +340,12 @@ type RunStatus struct {
 }
 
 type RunStatusResult struct {
-	Status  *RunStatus    `json:"run_status,omitempty"`
-	RunID   string        `json:"run_id,omitempty"`
-	RunURL  string        `json:"run_url,omitempty"`
-	Commit  *string       `json:"commit_sha,omitempty"`
-	Polling PollingResult `json:"polling"`
+	Status     *RunStatus    `json:"run_status,omitempty"`
+	TaskStatus *TaskStatus   `json:"task_status,omitempty"`
+	RunID      string        `json:"run_id,omitempty"`
+	RunURL     string        `json:"run_url,omitempty"`
+	Commit     *string       `json:"commit_sha,omitempty"`
+	Polling    PollingResult `json:"polling"`
 }
 
 type AmbiguousTaskKeyError struct {
