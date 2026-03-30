@@ -78,7 +78,9 @@ var (
 						}
 					}
 				}
-				if result.RunURL != "" {
+				if result.TaskURL != "" {
+					fmt.Printf("Task URL: %s\n", result.TaskURL)
+				} else if result.RunURL != "" {
 					fmt.Printf("Run URL: %s\n", result.RunURL)
 				}
 				if result.Completed {
