@@ -379,7 +379,7 @@ func TestAPIClient_TaskIDStatus(t *testing.T) {
 			require.Equal(t, "abc123", req.URL.Query().Get("id"))
 			require.Equal(t, http.MethodGet, req.Method)
 
-			body := `{"polling": {"completed": true}}`
+			body := `{"task_status": {"result": "succeeded"}, "polling": {"completed": true}}`
 			return &http.Response{
 				Status:     "200 OK",
 				StatusCode: 200,
@@ -392,6 +392,8 @@ func TestAPIClient_TaskIDStatus(t *testing.T) {
 		result, err := c.TaskIDStatus(api.TaskIDStatusConfig{TaskID: "abc123"})
 		require.NoError(t, err)
 		require.True(t, result.Polling.Completed)
+		require.NotNil(t, result.Status)
+		require.Equal(t, "succeeded", result.Status.Result)
 	})
 }
 
