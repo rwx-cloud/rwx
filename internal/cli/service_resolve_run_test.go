@@ -107,6 +107,42 @@ func TestResolveRunIDFromGitContext(t *testing.T) {
 		require.Equal(t, "run-def", runID)
 	})
 
+	t.Run("skips implicit branch when commit SHA is provided", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockGit.MockGetBranch = "my-branch"
+		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
+			require.Equal(t, "", cfg.BranchName)
+			require.Equal(t, "rwx", cfg.RepositoryName)
+			require.Equal(t, "abc123", cfg.CommitSha)
+			return api.RunStatusResult{RunID: "run-by-commit"}, nil
+		}
+
+		runID, err := setup.service.ResolveRunIDFromGitContext(cli.ResolveRunIDConfig{
+			CommitSha: "abc123",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "run-by-commit", runID)
+	})
+
+	t.Run("uses explicit branch with commit SHA", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockGit.MockGetBranch = "my-branch"
+		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
+			require.Equal(t, "explicit-branch", cfg.BranchName)
+			require.Equal(t, "abc123", cfg.CommitSha)
+			return api.RunStatusResult{RunID: "run-branch-commit"}, nil
+		}
+
+		runID, err := setup.service.ResolveRunIDFromGitContext(cli.ResolveRunIDConfig{
+			BranchName: "explicit-branch",
+			CommitSha:  "abc123",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "run-branch-commit", runID)
+	})
+
 	t.Run("returns error when run ID is empty in response", func(t *testing.T) {
 		setup := setupTest(t)
 		setup.mockGit.MockGetBranch = "my-branch"

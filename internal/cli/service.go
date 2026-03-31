@@ -245,16 +245,16 @@ func (s Service) ResolveRunIDFromGitContext(overrides ...ResolveRunIDConfig) (st
 		cfg = overrides[0]
 	}
 
-	branchName := s.GitClient.GetBranch()
-	if cfg.BranchName != "" {
-		branchName = cfg.BranchName
+	branchName := cfg.BranchName
+	if branchName == "" && cfg.CommitSha == "" {
+		branchName = s.GitClient.GetBranch()
 	}
 	repositoryName := git.RepoNameFromOriginUrl(s.GitClient.GetOriginUrl())
 	if cfg.RepositoryName != "" {
 		repositoryName = cfg.RepositoryName
 	}
 
-	if branchName == "" || repositoryName == "" {
+	if repositoryName == "" || (branchName == "" && cfg.CommitSha == "") {
 		return "", errors.New("unable to determine the current branch and repository from git; please provide a run ID")
 	}
 
@@ -264,7 +264,10 @@ func (s Service) ResolveRunIDFromGitContext(overrides ...ResolveRunIDConfig) (st
 		DefinitionPath: cfg.DefinitionPath,
 		CommitSha:      cfg.CommitSha,
 	})
-	notFoundMsg := fmt.Sprintf("no run found for %s repository on branch %s", repositoryName, branchName)
+	notFoundMsg := fmt.Sprintf("no run found for %s repository", repositoryName)
+	if branchName != "" {
+		notFoundMsg += fmt.Sprintf(" on branch %s", branchName)
+	}
 	if cfg.DefinitionPath != "" {
 		notFoundMsg += fmt.Sprintf(" with definition %s", cfg.DefinitionPath)
 	}
