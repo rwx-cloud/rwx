@@ -114,7 +114,7 @@ func (s Service) ImageBuild(config ImageBuildConfig) (buildResult *ImageBuildRes
 		}
 
 		if statusResult.Polling.Completed {
-			if statusResult.Status != nil && statusResult.Status.Result == api.TaskStatusSucceeded {
+			if taskStatus := statusResult.GetTaskStatus(); taskStatus != nil && taskStatus.Result == api.TaskStatusSucceeded {
 				taskID = statusResult.TaskID
 				stopSpinner()
 				if !config.OutputJSON {

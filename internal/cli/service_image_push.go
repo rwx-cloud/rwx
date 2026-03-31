@@ -167,7 +167,7 @@ func (s Service) ImagePush(config ImagePushConfig) (pushResult *ImagePushResult,
 		}
 
 		if result.Polling.Completed {
-			if result.Status != nil && result.Status.Result == api.TaskStatusSucceeded {
+			if taskStatus := result.GetTaskStatus(); taskStatus != nil && taskStatus.Result == api.TaskStatusSucceeded {
 				succeeded = true
 			} else {
 				stopStartSpinner()

@@ -392,8 +392,8 @@ func TestAPIClient_TaskIDStatus(t *testing.T) {
 		result, err := c.TaskIDStatus(api.TaskIDStatusConfig{TaskID: "abc123"})
 		require.NoError(t, err)
 		require.True(t, result.Polling.Completed)
-		require.NotNil(t, result.Status)
-		require.Equal(t, "succeeded", result.Status.Result)
+		require.NotNil(t, result.GetTaskStatus())
+		require.Equal(t, "succeeded", result.GetTaskStatus().Result)
 	})
 }
 

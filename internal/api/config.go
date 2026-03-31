@@ -306,9 +306,17 @@ type TaskStatus struct {
 }
 
 type TaskStatusResult struct {
-	Status  *TaskStatus   `json:"task_status,omitempty"`
-	TaskID  string        `json:"task_id,omitempty"`
-	Polling PollingResult `json:"polling"`
+	Status     *TaskStatus   `json:"status,omitempty"`
+	TaskStatus *TaskStatus   `json:"task_status,omitempty"`
+	TaskID     string        `json:"task_id,omitempty"`
+	Polling    PollingResult `json:"polling"`
+}
+
+func (r TaskStatusResult) GetTaskStatus() *TaskStatus {
+	if r.TaskStatus != nil {
+		return r.TaskStatus
+	}
+	return r.Status
 }
 
 type LogDownloadRequestResult struct {
