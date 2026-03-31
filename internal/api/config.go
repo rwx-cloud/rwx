@@ -332,7 +332,6 @@ type RunStatusConfig struct {
 	BranchName     string
 	RepositoryName string
 	DefinitionPath string
-	CommitSha      string
 	FailFast       bool
 }
 
