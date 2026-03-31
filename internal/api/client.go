@@ -1016,7 +1016,9 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 	} else {
 		params := url.Values{}
 		params.Set("fail_fast", failFast)
-		params.Set("branch_name", cfg.BranchName)
+		if cfg.BranchName != "" {
+			params.Set("branch_name", cfg.BranchName)
+		}
 		params.Set("repository_name", cfg.RepositoryName)
 		if cfg.DefinitionPath != "" {
 			params.Set("definition_path", cfg.DefinitionPath)
