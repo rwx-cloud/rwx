@@ -927,10 +927,7 @@ func (c Client) ImagePushStatus(pushID string) (ImagePushStatusResult, error) {
 }
 
 func (c Client) TaskKeyStatus(cfg TaskKeyStatusConfig) (TaskStatusResult, error) {
-	params := url.Values{}
-	params.Set("run_id", cfg.RunID)
-	params.Set("task_key", cfg.TaskKey)
-	endpoint := "/mint/api/results/task_status?" + params.Encode()
+	endpoint := fmt.Sprintf("/mint/api/runs/%s/task_status?task_key=%s", url.PathEscape(cfg.RunID), url.PathEscape(cfg.TaskKey))
 	result := TaskStatusResult{}
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
@@ -954,7 +951,7 @@ func (c Client) TaskKeyStatus(cfg TaskKeyStatusConfig) (TaskStatusResult, error)
 }
 
 func (c Client) TaskIDStatus(cfg TaskIDStatusConfig) (TaskStatusResult, error) {
-	endpoint := fmt.Sprintf("/mint/api/results/status?id=%s", url.QueryEscape(cfg.TaskID))
+	endpoint := fmt.Sprintf("/mint/api/tasks/%s/status", url.PathEscape(cfg.TaskID))
 	result := TaskStatusResult{}
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
@@ -981,10 +978,7 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 	var endpoint string
 	failFast := fmt.Sprintf("%t", cfg.FailFast)
 	if cfg.RunID != "" {
-		params := url.Values{}
-		params.Set("id", cfg.RunID)
-		params.Set("fail_fast", failFast)
-		endpoint = "/mint/api/results/status?" + params.Encode()
+		endpoint = fmt.Sprintf("/mint/api/runs/%s/status?fail_fast=%s", url.PathEscape(cfg.RunID), failFast)
 	} else {
 		params := url.Values{}
 		params.Set("fail_fast", failFast)
@@ -995,7 +989,7 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 		if cfg.DefinitionPath != "" {
 			params.Set("definition_path", cfg.DefinitionPath)
 		}
-		endpoint = "/mint/api/results/latest?" + params.Encode()
+		endpoint = "/mint/api/runs/latest?" + params.Encode()
 	}
 	result := RunStatusResult{}
 
@@ -1020,7 +1014,7 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 }
 
 func (c Client) GetRunPrompt(runID string) (string, error) {
-	endpoint := fmt.Sprintf("/mint/api/results/prompt?id=%s", url.QueryEscape(runID))
+	endpoint := fmt.Sprintf("/mint/api/runs/%s/prompt", url.PathEscape(runID))
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {

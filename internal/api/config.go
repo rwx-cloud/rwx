@@ -344,8 +344,6 @@ type RunStatusResult struct {
 	TaskStatus *TaskStatus   `json:"task_status,omitempty"`
 	RunID      string        `json:"run_id,omitempty"`
 	RunURL     string        `json:"run_url,omitempty"`
-	TaskID     string        `json:"task_id,omitempty"`
-	TaskURL    string        `json:"task_url,omitempty"`
 	Commit     *string       `json:"commit_sha,omitempty"`
 	Polling    PollingResult `json:"polling"`
 }
