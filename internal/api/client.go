@@ -87,11 +87,7 @@ func (c Client) GetSkillLatestVersion() (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		msg := extractErrorMessage(resp.Body)
-		if msg == "" {
-			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
-		}
-		return "", errors.New(msg)
+		return "", errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
 	}
 
 	var result struct {
@@ -141,11 +137,7 @@ func (c Client) GetDebugConnectionInfo(debugKey string) (DebugConnectionInfo, er
 		}
 		return connectionInfo, errors.ErrGone
 	default:
-		msg := extractErrorMessage(resp.Body)
-		if msg == "" {
-			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
-		}
-		return connectionInfo, errors.New(msg)
+		return connectionInfo, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&connectionInfo); err != nil {
@@ -202,11 +194,7 @@ func (c Client) GetSandboxConnectionInfo(runID, scopedToken string) (SandboxConn
 		}
 		return connectionInfo, errors.ErrGone
 	default:
-		msg := extractErrorMessage(resp.Body)
-		if msg == "" {
-			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
-		}
-		return connectionInfo, errors.New(msg)
+		return connectionInfo, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&connectionInfo); err != nil {
@@ -352,11 +340,15 @@ func (c Client) InitiateDispatch(cfg InitiateDispatchConfig) (*InitiateDispatchR
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 201 {
-		msg := extractErrorMessage(resp.Body)
-		if msg == "" {
-			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		errorStruct := struct {
+			Error string `json:"error,omitempty"`
+		}{}
+
+		if err := json.NewDecoder(resp.Body).Decode(&errorStruct); err != nil {
+			return nil, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
 		}
-		return nil, errors.New(msg)
+
+		return nil, errors.New(errorStruct.Error)
 	}
 
 	respBody := struct {
@@ -389,11 +381,7 @@ func (c Client) GetDispatch(cfg GetDispatchConfig) (*GetDispatchResult, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		msg := extractErrorMessage(resp.Body)
-		if msg == "" {
-			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
-		}
-		return nil, errors.New(msg)
+		return nil, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
 	}
 
 	respBody := struct {
@@ -440,11 +428,7 @@ func (c Client) ObtainAuthCode(cfg ObtainAuthCodeConfig) (*ObtainAuthCodeResult,
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 201 {
-		msg := extractErrorMessage(resp.Body)
-		if msg == "" {
-			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
-		}
-		return nil, errors.New(msg)
+		return nil, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
 	}
 
 	respBody := ObtainAuthCodeResult{}
@@ -470,11 +454,7 @@ func (c Client) AcquireToken(tokenUrl string) (*AcquireTokenResult, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		msg := extractErrorMessage(resp.Body)
-		if msg == "" {
-			msg = fmt.Sprintf("Unable to query the token URL - %s", resp.Status)
-		}
-		return nil, errors.New(msg)
+		return nil, errors.New(fmt.Sprintf("Unable to query the token URL - %s", resp.Status))
 	}
 
 	respBody := AcquireTokenResult{}
@@ -503,11 +483,7 @@ func (c Client) Whoami() (*WhoamiResult, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		msg := extractErrorMessage(resp.Body)
-		if msg == "" {
-			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
-		}
-		return nil, errors.New(msg)
+		return nil, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
 	}
 
 	respBody := WhoamiResult{}
@@ -535,11 +511,7 @@ func (c Client) CreateDocsToken() (*DocsTokenResult, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 201 && resp.StatusCode != 200 {
-		msg := extractErrorMessage(resp.Body)
-		if msg == "" {
-			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
-		}
-		return nil, errors.New(msg)
+		return nil, errors.New(fmt.Sprintf("Unable to call RWX API - %s", resp.Status))
 	}
 
 	respBody := DocsTokenResult{}
@@ -955,10 +927,7 @@ func (c Client) ImagePushStatus(pushID string) (ImagePushStatusResult, error) {
 }
 
 func (c Client) TaskKeyStatus(cfg TaskKeyStatusConfig) (TaskStatusResult, error) {
-	params := url.Values{}
-	params.Set("run_id", cfg.RunID)
-	params.Set("task_key", cfg.TaskKey)
-	endpoint := "/mint/api/results/task_status?" + params.Encode()
+	endpoint := fmt.Sprintf("/mint/api/runs/%s/task_status?task_key=%s", url.PathEscape(cfg.RunID), url.PathEscape(cfg.TaskKey))
 	result := TaskStatusResult{}
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
@@ -982,7 +951,7 @@ func (c Client) TaskKeyStatus(cfg TaskKeyStatusConfig) (TaskStatusResult, error)
 }
 
 func (c Client) TaskIDStatus(cfg TaskIDStatusConfig) (TaskStatusResult, error) {
-	endpoint := fmt.Sprintf("/mint/api/results/status?id=%s", url.QueryEscape(cfg.TaskID))
+	endpoint := fmt.Sprintf("/mint/api/tasks/%s/status", url.PathEscape(cfg.TaskID))
 	result := TaskStatusResult{}
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
@@ -1009,24 +978,16 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 	var endpoint string
 	failFast := fmt.Sprintf("%t", cfg.FailFast)
 	if cfg.RunID != "" {
-		params := url.Values{}
-		params.Set("id", cfg.RunID)
-		params.Set("fail_fast", failFast)
-		endpoint = "/mint/api/results/status?" + params.Encode()
+		endpoint = fmt.Sprintf("/mint/api/runs/%s?fail_fast=%s", url.PathEscape(cfg.RunID), failFast)
 	} else {
 		params := url.Values{}
 		params.Set("fail_fast", failFast)
-		if cfg.BranchName != "" {
-			params.Set("branch_name", cfg.BranchName)
-		}
+		params.Set("branch_name", cfg.BranchName)
 		params.Set("repository_name", cfg.RepositoryName)
 		if cfg.DefinitionPath != "" {
 			params.Set("definition_path", cfg.DefinitionPath)
 		}
-		if cfg.CommitSha != "" {
-			params.Set("commit_sha", cfg.CommitSha)
-		}
-		endpoint = "/mint/api/results/latest?" + params.Encode()
+		endpoint = "/mint/api/runs/latest?" + params.Encode()
 	}
 	result := RunStatusResult{}
 
@@ -1051,7 +1012,7 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 }
 
 func (c Client) GetRunPrompt(runID string) (string, error) {
-	endpoint := fmt.Sprintf("/mint/api/results/prompt?id=%s", url.QueryEscape(runID))
+	endpoint := fmt.Sprintf("/mint/api/runs/%s/prompt", url.PathEscape(runID))
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
