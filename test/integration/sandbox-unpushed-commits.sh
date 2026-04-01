@@ -4,7 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/sandbox-helpers.sh"
 
-cd ./rwx-testing
 start_sandbox
 trap stop_sandbox EXIT
 
@@ -12,7 +11,7 @@ git commit --allow-empty -m "unpushed local commit"
 echo "uncommitted edit" > uncommitted-test.txt
 uncommitted_sha=$(sha1sum uncommitted-test.txt | awk '{print $1}')
 
-../rwx sandbox exec -- echo "exercising sandbox with unpushed commits"
+"${RWX_CLI}" sandbox exec -- echo "exercising sandbox with unpushed commits"
 
 post_exec_sha=$(sha1sum uncommitted-test.txt | awk '{print $1}')
 if [ "$uncommitted_sha" != "$post_exec_sha" ]; then

@@ -1,0 +1,14 @@
+base:
+  image: ubuntu:24.04
+  config: none
+
+tasks:
+  - key: image
+    run: |
+      cat <<'SCRIPT' > /usr/local/bin/hello
+      #!/usr/bin/env bash
+      echo "hello from an RWX-built image"
+      SCRIPT
+      chmod +x /usr/local/bin/hello
+
+      echo "/usr/local/bin/hello" | tee $RWX_IMAGE/command
