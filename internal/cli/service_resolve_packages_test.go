@@ -13,6 +13,43 @@ import (
 )
 
 func TestService_ResolvingPackages(t *testing.T) {
+	t.Run("skips call values containing expressions", func(t *testing.T) {
+		s := setupTest(t)
+
+		s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{
+				LatestMajor: map[string]string{"nodejs/install": "1.2.3"},
+			}, nil
+		}
+
+		originalContents := `
+tasks:
+  - key: export
+    run: echo "rwx/greeting" > $RWX_VALUES/package-name
+  - key: embedded
+    call: ${{ run.dir }}/integration/run-test.yml
+  - key: dynamic
+    call: ${{ tasks.export.values.package-name }} 1.0.6
+  - key: package
+    call: nodejs/install
+`
+		err := os.WriteFile(filepath.Join(s.tmp, "foo.yaml"), []byte(originalContents), 0o644)
+		require.NoError(t, err)
+
+		_, err = s.service.ResolvePackages(cli.ResolvePackagesConfig{
+			RwxDirectory:        s.tmp,
+			LatestVersionPicker: cli.PickLatestMajorVersion,
+		})
+		require.NoError(t, err)
+
+		contents, err := os.ReadFile(filepath.Join(s.tmp, "foo.yaml"))
+		require.NoError(t, err)
+		require.Contains(t, string(contents), "${{ run.dir }}/integration/run-test.yml")
+		require.Contains(t, string(contents), "${{ tasks.export.values.package-name }} 1.0.6")
+		require.Contains(t, string(contents), "nodejs/install 1.2.3")
+		require.NotContains(t, s.mockStderr.String(), "Unable to find the package")
+	})
+
 	t.Run("when no files provided", func(t *testing.T) {
 		t.Run("when no yaml files found in the default directory", func(t *testing.T) {
 			s := setupTest(t)
