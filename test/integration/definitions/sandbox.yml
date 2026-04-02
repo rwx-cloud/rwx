@@ -2,7 +2,6 @@ on:
   cli:
     init:
       ref: ${{ event.git.sha }}
-      cli: main
 
 base:
   image: ubuntu:24.04
@@ -12,8 +11,8 @@ tasks:
   - key: code
     call: git/clone 2.0.7
     with:
-      repository: https://github.com/rwx-cloud/cli.git
-      ref: ${{ init.cli }}
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
       preserve-git-dir: true
 
   - key: build-def
@@ -23,7 +22,7 @@ tasks:
   - key: build-rwx-cli
     call: ${{ tasks.build-def.artifacts.build-yml }}
     init:
-      ref: ${{ init.cli }}
+      ref: ${{ init.ref }}
 
   - key: rwx-cli
     run: sudo install "$CLI_BINARY" /usr/local/bin
