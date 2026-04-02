@@ -134,25 +134,17 @@ tasks:
         exit 1
       fi
 
-      # run it again without JSON to see the results prompt, will be simpler after RWX-291
-      result_exit_code=0
-      result=$(rwx run "$RUN_DEF" --wait --fail-fast) || result_exit_code=$?
+      prompt=$(echo "$kickoff" | jq -r '.Prompt // empty')
 
-      if [ "$result_exit_code" -eq 0 ]; then
-        echo "Expected non-zero exit code with --fail-fast on failing run"
-        echo "$result"
+      if ! echo "$prompt" | grep -q "will-fail-fast"; then
+        echo "Expected prompt to include 'will-fail-fast', but it did not."
+        echo "$kickoff"
         exit 1
       fi
 
-      if ! echo "$result" | grep -q "will-fail-fast"; then
-        echo "Expected output to include 'will-fail-fast', but it did not."
-        echo "$result"
-        exit 1
-      fi
-
-      if echo "$result" | grep -q "will-fail-slow"; then
-        echo "Expected output to NOT include 'will-fail-slow', but it did."
-        echo "$result"
+      if echo "$prompt" | grep -q "will-fail-slow"; then
+        echo "Expected prompt to NOT include 'will-fail-slow', but it did."
+        echo "$kickoff"
         exit 1
       fi
     env:
