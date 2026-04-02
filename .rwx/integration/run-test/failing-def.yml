@@ -1,0 +1,10 @@
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: will-fail-fast
+    run: exit 1
+
+  - key: will-fail-slow
+    run: sleep 10 && exit 1
