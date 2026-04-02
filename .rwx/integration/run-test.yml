@@ -26,3 +26,136 @@ tasks:
       ref: main
       lsp: main
       cli: ${{ init.cli }}
+
+  - key: rwx-cli-code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.cli }}
+
+  - key: build-def
+    use: rwx-cli-code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.cli }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: test-run-no-cache
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      kickoff=$(rwx run "$RUN_DEF" --wait --json --no-cache)
+      status=$(echo "$kickoff" | jq -r '.ResultStatus')
+      run_url=$(echo "$kickoff" | jq -r '.RunURL // empty')
+      echo "$run_url" > "$RWX_LINKS/No cache run"
+
+      if [ "$status" != "succeeded" ]; then
+        echo "Expected 'succeeded' with --no-cache, got '$status'"
+        echo "$kickoff"
+        exit 1
+      fi
+    env:
+      RUN_DEF: ${{ run.dir }}/integration/run-test/simple-def.yml
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-run-target
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      kickoff=$(rwx run "$RUN_DEF" --wait --json --target task-a)
+      status=$(echo "$kickoff" | jq -r '.ResultStatus')
+      targeted=$(echo "$kickoff" | jq -r '.TargetedTaskKeys[]')
+      run_url=$(echo "$kickoff" | jq -r '.RunURL // empty')
+      echo "$run_url" > "$RWX_LINKS/Targeted run"
+
+      if [ "$status" != "succeeded" ]; then
+        echo "Expected 'succeeded' with --target, got '$status'"
+        echo "$kickoff"
+        exit 1
+      fi
+
+      if [ "$targeted" != "task-a" ]; then
+        echo "Expected TargetedTaskKeys to contain 'task-a', got '$targeted'"
+        echo "$kickoff"
+        exit 1
+      fi
+    env:
+      RUN_DEF: ${{ run.dir }}/integration/run-test/multi-task-def.yml
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-run-dir
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      kickoff=$(rwx run .rwx/nested-ci.yml --wait --json -d "$RUN_DIR_PARENT")
+      status=$(echo "$kickoff" | jq -r '.ResultStatus')
+      run_url=$(echo "$kickoff" | jq -r '.RunURL // empty')
+      echo "$run_url" > "$RWX_LINKS/Dir run"
+
+      if [ "$status" != "succeeded" ]; then
+        echo "Expected 'succeeded' with --dir, got '$status'"
+        echo "$kickoff"
+        exit 1
+      fi
+    env:
+      RUN_DIR_PARENT: ${{ run.dir }}/integration/run-test/dir-test
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-run-fail-fast
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      exit_code=0
+      kickoff=$(rwx run "$RUN_DEF" --wait --fail-fast --json) || exit_code=$?
+      run_url=$(echo "$kickoff" | jq -r '.RunURL // empty')
+      echo "$run_url" > "$RWX_LINKS/Run URL"
+
+      if [ "$exit_code" -eq 0 ]; then
+        echo "Expected non-zero exit code with --fail-fast on failing run"
+        echo "$kickoff"
+        exit 1
+      fi
+
+      status=$(echo "$kickoff" | jq -r '.ResultStatus')
+      if [ "$status" = "succeeded" ]; then
+        echo "Expected non-succeeded status with --fail-fast on failing run, got '$status'"
+        echo "$kickoff"
+        exit 1
+      fi
+
+      # run it again without JSON to see the results prompt, will be simpler after RWX-291
+      result_exit_code=0
+      result=$(rwx run "$RUN_DEF" --wait --fail-fast) || result_exit_code=$?
+
+      if [ "$result_exit_code" -eq 0 ]; then
+        echo "Expected non-zero exit code with --fail-fast on failing run"
+        echo "$result"
+        exit 1
+      fi
+
+      if ! echo "$result" | grep -q "will-fail-fast"; then
+        echo "Expected output to include 'will-fail-fast', but it did not."
+        echo "$result"
+        exit 1
+      fi
+
+      if echo "$result" | grep -q "will-fail-slow"; then
+        echo "Expected output to NOT include 'will-fail-slow', but it did."
+        echo "$result"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RUN_DEF: ${{ run.dir }}/integration/run-test/failing-def.yml
+      

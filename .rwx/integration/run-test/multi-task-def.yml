@@ -1,0 +1,9 @@
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: task-a
+    run: echo "task-a ran"
+  - key: task-b
+    run: echo "task-b ran"

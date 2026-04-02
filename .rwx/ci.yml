@@ -152,7 +152,32 @@ tasks:
   - key: run-rwx-image-test
     call: ${{ run.dir }}/integration/image-test.yml
     init:
-      cli: ${{ init.commit-sha }}
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-results-test
+    call: ${{ run.dir }}/integration/results-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-logs-test
+    call: ${{ run.dir }}/integration/logs-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-artifacts-test
+    call: ${{ run.dir }}/integration/artifacts-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-resolve-update-test
+    call: ${{ run.dir }}/integration/resolve-update-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-whoami-test
+    call: ${{ run.dir }}/integration/whoami-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
 
   - key: generate-sandbox-tests
     use: code

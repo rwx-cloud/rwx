@@ -1,0 +1,91 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: rwx-run
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      # Kick off a run and wait for it
+      kickoff=$(rwx run $RUN_DEF --wait --json)
+      run_id=$(echo "$kickoff" | jq -r '.RunID')
+      run_url=$(echo "$kickoff" | jq -r '.RunURL // empty')
+
+      if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+        echo "Failed to get RunID from kickoff"
+        echo "$kickoff"
+        exit 1
+      fi
+
+      echo "$run_id" > "$RWX_VALUES/run-id"
+      echo "$run_url" > "$RWX_VALUES/run-url"
+      echo "$run_url" > "$RWX_LINKS/Run URL"
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RUN_DEF: ${{ run.dir }}/integration/logs-test/run-def.yml
+
+  - key: test-download-and-extract-logs
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      rwx logs "$RUN_ID" --task log-producer --output-dir /tmp/logs-test
+      if [ ! "$(ls -A /tmp/logs-test)" ]; then
+        echo "No log files extracted to /tmp/logs-test"
+        exit 1
+      fi
+      if ! grep -r "integration-test-log-marker" /tmp/logs-test/; then
+        echo "Log marker not found in extracted logs"
+        ls -laR /tmp/logs-test/
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-logs-as-zip
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      rwx logs "$RUN_ID" --task log-producer --zip --output-file /tmp/logs-test.zip
+      if [ ! -f /tmp/logs-test.zip ]; then
+        echo "Zip file not created at /tmp/logs-test.zip"
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
