@@ -1,0 +1,163 @@
+# Run definitions in this file must be embedded to work around real linting
+
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: tool-versions
+    use: code
+    run: |
+      while read -r tool version _; do
+        printf "%s" "$version" > "$RWX_VALUES/$tool"
+      done < .tool-versions
+      cp language-server-ref $RWX_VALUES
+    filter:
+      - .tool-versions
+      - language-server-ref
+
+  - key: go-installation
+    call: golang/install 1.2.1
+    with:
+      go-version: ${{ tasks.tool-versions.values.golang }}
+
+  - key: go
+    use: go-installation
+    run: echo "$(go env GOPATH)/bin" > "${MINT_ENV}/PATH"
+
+  - key: node
+    call: nodejs/install 1.1.13
+    with:
+      node-version: ${{ tasks.tool-versions.values.nodejs }}
+
+  - key: lsp-code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/language-server.git
+      ref: ${{ tasks.tool-versions.values.language-server-ref }}
+      path: language-server
+
+  - key: lsp-build-def
+    use: lsp-code
+    run: cp language-server/.rwx/build.yml $RWX_ARTIFACTS/build-run-def
+
+  - key: lsp-build
+    call: ${{ tasks.lsp-build-def.artifacts.build-run-def }}
+    init:
+      ref: ${{ tasks.tool-versions.values.language-server-ref }}
+
+  - key: lsp-server
+    use: code
+    run: cp ${{ tasks.lsp-build.tasks.build.artifacts.bundle }} internal/lsp/bundle/server.js
+
+  - key: go-deps
+    use: [go, code]
+    call: golang/mod-download 1.0.2
+    filter: [go.mod, go.sum]
+    with:
+      tool-cache: cli-go-deps
+
+  - key: rwx-cli
+    use: [go-deps, lsp-server]
+    run: |
+      go build -a -ldflags "-w -s -X github.com/rwx-cloud/rwx/cmd/rwx/config.Version=testing-${{ init.ref }}" ./cmd/rwx
+      sudo install ./rwx /usr/local/bin/rwx
+
+  - key: test-lint-valid
+    use: [rwx-cli, node]
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+
+      cat > "$tmpdir/.rwx/ci.yml" << 'EOF'
+      base:
+        image: ubuntu:24.04
+        config: rwx/base 1.0.0
+
+      tasks:
+      - key: hello
+        run: echo "hello"
+      EOF
+
+      if ! rwx lint -d "$tmpdir" --warnings-as-errors; then
+        echo "Lint failed on valid config"
+        exit 1
+      fi
+
+  - key: test-lint-invalid
+    use: [rwx-cli, node]
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+
+      cat > "$tmpdir/.rwx/ci.yml" << 'EOF'
+      tasks: "not-a-list"
+      EOF
+
+      if rwx lint -d "$tmpdir" --warnings-as-errors; then
+        echo "Lint should have failed on invalid config but exited 0"
+        exit 1
+      fi
+
+  - key: test-lint-fix-outdated-version
+    use: [rwx-cli, node]
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+
+      cat > "$tmpdir/.rwx/ci.yml" << 'EOF'
+      tasks:
+        - key: clone
+          call: git/clone 0.0.1
+      EOF
+
+      before_fix=$(cat "$tmpdir/.rwx/ci.yml")
+      rwx lint --fix -d "$tmpdir" --warnings-as-errors || true
+      after_fix=$(cat "$tmpdir/.rwx/ci.yml")
+
+      if [ "$before_fix" = "$after_fix" ]; then
+        echo "Lint --fix did not modify config with outdated package version"
+        echo "Before: $before_fix"
+        echo "After: $after_fix"
+        exit 1
+      fi
+
+  - key: test-lint-file-argument
+    use: [rwx-cli, node]
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+
+      cat > "$tmpdir/.rwx/ci.yml" << 'EOF'
+      base:
+        image: ubuntu:24.04
+        config: rwx/base 1.0.0
+
+      tasks:
+        - key: hello
+          run: echo "hello"
+      EOF
+
+      if ! rwx lint -d "$tmpdir" "$tmpdir/.rwx/ci.yml" --warnings-as-errors; then
+        echo "Lint failed when given a specific file argument"
+        exit 1
+      fi

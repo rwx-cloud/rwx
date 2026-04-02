@@ -169,6 +169,11 @@ tasks:
     init:
       ref: ${{ init.commit-sha }}
 
+  - key: run-rwx-lint-test
+    call: ${{ run.dir }}/integration/lint-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
   - key: run-rwx-resolve-update-test
     call: ${{ run.dir }}/integration/resolve-update-test.yml
     init:
