@@ -2,7 +2,6 @@ on:
   cli:
     init:
       ref: ${{ event.git.sha }}
-      cli: main
 
 base:
   image: ubuntu:24.04
@@ -15,21 +14,20 @@ tasks:
   - key: aws-cli
     call: aws/install-cli 1.0.10
 
-  - key: rwx-cli-code
+  - key: code
     call: git/clone 2.0.7
     with:
-      path: ./rwx-cli
-      repository: https://github.com/rwx-cloud/cli.git
-      ref: ${{ init.cli }}
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
 
-  - key: rwx-cli-build-def
-    use: rwx-cli-code
-    run: cp ./rwx-cli/.rwx/build.yml $RWX_ARTIFACTS/build-yml
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
 
   - key: build-rwx-cli
-    call: ${{ tasks.rwx-cli-build-def.artifacts.build-yml }}
+    call: ${{ tasks.build-def.artifacts.build-yml }}
     init:
-      ref: ${{ init.cli }}
+      ref: ${{ init.ref }}
 
   - key: rwx-cli
     run: sudo install "$CLI_BINARY" /usr/local/bin
@@ -62,6 +60,23 @@ tasks:
         cache-key: excluded
     outputs:
       values: [ecr-image]
+
+  - key: push-image-gzip
+    use: [rwx-cli, aws-role]
+    after: build-image
+    run: |
+      aws ecr get-login-password --region us-east-2 --profile staging \
+        | docker login --username AWS --password-stdin $REGISTRY_HOST
+
+      rwx image push $IMAGE_TASK_ID \
+        --to $REGISTRY_HOST/rwx_cli_staging:${{ run.id }}-gzip \
+        --compression gzip
+    env:
+      IMAGE_TASK_ID: ${{ tasks.build-image.tasks.image.id }}
+      REGISTRY_HOST: 646244215049.dkr.ecr.us-east-2.amazonaws.com
+      AWS_OIDC_TOKEN:
+        value: ${{ vaults.rwx_cli_development.oidc.aws }}
+        cache-key: excluded
 
   - key: pull-image-uncompressed
     use: rwx-cli
@@ -97,3 +112,22 @@ tasks:
       AWS_OIDC_TOKEN:
         value: ${{ vaults.rwx_cli_development.oidc.aws }}
         cache-key: excluded
+
+  - key: test-image-build
+    use: rwx-cli
+    docker: true
+    run: |
+      set -euo pipefail
+
+      build_def="${BUILD_IMAGE_DEF}"
+
+      rwx image build "$build_def" --target image --tag rwx-build-test:latest
+      output=$(docker run rwx-build-test:latest)
+      echo "Output from image build: $output"
+      if [ "$output" != "hello from an RWX-built image" ]; then
+        echo "Unexpected output from image build: $output"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      BUILD_IMAGE_DEF: ${{ run.dir }}/integration/image-test/build-image.yml
