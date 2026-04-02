@@ -1,0 +1,52 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: test-whoami
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      output=$(rwx whoami --json)
+      org=$(echo "$output" | jq -r '.organization_slug // empty')
+      kind=$(echo "$output" | jq -r '.token_kind // empty')
+
+      if [ -z "$org" ]; then
+        echo "organization_slug is empty"
+        echo "$output"
+        exit 1
+      fi
+
+      if [ -z "$kind" ]; then
+        echo "token_kind is empty"
+        echo "$output"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
