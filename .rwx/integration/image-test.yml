@@ -1,0 +1,99 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+      cli: main
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: build-image
+    call: ${{ run.dir }}/integration/image-test/build-image.yml
+
+  - key: aws-cli
+    call: aws/install-cli 1.0.10
+
+  - key: rwx-cli-code
+    call: git/clone 2.0.7
+    with:
+      path: ./rwx-cli
+      repository: https://github.com/rwx-cloud/cli.git
+      ref: ${{ init.cli }}
+
+  - key: rwx-cli-build-def
+    use: rwx-cli-code
+    run: cp ./rwx-cli/.rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.rwx-cli-build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.cli }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: aws-role
+    use: aws-cli
+    call: aws/assume-role 2.0.9
+    with:
+      region: us-east-2
+      role-to-assume: arn:aws:iam::646244215049:role/rwx-repo-cd
+      role-session-name: rwx-run-${{ run.id }}
+      profile-name: staging
+
+  - key: push-image
+    use: [rwx-cli, aws-role]
+    run: |
+      aws ecr get-login-password --region us-east-2 --profile staging \
+        | docker login --username AWS --password-stdin $REGISTRY_HOST
+
+      IMAGE_REF="$REGISTRY_HOST/rwx_cli_staging:${{ run.id }}"
+      rwx image push $IMAGE_TASK_ID --to "$IMAGE_REF"
+      printf "%s" "$IMAGE_REF" > "$RWX_VALUES/ecr-image"
+    env:
+      IMAGE_TASK_ID: ${{ tasks.build-image.tasks.image.id }}
+      REGISTRY_HOST: 646244215049.dkr.ecr.us-east-2.amazonaws.com
+      AWS_OIDC_TOKEN:
+        value: ${{ vaults.rwx_cli_development.oidc.aws }}
+        cache-key: excluded
+    outputs:
+      values: [ecr-image]
+
+  - key: pull-image-uncompressed
+    use: rwx-cli
+    docker: true
+    run: |
+      rwx image pull $IMAGE_TASK_ID --tag rwx-test:latest
+      output=$(docker run rwx-test)
+      echo "Output from image: $output"
+      if [ "$output" != "hello from an RWX-built image" ]; then
+        echo "Unexpected output from image: $output"
+        exit 1
+      fi
+    env:
+      IMAGE_TASK_ID: ${{ tasks.build-image.tasks.image.id }}
+
+  - key: pull-image-ecr
+    use: aws-role
+    docker: true
+    run: |
+      REGISTRY_HOST="${ECR_IMAGE%%/*}"
+      aws ecr get-login-password --region us-east-2 --profile staging \
+        | docker login --username AWS --password-stdin "$REGISTRY_HOST"
+
+      docker pull $ECR_IMAGE
+      output=$(docker run $ECR_IMAGE)
+      echo "Output from image: $output"
+      if [ "$output" != "hello from an RWX-built image" ]; then
+        echo "Unexpected output from image: $output"
+        exit 1
+      fi
+    env:
+      ECR_IMAGE: ${{ tasks.push-image.values.ecr-image }}
+      AWS_OIDC_TOKEN:
+        value: ${{ vaults.rwx_cli_development.oidc.aws }}
+        cache-key: excluded

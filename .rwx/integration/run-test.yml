@@ -1,0 +1,28 @@
+on:
+  cli:
+    init:
+      cli: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: rwx-testing-code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx-testing.git
+      ref: main
+      github-token: ${{ github['rwx-cloud'].token }}
+
+  - key: run-def
+    use: rwx-testing-code
+    run: cp .rwx/trigger-integration-test.yml $RWX_ARTIFACTS/run-def
+
+  - key: integration-tests
+    call: ${{ tasks.run-def.artifacts.run-def }}
+    init:
+      grep: "@cli"
+      ref: main
+      lsp: main
+      cli: ${{ init.cli }}

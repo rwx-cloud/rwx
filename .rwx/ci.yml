@@ -113,12 +113,6 @@ tasks:
     run: |
       go build -a -ldflags "-w -s -X github.com/rwx-cloud/rwx/cmd/rwx/config.Version=testing-${{ init.commit-sha }}" ./cmd/rwx
 
-  - key: integration-tests
-    use: rwx-cli
-    run: ./rwx run --debug -f test/hello-world.mint.yaml
-    env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
-
   - key: lint
     use: [golangci-lint, go-deps, lsp-server]
     run: golangci-lint run ./...
@@ -150,25 +144,15 @@ tasks:
     init:
       ref: ${{ init.commit-sha }}
 
-  - key: rwx-testing-code
-    call: git/clone 2.0.7
-    with:
-      path: ./rwx-testing
-      repository: https://github.com/rwx-cloud/rwx-testing.git
-      ref: main
-      github-token: ${{ github['rwx-cloud'].token }}
-      preserve-git-dir: true
+  - key: run-rwx-run-test
+    call: ${{ run.dir }}/integration/run-test.yml
+    init:
+      cli: ${{ init.commit-sha }}
 
-  - key: run-rwx-testing-tests
-    use: [rwx-testing-code, rwx-cli]
-    run: ./test/integration/rwx-testing-tests.sh
-    env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
-      COMMIT_SHA: ${{ init.commit-sha }}
-    filter:
-      - rwx
-      - test/integration/rwx-testing-tests.sh
-      - rwx-testing/.rwx/trigger-integration-test.yml
+  - key: run-rwx-image-test
+    call: ${{ run.dir }}/integration/image-test.yml
+    init:
+      cli: ${{ init.commit-sha }}
 
   - key: generate-sandbox-tests
     use: code
@@ -180,16 +164,11 @@ tasks:
         fi
         printf '%s\n' \
           "- key: ${key}" \
-          "  use: [rwx-testing-code, rwx-cli, git]" \
+          "  use: [rwx-cli, git]" \
           "  run: ./${script}" \
           "  env:" \
           "    RWX_ACCESS_TOKEN: ${RWX_ACCESS_TOKEN}" \
           "    COMMIT_SHA: ${COMMIT_SHA}" \
-          "  filter:" \
-          "    - rwx" \
-          "    - ${script}" \
-          "    - test/integration/sandbox-helpers.sh" \
-          "    - rwx-testing" \
           >> "$RWX_DYNAMIC_TASKS/sandbox-tests.yml"
       done
     env:
