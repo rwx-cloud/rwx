@@ -1004,6 +1004,10 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 	}
 	defer resp.Body.Close()
 
+	if cfg.RunID == "" && resp.StatusCode == http.StatusUnprocessableEntity {
+		return result, parseAmbiguousDefinitionPathError(resp.Body)
+	}
+
 	if err = decodeResponseJSON(resp, &result); err != nil {
 		return result, err
 	}
@@ -1482,6 +1486,22 @@ func parseAmbiguousTaskKeyError(body io.Reader, taskKey string) error {
 	return &AmbiguousTaskKeyError{
 		TaskKey: taskKey,
 		Message: respBody.Error,
+	}
+}
+
+func parseAmbiguousDefinitionPathError(body io.Reader) error {
+	respBody := struct {
+		Error                   string   `json:"error"`
+		MatchingDefinitionPaths []string `json:"matching_definition_paths"`
+	}{}
+	if err := json.NewDecoder(body).Decode(&respBody); err != nil || respBody.Error == "" {
+		return &AmbiguousDefinitionPathError{
+			Message: "ambiguous definition path",
+		}
+	}
+	return &AmbiguousDefinitionPathError{
+		Message:                 respBody.Error,
+		MatchingDefinitionPaths: respBody.MatchingDefinitionPaths,
 	}
 }
 
