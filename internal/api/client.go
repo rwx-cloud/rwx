@@ -1005,7 +1005,14 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 	defer resp.Body.Close()
 
 	if cfg.RunID == "" && resp.StatusCode == http.StatusUnprocessableEntity {
-		return result, parseAmbiguousDefinitionPathError(resp.Body)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return result, errors.New("Unable to call RWX API - 422 Unprocessable Entity")
+		}
+		if ambiguousErr := parseAmbiguousDefinitionPathError(bytes.NewReader(bodyBytes)); ambiguousErr != nil {
+			return result, ambiguousErr
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
 
 	if err = decodeResponseJSON(resp, &result); err != nil {
@@ -1249,7 +1256,14 @@ func (c Client) GetAllArtifactDownloadRequestsByTaskKey(runID, taskKey string) (
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnprocessableEntity {
-		return nil, parseAmbiguousTaskKeyError(resp.Body, taskKey)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, errors.New("Unable to call RWX API - 422 Unprocessable Entity")
+		}
+		if ambiguousErr := parseAmbiguousTaskKeyError(bytes.NewReader(bodyBytes), taskKey); ambiguousErr != nil {
+			return nil, ambiguousErr
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -1468,7 +1482,14 @@ type ErrorMessage struct {
 
 func decodeTaskKeyResponseJSON(resp *http.Response, taskKey string, result any) error {
 	if resp.StatusCode == http.StatusUnprocessableEntity {
-		return parseAmbiguousTaskKeyError(resp.Body, taskKey)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return errors.New("Unable to call RWX API - 422 Unprocessable Entity")
+		}
+		if ambiguousErr := parseAmbiguousTaskKeyError(bytes.NewReader(bodyBytes), taskKey); ambiguousErr != nil {
+			return ambiguousErr
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
 	return decodeResponseJSON(resp, result)
 }
@@ -1478,10 +1499,7 @@ func parseAmbiguousTaskKeyError(body io.Reader, taskKey string) error {
 		Error string `json:"error"`
 	}{}
 	if err := json.NewDecoder(body).Decode(&respBody); err != nil || respBody.Error == "" {
-		return &AmbiguousTaskKeyError{
-			TaskKey: taskKey,
-			Message: "ambiguous task key",
-		}
+		return nil
 	}
 	return &AmbiguousTaskKeyError{
 		TaskKey: taskKey,
@@ -1494,10 +1512,8 @@ func parseAmbiguousDefinitionPathError(body io.Reader) error {
 		Error                   string   `json:"error"`
 		MatchingDefinitionPaths []string `json:"matching_definition_paths"`
 	}{}
-	if err := json.NewDecoder(body).Decode(&respBody); err != nil || respBody.Error == "" {
-		return &AmbiguousDefinitionPathError{
-			Message: "ambiguous definition path",
-		}
+	if err := json.NewDecoder(body).Decode(&respBody); err != nil || len(respBody.MatchingDefinitionPaths) == 0 {
+		return nil
 	}
 	return &AmbiguousDefinitionPathError{
 		Message:                 respBody.Error,
