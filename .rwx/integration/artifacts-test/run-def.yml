@@ -1,0 +1,17 @@
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: artifact-producer
+    run: |
+      echo "integration-test-content" > test-file.txt
+
+      mkdir -p test-dir-output
+      echo "nested-file-content" > test-dir-output/nested-file.txt
+    outputs:
+      artifacts:
+        - key: test-file
+          path: test-file.txt
+        - key: test-dir
+          path: test-dir-output

@@ -1,0 +1,155 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: rwx-run
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      # Kick off a run and wait for it
+      kickoff=$(rwx run "$RUN_DEF" --wait --json)
+      run_id=$(echo "$kickoff" | jq -r '.RunID')
+      run_url=$(echo "$kickoff" | jq -r '.RunURL // empty')
+
+      if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+        echo "Failed to get RunID from kickoff"
+        echo "$kickoff"
+        exit 1
+      fi
+
+      if [ -n "$run_url" ]; then
+        echo "Run URL: $run_url"
+      fi
+
+      echo "$run_id" > "$RWX_VALUES/run-id"
+      echo "$run_url" > "$RWX_VALUES/run-url"
+      echo "$run_url" > "$RWX_LINKS/Run URL"
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RUN_DEF: ${{ run.dir }}/integration/artifacts-test/run-def.yml
+
+  - key: test-list-artifacts
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      list_output=$(rwx artifacts list --json "$RUN_ID" --task artifact-producer)
+      if ! echo "$list_output" | jq -e '.Artifacts[] | select(.Key == "test-file")' > /dev/null; then
+        echo "test-file artifact not found in list"
+        echo "$list_output"
+        exit 1
+      fi
+      if ! echo "$list_output" | jq -e '.Artifacts[] | select(.Key == "test-dir")' > /dev/null; then
+        echo "test-dir artifact not found in list"
+        echo "$list_output"
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-single-artifact
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      rwx artifacts download "$RUN_ID" --task artifact-producer test-file --output-dir /tmp/artifacts-test
+      if ! grep -q "integration-test-content" /tmp/artifacts-test/*; then
+        echo "Downloaded test-file does not contain expected content"
+        ls -la /tmp/artifacts-test/
+        cat /tmp/artifacts-test/* || true
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+  
+  - key: test-download-all-artifacts
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      rwx artifacts download "$RUN_ID" --task artifact-producer --all --output-dir /tmp/artifacts-all
+      if [ ! -d /tmp/artifacts-all ] || [ "$(ls /tmp/artifacts-all | wc -l)" -lt 2 ]; then
+        echo "Expected at least 2 artifacts downloaded"
+        ls -la /tmp/artifacts-all/ || true
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-single-artifact-with-output-file
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      rwx artifacts download "$RUN_ID" --task artifact-producer test-file --output-file /tmp/artifacts-single-file.txt
+      if [ ! -f /tmp/artifacts-single-file.txt ]; then
+        echo "Artifact not downloaded to --output-file path"
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-directory-artifact-with-auto-extract
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      rwx artifacts download "$RUN_ID" --task artifact-producer test-dir --auto-extract --output-dir /tmp/artifacts-extracted
+      if [ ! -d /tmp/artifacts-extracted ]; then
+        echo "Directory artifact not extracted to --output-dir"
+        exit 1
+      fi
+      if ! find /tmp/artifacts-extracted -name "nested-file.txt" | grep -q .; then
+        echo "nested-file.txt not found in extracted directory artifact"
+        ls -laR /tmp/artifacts-extracted/ || true
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
