@@ -216,9 +216,13 @@ func (s Service) resolveOrUpdatePackagesForFiles(mintFiles []*MintYAMLFile, upda
 		}
 
 		err = file.Doc.ForEachNode(nodePath, func(node ast.Node) error {
+			// Expressions can't be statically resolved, so skip them
+			if strings.Contains(node.String(), "${{") {
+				return nil
+			}
+
 			packageVersion := s.parsePackageVersion(node.String())
 			if packageVersion.Name == "" {
-				// Packages won't be found for eg. embedded runs, call: ${{ run.dir }}/embed.yml
 				return nil
 			} else if !update && packageVersion.MajorVersion != "" {
 				return nil
