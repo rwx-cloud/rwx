@@ -1,0 +1,174 @@
+# Invalid / incomplete run definitions in this file must be embedded to work around real linting
+
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: test-resolve-base-adds-base-block
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+
+      # Start with a config that has no base and an unversioned package
+      cat > "$tmpdir/.rwx/ci.yml" << 'EOF'
+      tasks:
+        - key: clone
+          call: git/clone
+      EOF
+
+      rwx resolve base -d "$tmpdir"
+      if ! grep -q "base:" "$tmpdir/.rwx/ci.yml"; then
+        echo "resolve base did not add base block"
+        cat "$tmpdir/.rwx/ci.yml"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-resolve-packages-adds-version-pin
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+
+      # Start with a config that has no versioned package
+      cat > "$tmpdir/.rwx/ci.yml" << 'EOF'
+      tasks:
+        - key: clone
+          call: git/clone
+      EOF
+
+      rwx resolve packages -d "$tmpdir"
+      if ! grep -qE "git/clone [0-9]" "$tmpdir/.rwx/ci.yml"; then
+        echo "resolve packages did not add version to git/clone"
+        cat "$tmpdir/.rwx/ci.yml"
+        exit 1
+      fi
+
+      rm -rf "$tmpdir"
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-update-packages-bumps-old-version
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+      cat > "$tmpdir/.rwx/ci.yml" << 'EOF'
+      tasks:
+        - key: clone
+          call: git/clone 1.0.0
+      EOF
+
+      rwx update packages -d "$tmpdir"
+      if grep -q "git/clone 1.0.0" "$tmpdir/.rwx/ci.yml"; then
+        echo "update packages did not change version from 1.0.0"
+        cat "$tmpdir/.rwx/ci.yml"
+        rm -rf "$tmpdir"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-update-base-updates-base-image
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+      cat > "$tmpdir/.rwx/ci.yml" << 'EOF'
+      base:
+        image: ubuntu:18.04
+      tasks:
+        - key: clone
+          call: git/clone 2.0.7
+      EOF
+
+      base_before=$(grep -A1 "base:" "$tmpdir/.rwx/ci.yml" | grep "image:" || true)
+      rwx update base -d "$tmpdir"
+      base_after=$(grep -A1 "base:" "$tmpdir/.rwx/ci.yml" | grep "image:" || true)
+      if [ -z "$base_after" ]; then
+        echo "update base removed the base image"
+        cat "$tmpdir/.rwx/ci.yml"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-update-packages-allow-major-version-change
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+      cat > "$tmpdir/.rwx/ci.yml" << 'EOF'
+      tasks:
+        - key: clone
+          call: git/clone 1.0.0
+      EOF
+
+      rwx update packages --allow-major-version-change -d "$tmpdir"
+      if grep -q "git/clone 1\." "$tmpdir/.rwx/ci.yml"; then
+        echo "update packages --allow-major-version-change did not bump past major version 1"
+        cat "$tmpdir/.rwx/ci.yml"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-resolve-packages-with-file-argument
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+      cat > "$tmpdir/.rwx/ci.yml" << 'EOF'
+      tasks:
+        - key: clone
+          call: git/clone
+      EOF
+
+      rwx resolve packages "$tmpdir/.rwx/ci.yml"
+      if ! grep -qE "git/clone [0-9]" "$tmpdir/.rwx/ci.yml"; then
+        echo "resolve packages with file argument did not add version"
+        cat "$tmpdir/.rwx/ci.yml"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
