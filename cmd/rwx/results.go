@@ -3,21 +3,25 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/git"
 
+	"github.com/skratchdot/open-golang/open"
 	"github.com/spf13/cobra"
 )
 
 var (
 	ResultsWait       bool
 	ResultsFailFast   bool
+	ResultsOpen       bool
 	ResultsBranch     string
 	ResultsRepo       string
 	ResultsDefinition string
+	ResultsCommit     string
 
 	resultsCmd = &cobra.Command{
 		GroupID: "outputs",
@@ -40,6 +44,7 @@ var (
 					BranchName:     ResultsBranch,
 					RepositoryName: ResultsRepo,
 					DefinitionPath: ResultsDefinition,
+					CommitSha:      ResultsCommit,
 				})
 				if err != nil {
 					return HandleAmbiguousDefinitionPathError(err, ResultsBranch, ResultsRepo)
@@ -86,7 +91,9 @@ var (
 						}
 					}
 				}
-				if result.RunURL != "" {
+				if result.TaskURL != "" {
+					fmt.Printf("Task URL: %s\n", result.TaskURL)
+				} else if result.RunURL != "" {
 					fmt.Printf("Run URL: %s\n", result.RunURL)
 				}
 				if result.Completed {
@@ -100,6 +107,18 @@ var (
 				}
 			}
 
+			if ResultsOpen {
+				openURL := result.RunURL
+				if result.TaskURL != "" {
+					openURL = result.TaskURL
+				}
+				if openURL != "" {
+					if err := open.Run(openURL); err != nil {
+						fmt.Fprintf(os.Stderr, "Failed to open browser.\n")
+					}
+				}
+			}
+
 			if result.Completed && result.ResultStatus != "succeeded" {
 				return HandledError
 			}
@@ -110,11 +129,13 @@ var (
 )
 
 func init() {
+	resultsCmd.Flags().BoolVar(&ResultsOpen, "open", false, "open the run in a browser")
 	resultsCmd.Flags().BoolVar(&ResultsWait, "wait", false, "poll for the run to complete and report the result status")
 	resultsCmd.Flags().BoolVar(&ResultsFailFast, "fail-fast", false, "stop waiting when failures are available (only has an effect when used with --wait)")
 	resultsCmd.Flags().StringVar(&ResultsBranch, "branch", "", "get results for a specific branch instead of the current git branch")
 	resultsCmd.Flags().StringVar(&ResultsRepo, "repo", "", "get results for a specific repository instead of the current git repository")
 	resultsCmd.Flags().StringVar(&ResultsDefinition, "definition", "", "get results for a specific definition path")
+	resultsCmd.Flags().StringVar(&ResultsCommit, "commit", "", "get results for a specific commit SHA")
 }
 
 func HandleAmbiguousDefinitionPathError(err error, branch, repo string) error {

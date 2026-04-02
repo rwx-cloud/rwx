@@ -334,6 +334,33 @@ func TestService_GetRunStatus(t *testing.T) {
 		require.Equal(t, "", result.Commit)
 	})
 
+	t.Run("passes through task_id and task_url from API response", func(t *testing.T) {
+		setup := setupTest(t)
+
+		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
+			return api.RunStatusResult{
+				Status:  &api.RunStatus{Result: "succeeded"},
+				RunID:   "run-123",
+				RunURL:  "https://cloud.rwx.com/mint/org/runs/run-123",
+				TaskID:  "task-456",
+				TaskURL: "https://cloud.rwx.com/mint/org/tasks/task-456",
+				Polling: api.PollingResult{Completed: true},
+			}, nil
+		}
+
+		result, err := setup.service.GetRunStatus(cli.GetRunStatusConfig{
+			RunID: "run-123",
+			Wait:  false,
+			Json:  false,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-123", result.RunID)
+		require.Equal(t, "https://cloud.rwx.com/mint/org/runs/run-123", result.RunURL)
+		require.Equal(t, "task-456", result.TaskID)
+		require.Equal(t, "https://cloud.rwx.com/mint/org/tasks/task-456", result.TaskURL)
+	})
+
 	t.Run("returns current status without waiting when Wait is false", func(t *testing.T) {
 		setup := setupTest(t)
 

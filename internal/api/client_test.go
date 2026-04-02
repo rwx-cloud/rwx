@@ -376,7 +376,8 @@ func TestAPIClient_ImagePushStatus(t *testing.T) {
 func TestAPIClient_TaskIDStatus(t *testing.T) {
 	t.Run("builds the request and parses the response", func(t *testing.T) {
 		roundTrip := func(req *http.Request) (*http.Response, error) {
-			require.Equal(t, "/mint/api/tasks/abc123/status", req.URL.Path)
+			require.Equal(t, "/mint/api/results/status", req.URL.Path)
+			require.Equal(t, "abc123", req.URL.Query().Get("id"))
 			require.Equal(t, http.MethodGet, req.Method)
 
 			body := `{"polling": {"completed": true}}`
@@ -892,7 +893,8 @@ func TestAPIClient_RunStatus(t *testing.T) {
 		bodyBytes, _ := json.Marshal(body)
 
 		roundTrip := func(req *http.Request) (*http.Response, error) {
-			require.Equal(t, "/mint/api/runs/run-123", req.URL.Path)
+			require.Equal(t, "/mint/api/results/status", req.URL.Path)
+			require.Equal(t, "run-123", req.URL.Query().Get("id"))
 			require.Equal(t, "true", req.URL.Query().Get("fail_fast"))
 			require.Equal(t, http.MethodGet, req.Method)
 			return &http.Response{
@@ -952,7 +954,8 @@ func TestAPIClient_RunStatus(t *testing.T) {
 		bodyBytes, _ := json.Marshal(body)
 
 		roundTrip := func(req *http.Request) (*http.Response, error) {
-			require.Equal(t, "/mint/api/runs/run-456", req.URL.Path)
+			require.Equal(t, "/mint/api/results/status", req.URL.Path)
+			require.Equal(t, "run-456", req.URL.Query().Get("id"))
 			require.Equal(t, http.MethodGet, req.Method)
 			return &http.Response{
 				Status:     "200 OK",
@@ -1439,7 +1442,8 @@ func TestAPIClient_CreateSandboxToken(t *testing.T) {
 func TestAPIClient_GetRunPrompt(t *testing.T) {
 	t.Run("builds the request and returns the prompt text", func(t *testing.T) {
 		roundTrip := func(req *http.Request) (*http.Response, error) {
-			require.Equal(t, "/mint/api/runs/run-123/prompt", req.URL.Path)
+			require.Equal(t, "/mint/api/results/prompt", req.URL.Path)
+			require.Equal(t, "run-123", req.URL.Query().Get("id"))
 			require.Equal(t, http.MethodGet, req.Method)
 			require.Equal(t, "text/plain", req.Header.Get("Accept"))
 			return &http.Response{
