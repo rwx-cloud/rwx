@@ -65,7 +65,7 @@ var (
 				return err
 			}
 
-			if result.HasError || LintWarningsAsErrors {
+			if LintShouldFail(result, LintWarningsAsErrors) {
 				return LintFailure
 			}
 
@@ -75,6 +75,10 @@ var (
 		Use:   "lint [flags] [file...]",
 	}
 )
+
+func LintShouldFail(result *cli.LintResult, warningsAsErrors bool) bool {
+	return result.HasError || (warningsAsErrors && result.WarningCount > 0)
+}
 
 func init() {
 	lintCmd.Flags().BoolVar(&LintWarningsAsErrors, "warnings-as-errors", false, "treat warnings as errors")
