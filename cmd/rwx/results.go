@@ -55,15 +55,21 @@ var (
 				return err
 			}
 
+			promptResult, promptErr := service.GetRunPrompt(result.RunID)
+
 			if useJson {
 				jsonOutput := struct {
 					RunID        string
 					ResultStatus string
 					Completed    bool
+					Prompt       string `json:",omitempty"`
 				}{
 					RunID:        result.RunID,
 					ResultStatus: result.ResultStatus,
 					Completed:    result.Completed,
+				}
+				if promptErr == nil {
+					jsonOutput.Prompt = promptResult.Prompt
 				}
 				resultJson, err := json.Marshal(jsonOutput)
 				if err != nil {
@@ -87,8 +93,7 @@ var (
 					fmt.Printf("Run status: %s (in progress)\n", result.ResultStatus)
 				}
 
-				promptResult, err := service.GetRunPrompt(result.RunID)
-				if err == nil {
+				if promptErr == nil {
 					fmt.Printf("\n%s", promptResult.Prompt)
 				}
 			}

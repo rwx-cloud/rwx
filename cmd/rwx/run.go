@@ -92,6 +92,7 @@ var (
 				DefinitionPath   string
 				Message          string
 				ResultStatus     string `json:",omitempty"`
+				Prompt           string `json:",omitempty"`
 			}{
 				RunID:            runResult.RunID,
 				RunURL:           runResult.RunURL,
@@ -131,8 +132,13 @@ var (
 					return err
 				}
 
+				promptResult, err := service.GetRunPrompt(runResult.RunID)
+
 				if useJson {
 					jsonOutput.ResultStatus = waitResult.ResultStatus
+					if err == nil {
+						jsonOutput.Prompt = promptResult.Prompt
+					}
 					waitResultJson, err := json.Marshal(jsonOutput)
 					if err != nil {
 						return err
@@ -141,7 +147,6 @@ var (
 				} else {
 					fmt.Printf("Run result status: %s\n", waitResult.ResultStatus)
 
-					promptResult, err := service.GetRunPrompt(runResult.RunID)
 					if err == nil {
 						fmt.Printf("\n%s", promptResult.Prompt)
 					}
