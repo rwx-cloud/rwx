@@ -306,7 +306,7 @@ type TaskStatus struct {
 }
 
 type TaskStatusResult struct {
-	Status  *TaskStatus   `json:"status,omitempty"`
+	Status  *TaskStatus   `json:"task_status,omitempty"`
 	TaskID  string        `json:"task_id,omitempty"`
 	Polling PollingResult `json:"polling"`
 }
