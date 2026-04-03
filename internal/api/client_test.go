@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -995,6 +996,243 @@ func TestAPIClient_RunStatus(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, result.Status)
 		require.True(t, result.Polling.Completed)
+	})
+}
+
+func TestAPIClient_RunStatus_AmbiguousDefinitionPath(t *testing.T) {
+	t.Run("returns AmbiguousDefinitionPathError when 422 has matching_definition_paths", func(t *testing.T) {
+		respBody := `{"error":"multiple definitions found","matching_definition_paths":[".rwx/ci.yml",".rwx/deploy.yml"]}`
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: 422,
+				Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.RunStatus(api.RunStatusConfig{BranchName: "main", RepositoryName: "cloud"})
+		require.Error(t, err)
+
+		var ambiguousErr *api.AmbiguousDefinitionPathError
+		require.ErrorAs(t, err, &ambiguousErr)
+		require.Equal(t, "multiple definitions found", ambiguousErr.Message)
+		require.Equal(t, []string{".rwx/ci.yml", ".rwx/deploy.yml"}, ambiguousErr.MatchingDefinitionPaths)
+	})
+
+	t.Run("falls through to generic error when 422 is not an ambiguous definition path", func(t *testing.T) {
+		respBody := `{"error":"something else went wrong"}`
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: 422,
+				Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.RunStatus(api.RunStatusConfig{BranchName: "main", RepositoryName: "cloud"})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "something else went wrong")
+
+		var ambiguousErr *api.AmbiguousDefinitionPathError
+		require.False(t, errors.As(err, &ambiguousErr))
+	})
+
+	t.Run("does not attempt ambiguous definition path parsing when RunID is set", func(t *testing.T) {
+		respBody := `{"error":"some 422 error"}`
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: 422,
+				Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.RunStatus(api.RunStatusConfig{RunID: "run-123"})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "some 422 error")
+
+		var ambiguousErr *api.AmbiguousDefinitionPathError
+		require.False(t, errors.As(err, &ambiguousErr))
+	})
+}
+
+func TestAPIClient_GetLogDownloadRequestByTaskKey_AmbiguousTaskKey(t *testing.T) {
+	t.Run("returns AmbiguousTaskKeyError when 422 has an error message", func(t *testing.T) {
+		respBody := `{"error":"The task key 'build' is ambiguous"}`
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: 422,
+				Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetLogDownloadRequestByTaskKey("run-123", "build")
+		require.Error(t, err)
+
+		var ambiguousErr *api.AmbiguousTaskKeyError
+		require.ErrorAs(t, err, &ambiguousErr)
+		require.Equal(t, "The task key 'build' is ambiguous", ambiguousErr.Message)
+	})
+
+	t.Run("falls through to generic error when 422 has no error message", func(t *testing.T) {
+		respBody := `{}`
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: 422,
+				Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetLogDownloadRequestByTaskKey("run-123", "build")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "422 Unprocessable Entity")
+
+		var ambiguousErr *api.AmbiguousTaskKeyError
+		require.False(t, errors.As(err, &ambiguousErr))
+	})
+
+	t.Run("falls through to generic error when 422 body is not JSON", func(t *testing.T) {
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: 422,
+				Body:       io.NopCloser(bytes.NewReader([]byte("not json"))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetLogDownloadRequestByTaskKey("run-123", "build")
+		require.Error(t, err)
+
+		var ambiguousErr *api.AmbiguousTaskKeyError
+		require.False(t, errors.As(err, &ambiguousErr))
+	})
+}
+
+func TestAPIClient_GetAllArtifactDownloadRequestsByTaskKey_AmbiguousTaskKey(t *testing.T) {
+	t.Run("returns AmbiguousTaskKeyError when 422 has an error message", func(t *testing.T) {
+		respBody := `{"error":"The task key 'build' is ambiguous"}`
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: 422,
+				Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetAllArtifactDownloadRequestsByTaskKey("run-123", "build")
+		require.Error(t, err)
+
+		var ambiguousErr *api.AmbiguousTaskKeyError
+		require.ErrorAs(t, err, &ambiguousErr)
+		require.Equal(t, "The task key 'build' is ambiguous", ambiguousErr.Message)
+	})
+
+	t.Run("falls through to generic error when 422 has no error message", func(t *testing.T) {
+		respBody := `{"error":"something unrelated"}`
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: 422,
+				Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetAllArtifactDownloadRequestsByTaskKey("run-123", "build")
+		require.Error(t, err)
+
+		// This endpoint does return AmbiguousTaskKeyError for any 422 with a non-empty error field
+		var ambiguousErr *api.AmbiguousTaskKeyError
+		require.ErrorAs(t, err, &ambiguousErr)
+	})
+
+	t.Run("falls through to generic error when 422 body is empty JSON", func(t *testing.T) {
+		respBody := `{}`
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: 422,
+				Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetAllArtifactDownloadRequestsByTaskKey("run-123", "build")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "422 Unprocessable Entity")
+
+		var ambiguousErr *api.AmbiguousTaskKeyError
+		require.False(t, errors.As(err, &ambiguousErr))
+	})
+}
+
+func TestAPIClient_GetArtifactDownloadRequestByTaskKey_AmbiguousTaskKey(t *testing.T) {
+	t.Run("returns AmbiguousTaskKeyError when 422 has an error message", func(t *testing.T) {
+		respBody := `{"error":"The task key 'build' is ambiguous"}`
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: 422,
+				Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetArtifactDownloadRequestByTaskKey("run-123", "build", "my-artifact")
+		require.Error(t, err)
+
+		var ambiguousErr *api.AmbiguousTaskKeyError
+		require.ErrorAs(t, err, &ambiguousErr)
+		require.Equal(t, "The task key 'build' is ambiguous", ambiguousErr.Message)
+	})
+
+	t.Run("falls through to generic error when 422 has no error message", func(t *testing.T) {
+		respBody := `{}`
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: 422,
+				Body:       io.NopCloser(bytes.NewReader([]byte(respBody))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetArtifactDownloadRequestByTaskKey("run-123", "build", "my-artifact")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "422 Unprocessable Entity")
+
+		var ambiguousErr *api.AmbiguousTaskKeyError
+		require.False(t, errors.As(err, &ambiguousErr))
 	})
 }
 

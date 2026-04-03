@@ -360,6 +360,19 @@ func (e *AmbiguousTaskKeyError) Unwrap() error {
 	return errors.ErrAmbiguousTaskKey
 }
 
+type AmbiguousDefinitionPathError struct {
+	Message                 string
+	MatchingDefinitionPaths []string
+}
+
+func (e *AmbiguousDefinitionPathError) Error() string {
+	return e.Message
+}
+
+func (e *AmbiguousDefinitionPathError) Unwrap() error {
+	return errors.ErrAmbiguousDefinitionPath
+}
+
 type SandboxInitTemplateResult struct {
 	Template string `json:"template"`
 }

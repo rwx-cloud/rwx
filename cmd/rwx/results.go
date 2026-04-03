@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
+	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/git"
 
 	"github.com/spf13/cobra"
@@ -40,7 +42,7 @@ var (
 					DefinitionPath: ResultsDefinition,
 				})
 				if err != nil {
-					return err
+					return HandleAmbiguousDefinitionPathError(err, ResultsBranch, ResultsRepo)
 				}
 				runIDFromGit = true
 			}
@@ -113,4 +115,25 @@ func init() {
 	resultsCmd.Flags().StringVar(&ResultsBranch, "branch", "", "get results for a specific branch instead of the current git branch")
 	resultsCmd.Flags().StringVar(&ResultsRepo, "repo", "", "get results for a specific repository instead of the current git repository")
 	resultsCmd.Flags().StringVar(&ResultsDefinition, "definition", "", "get results for a specific definition path")
+}
+
+func HandleAmbiguousDefinitionPathError(err error, branch, repo string) error {
+	var ambiguousErr *api.AmbiguousDefinitionPathError
+	if errors.As(err, &ambiguousErr) {
+		msg := ambiguousErr.Error()
+		for _, path := range ambiguousErr.MatchingDefinitionPaths {
+			cmd := "rwx results"
+			if branch != "" {
+				cmd += " --branch " + branch
+			}
+			if repo != "" {
+				cmd += " --repo " + repo
+			}
+			cmd += " --definition " + path
+			msg += "\n  " + cmd
+		}
+		return errors.WrapSentinel(errors.New(msg), errors.ErrAmbiguousDefinitionPath)
+	}
+
+	return err
 }

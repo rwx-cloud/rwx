@@ -271,6 +271,9 @@ func (s Service) ResolveRunIDFromGitContext(overrides ...ResolveRunIDConfig) (st
 		if errors.Is(err, api.ErrNotFound) {
 			return "", fmt.Errorf("%s", notFoundMsg)
 		}
+		if errors.Is(err, errors.ErrAmbiguousDefinitionPath) {
+			return "", err
+		}
 		return "", errors.Wrap(err, "unable to resolve run from git context")
 	}
 

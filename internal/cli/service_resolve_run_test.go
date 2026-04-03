@@ -5,6 +5,7 @@ import (
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
+	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -105,6 +106,27 @@ func TestResolveRunIDFromGitContext(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, "run-def", runID)
+	})
+
+	t.Run("passes through ambiguous definition path error without wrapping", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockGit.MockGetBranch = "my-branch"
+		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
+			return api.RunStatusResult{}, &api.AmbiguousDefinitionPathError{
+				Message:                 "Multiple definitions found",
+				MatchingDefinitionPaths: []string{".rwx/ci.yml", ".rwx/deploy.yml"},
+			}
+		}
+
+		_, err := setup.service.ResolveRunIDFromGitContext()
+		require.Error(t, err)
+		require.True(t, errors.Is(err, errors.ErrAmbiguousDefinitionPath))
+
+		var ambiguousErr *api.AmbiguousDefinitionPathError
+		require.True(t, errors.As(err, &ambiguousErr))
+		require.Equal(t, "Multiple definitions found", ambiguousErr.Message)
+		require.Equal(t, []string{".rwx/ci.yml", ".rwx/deploy.yml"}, ambiguousErr.MatchingDefinitionPaths)
 	})
 
 	t.Run("returns error when run ID is empty in response", func(t *testing.T) {
