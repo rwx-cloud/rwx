@@ -62,16 +62,22 @@ var (
 				return err
 			}
 
-			promptResult, promptErr := service.GetRunPrompt(result.RunID)
+			promptID := result.RunID
+			if result.TaskID != "" {
+				promptID = result.TaskID
+			}
+			promptResult, promptErr := service.GetRunPrompt(promptID)
 
 			if useJson {
 				jsonOutput := struct {
 					RunID        string
+					TaskID       string `json:",omitempty"`
 					ResultStatus string
 					Completed    bool
 					Prompt       string `json:",omitempty"`
 				}{
 					RunID:        result.RunID,
+					TaskID:       result.TaskID,
 					ResultStatus: result.ResultStatus,
 					Completed:    result.Completed,
 				}
@@ -96,10 +102,14 @@ var (
 				} else if result.RunURL != "" {
 					fmt.Printf("Run URL: %s\n", result.RunURL)
 				}
+				statusLabel := "Run"
+				if result.TaskURL != "" {
+					statusLabel = "Task"
+				}
 				if result.Completed {
-					fmt.Printf("Run result status: %s\n", result.ResultStatus)
+					fmt.Printf("%s result status: %s\n", statusLabel, result.ResultStatus)
 				} else {
-					fmt.Printf("Run status: %s (in progress)\n", result.ResultStatus)
+					fmt.Printf("%s status: %s (in progress)\n", statusLabel, result.ResultStatus)
 				}
 
 				if promptErr == nil {
