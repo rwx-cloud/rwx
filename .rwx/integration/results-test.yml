@@ -126,3 +126,38 @@ tasks:
     env:
       RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
       RUN_DEF: ${{ run.dir }}/integration/results-test/failing.yml
+
+  - key: test-results-task-level
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      # Kick off a run
+      kickoff=$(rwx run "$RUN_DEF" --wait --json) || exit_code=$?
+      run_id=$(echo "$kickoff" | jq -r '.RunID')
+      run_url=$(echo "$kickoff" | jq -r '.RunURL // empty')
+      echo "$run_url" > "$RWX_LINKS/Run URL"
+
+      # NOTE: This is not great, but is currently the best way to get an unknown, successful task ID from the server to the CLI.
+      artifacts_result=$(rwx artifacts download --all --json "$run_id" --task will-pass)
+      task_id=$(echo "$artifacts_result" | jq -r '.OutputFiles[0]' | grep -o '[a-f0-9]\{32\}')
+      echo "Identified task ID to use for results: $task_id"
+
+      task_result=$(rwx results --wait --json "$task_id")
+      task_status=$(echo "$task_result" | jq -r '.ResultStatus')
+      task_result_task_id=$(echo "$task_result" | jq -r '.TaskID')
+
+      if [ "$task_status" != "succeeded" ]; then
+        echo "Expected task status 'succeeded', got '$task_status'"
+        echo "$task_result"
+        exit 1
+      fi
+
+      if [ "$task_result_task_id" != "$task_id" ]; then
+        echo "Expected .TaskID to be '$task_id', got '$task_result_task_id'"
+        echo "$task_result"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RUN_DEF: ${{ run.dir }}/integration/results-test/mixed-task-statuses.yml
