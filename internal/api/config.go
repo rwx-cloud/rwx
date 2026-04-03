@@ -306,7 +306,7 @@ type TaskStatus struct {
 }
 
 type TaskStatusResult struct {
-	Status  *TaskStatus   `json:"status,omitempty"`
+	Status  *TaskStatus   `json:"task_status,omitempty"`
 	TaskID  string        `json:"task_id,omitempty"`
 	Polling PollingResult `json:"polling"`
 }
@@ -332,6 +332,7 @@ type RunStatusConfig struct {
 	BranchName     string
 	RepositoryName string
 	DefinitionPath string
+	CommitSha      string
 	FailFast       bool
 }
 
@@ -340,11 +341,14 @@ type RunStatus struct {
 }
 
 type RunStatusResult struct {
-	Status  *RunStatus    `json:"run_status,omitempty"`
-	RunID   string        `json:"run_id,omitempty"`
-	RunURL  string        `json:"run_url,omitempty"`
-	Commit  *string       `json:"commit_sha,omitempty"`
-	Polling PollingResult `json:"polling"`
+	Status     *RunStatus    `json:"run_status,omitempty"`
+	TaskStatus *TaskStatus   `json:"task_status,omitempty"`
+	RunID      string        `json:"run_id,omitempty"`
+	RunURL     string        `json:"run_url,omitempty"`
+	TaskID     string        `json:"task_id,omitempty"`
+	TaskURL    string        `json:"task_url,omitempty"`
+	Commit     *string       `json:"commit_sha,omitempty"`
+	Polling    PollingResult `json:"polling"`
 }
 
 type AmbiguousTaskKeyError struct {
