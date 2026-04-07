@@ -1,0 +1,126 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: test-dispatch-success
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      # Kick off a dispatch
+      kickoff=$(rwx dispatch dispatch-success-test --ref ${{ init.ref }} --json --wait)
+      run_id=$(echo "$kickoff" | tail -1 | jq -r '.RunID')
+      run_url=$(echo "$kickoff" | tail -1 | jq -r '.RunURL')
+      status=$(echo "$kickoff" | tail -1 | jq -r '.ResultStatus')
+
+      if [ "$status" != "succeeded" ]; then
+        echo "Expected ResultStatus 'succeeded', got '$status'"
+        echo "$kickoff"
+        exit 1
+      fi
+
+      echo "$run_url" > "$RWX_LINKS/Run URL"
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-dispatch-failure
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      # Kick off a dispatch
+      kickoff=$(rwx dispatch dispatch-failure-test --ref ${{ init.ref }} --json --wait) || exit_code=$?
+      status=$(echo "$kickoff" | tail -1 | jq -r '.ResultStatus')
+      run_url=$(echo "$kickoff" | tail -1 | jq -r '.RunURL')
+      echo "$run_url" > "$RWX_LINKS/Run URL"
+
+      if [ "$exit_code" -eq 0 ]; then
+        echo "Expected non-zero exit code with --fail-fast on failing run"
+        echo "$kickoff"
+        exit 1
+      fi
+
+      if [ "$status" != "failed" ]; then
+        echo "Expected ResultStatus 'failed', got '$status'"
+        echo "$kickoff"
+        exit 1
+      fi
+
+      prompt=$(echo "$kickoff" | tail -1 | jq -r '.Prompt')
+      if ! echo "$prompt" | grep -q "fail-fast"; then
+        echo "Expected prompt to include 'fail-fast', but it did not."
+        echo "$kickoff"
+        exit 1
+      fi
+
+      if ! echo "$prompt" | grep -q "fail-slow"; then
+        echo "Expected prompt to include 'fail-slow', but it did not."
+        echo "$kickoff"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-dispatch-fail-fast
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      # Kick off a dispatch
+      kickoff=$(rwx dispatch dispatch-failure-test --ref ${{ init.ref }} --json --wait --fail-fast) || exit_code=$?
+      status=$(echo "$kickoff" | tail -1 | jq -r '.ResultStatus')
+      run_url=$(echo "$kickoff" | tail -1 | jq -r '.RunURL')
+      echo "$run_url" > "$RWX_LINKS/Run URL"
+
+      if [ "$exit_code" -eq 0 ]; then
+        echo "Expected non-zero exit code with --fail-fast on failing run"
+        echo "$kickoff"
+        exit 1
+      fi
+
+      if [ "$status" != "failed" ]; then
+        echo "Expected ResultStatus 'failed', got '$status'"
+        echo "$kickoff"
+        exit 1
+      fi
+
+      prompt=$(echo "$kickoff" | tail -1 | jq -r '.Prompt')
+      if ! echo "$prompt" | grep -q "fail-fast"; then
+        echo "Expected prompt to include 'fail-fast', but it did not."
+        echo "$kickoff"
+        exit 1
+      fi
+
+      if echo "$prompt" | grep -q "fail-slow"; then
+        echo "Expected prompt to NOT include 'fail-slow', but it did."
+        echo "$kickoff"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}

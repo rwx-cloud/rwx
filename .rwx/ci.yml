@@ -159,6 +159,11 @@ tasks:
     init:
       ref: ${{ init.commit-sha }}
 
+  - key: run-rwx-dispatch-test
+    call: ${{ run.dir }}/integration/dispatch-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
   - key: run-rwx-logs-test
     call: ${{ run.dir }}/integration/logs-test.yml
     init:
