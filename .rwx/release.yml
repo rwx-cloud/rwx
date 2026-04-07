@@ -299,3 +299,27 @@ tasks:
     env:
       GITHUB_TOKEN: ${{ github-apps.rwx-cloud-bot.token }}
       GH_TOKEN: ${{ github-apps.rwx-cloud-bot.token }}
+
+  - key: update-latest-release
+    use: [gh-cli, code]
+    after:
+      - extract-version-details
+      - ensure-release-not-published
+      - build-and-upload-binaries
+    if: ${{ init.kind == "production" }}
+    run: |
+      echo "Updating latest release"
+      git tag --force "latest"
+      git push --force origin "latest"
+      gh release view "latest" || \
+        gh release create "latest" \
+        --latest=false \
+        --notes="The latest stable release of the RWX CLI, updated on every production release. For example, you can always download the latest Linux x86 release at this URL: https://github.com/rwx-cloud/rwx/releases/download/latest/rwx-linux-x86_64. (Look at the assets attached to this release to find the other available downloads.)" \
+        --title "RWX CLI latest"
+
+      mkdir -p ./latest_release && cd ./latest_release
+      gh release download ${{ tasks.extract-version-details.values.full-version }}
+      gh release upload "latest" rwx-* --clobber
+    env:
+      GITHUB_TOKEN: ${{ github-apps.rwx-cloud-bot.token }}
+      GH_TOKEN: ${{ github-apps.rwx-cloud-bot.token }}
