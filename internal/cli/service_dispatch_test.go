@@ -114,7 +114,7 @@ func TestService_GettingDispatch(t *testing.T) {
 		runs, err := s.service.GetDispatch(dispatchConfig)
 		require.NoError(t, err)
 		require.Equal(t, "runid", runs[0].RunID)
-		require.Equal(t, "runurl", runs[0].RunUrl)
+		require.Equal(t, "runurl", runs[0].RunURL)
 	})
 
 	t.Run("when no runs are created", func(t *testing.T) {

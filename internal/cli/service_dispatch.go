@@ -27,7 +27,7 @@ type GetDispatchConfig struct {
 
 type GetDispatchRun struct {
 	RunID  string
-	RunUrl string
+	RunURL string
 }
 
 func (s Service) InitiateDispatch(cfg InitiateDispatchConfig) (*api.InitiateDispatchResult, error) {
@@ -74,7 +74,7 @@ func (s Service) GetDispatch(cfg GetDispatchConfig) ([]GetDispatchRun, error) {
 
 	runs := make([]GetDispatchRun, len(dispatchResult.Runs))
 	for i, run := range dispatchResult.Runs {
-		runs[i] = GetDispatchRun{RunID: run.RunID, RunUrl: run.RunUrl}
+		runs[i] = GetDispatchRun{RunID: run.RunID, RunURL: run.RunUrl}
 	}
 
 	return runs, nil

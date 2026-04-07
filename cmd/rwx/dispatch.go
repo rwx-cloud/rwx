@@ -15,11 +15,13 @@ import (
 )
 
 var (
-	DispatchParams []string
-	DispatchOpen   bool
-	DispatchDebug  bool
-	DispatchTitle  string
-	DispatchRef    string
+	DispatchParams   []string
+	DispatchOpen     bool
+	DispatchDebug    bool
+	DispatchWait     bool
+	DispatchFailFast bool
+	DispatchTitle    string
+	DispatchRef      string
 
 	dispatchCmd = &cobra.Command{
 		GroupID: "api",
@@ -68,20 +70,72 @@ var (
 				break
 			}
 
-			if useJson {
-				dispatchResultJson, err := json.Marshal(runs)
+			if useJson && !DispatchWait {
+				jsonOutput := struct {
+					RunID  string
+					RunURL string
+				}{
+					RunID:  runs[0].RunID,
+					RunURL: runs[0].RunURL,
+				}
+				dispatchResultJson, err := json.Marshal(jsonOutput)
 				if err != nil {
 					return err
 				}
 
 				fmt.Println(string(dispatchResultJson))
-			} else {
-				fmt.Printf("Run is watchable at %s\n", runs[0].RunUrl)
+			} else if !useJson {
+				fmt.Printf("Run is watchable at %s\n", runs[0].RunURL)
 			}
 
 			if DispatchOpen {
-				if err := open.Run(runs[0].RunUrl); err != nil {
+				if err := open.Run(runs[0].RunURL); err != nil {
 					fmt.Fprintf(os.Stderr, "Failed to open browser.\n")
+				}
+			}
+
+			if DispatchWait && !DispatchDebug {
+				waitResult, err := service.GetRunStatus(cli.GetRunStatusConfig{
+					RunID:    runs[0].RunID,
+					Wait:     true,
+					FailFast: DispatchFailFast,
+					Json:     useJson,
+				})
+				if err != nil {
+					return err
+				}
+
+				promptResult, promptErr := service.GetRunPrompt(runs[0].RunID)
+
+				if useJson {
+					jsonOutput := struct {
+						RunID        string
+						RunURL       string
+						ResultStatus string
+						Prompt       string `json:",omitempty"`
+					}{
+						RunID:        runs[0].RunID,
+						RunURL:       runs[0].RunURL,
+						ResultStatus: waitResult.ResultStatus,
+					}
+					if promptErr == nil {
+						jsonOutput.Prompt = promptResult.Prompt
+					}
+					waitResultJson, err := json.Marshal(jsonOutput)
+					if err != nil {
+						return err
+					}
+					fmt.Println(string(waitResultJson))
+				} else {
+					fmt.Printf("Run result status: %s\n", waitResult.ResultStatus)
+
+					if promptErr == nil {
+						fmt.Printf("\n%s", promptResult.Prompt)
+					}
+				}
+
+				if waitResult.ResultStatus != "succeeded" {
+					return HandledError
 				}
 			}
 
@@ -121,6 +175,8 @@ func init() {
 	dispatchCmd.Flags().StringVar(&DispatchRef, "ref", "", "the git ref to use for the run")
 	dispatchCmd.Flags().BoolVar(&DispatchOpen, "open", false, "open the run in a browser")
 	dispatchCmd.Flags().BoolVar(&DispatchDebug, "debug", false, "start a remote debugging session once a breakpoint is hit")
+	dispatchCmd.Flags().BoolVar(&DispatchWait, "wait", false, "poll for the run to complete and report the result status")
+	dispatchCmd.Flags().BoolVar(&DispatchFailFast, "fail-fast", false, "stop waiting when failures are available (only has an effect when used with --wait)")
 	dispatchCmd.Flags().StringVar(&DispatchTitle, "title", "", "the title the UI will display for the run")
 	dispatchCmd.Flags().SortFlags = false
 }
