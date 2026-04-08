@@ -1008,7 +1008,13 @@ func (c Client) TaskIDStatus(cfg TaskIDStatusConfig) (TaskStatusResult, error) {
 func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 	var endpoint string
 	failFast := fmt.Sprintf("%t", cfg.FailFast)
-	if cfg.RunID != "" {
+	if cfg.RunID != "" && cfg.TaskKey != "" {
+		params := url.Values{}
+		params.Set("run_id", cfg.RunID)
+		params.Set("task_key", cfg.TaskKey)
+		params.Set("fail_fast", failFast)
+		endpoint = "/mint/api/results/status?" + params.Encode()
+	} else if cfg.RunID != "" {
 		params := url.Values{}
 		params.Set("id", cfg.RunID)
 		params.Set("fail_fast", failFast)
@@ -1043,13 +1049,19 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 	}
 	defer resp.Body.Close()
 
-	if cfg.RunID == "" && resp.StatusCode == http.StatusUnprocessableEntity {
+	if resp.StatusCode == http.StatusUnprocessableEntity {
 		bodyBytes, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
 			return result, errors.New("Unable to call RWX API - 422 Unprocessable Entity")
 		}
-		if ambiguousErr := parseAmbiguousDefinitionPathError(bytes.NewReader(bodyBytes)); ambiguousErr != nil {
-			return result, ambiguousErr
+		if cfg.TaskKey != "" {
+			if ambiguousErr := parseAmbiguousTaskKeyError(bytes.NewReader(bodyBytes), cfg.TaskKey); ambiguousErr != nil {
+				return result, ambiguousErr
+			}
+		} else if cfg.RunID == "" {
+			if ambiguousErr := parseAmbiguousDefinitionPathError(bytes.NewReader(bodyBytes)); ambiguousErr != nil {
+				return result, ambiguousErr
+			}
 		}
 		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
@@ -1075,6 +1087,54 @@ func (c Client) GetRunPrompt(runID string) (string, error) {
 		return "", errors.Wrap(err, "HTTP request failed")
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errMsg := extractErrorMessage(resp.Body)
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			return "", errors.Wrap(ErrNotFound, errMsg)
+		}
+		return "", errors.New(errMsg)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", errors.Wrap(err, "unable to read response body")
+	}
+
+	return string(body), nil
+}
+
+func (c Client) GetRunPromptByTaskKey(runID, taskKey string) (string, error) {
+	params := url.Values{}
+	params.Set("run_id", runID)
+	params.Set("task_key", taskKey)
+	endpoint := "/mint/api/results/prompt?" + params.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", errors.Wrap(err, "unable to create new HTTP request")
+	}
+	req.Header.Set("Accept", "text/plain")
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return "", errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnprocessableEntity {
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return "", errors.New("Unable to call RWX API - 422 Unprocessable Entity")
+		}
+		if ambiguousErr := parseAmbiguousTaskKeyError(bytes.NewReader(bodyBytes), taskKey); ambiguousErr != nil {
+			return "", ambiguousErr
+		}
+		return "", errors.New(string(bodyBytes))
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		errMsg := extractErrorMessage(resp.Body)

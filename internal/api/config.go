@@ -329,6 +329,7 @@ type ArtifactDownloadRequestResult struct {
 
 type RunStatusConfig struct {
 	RunID          string
+	TaskKey        string
 	BranchName     string
 	RepositoryName string
 	DefinitionPath string
