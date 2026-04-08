@@ -22,10 +22,11 @@ var (
 	ResultsRepo       string
 	ResultsDefinition string
 	ResultsCommit     string
+	ResultsTaskKey    string
 
 	resultsCmd = &cobra.Command{
 		GroupID: "outputs",
-		Use:     "results [run-id]",
+		Use:     "results [run-id | run-id --task <key>]",
 		Short:   "Get results for a run",
 		Args:    cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -33,6 +34,7 @@ var (
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
+			taskKeySet := cmd.Flags().Changed("task")
 
 			var runID string
 			runIDFromGit := false
@@ -54,19 +56,32 @@ var (
 
 			result, err := service.GetRunStatus(cli.GetRunStatusConfig{
 				RunID:    runID,
+				TaskKey:  ResultsTaskKey,
 				Wait:     ResultsWait,
 				FailFast: ResultsFailFast,
 				Json:     useJson,
 			})
 			if err != nil {
+				if taskKeySet {
+					return handleResultsTaskKeyError(err)
+				}
 				return err
 			}
 
-			promptID := result.RunID
-			if result.TaskID != "" {
-				promptID = result.TaskID
+			var promptResult *cli.GetRunPromptResult
+			var promptErr error
+			if taskKeySet {
+				promptResult, promptErr = service.GetRunPromptByTaskKey(runID, ResultsTaskKey)
+				if promptErr != nil {
+					promptErr = handleResultsTaskKeyError(promptErr)
+				}
+			} else {
+				promptID := result.RunID
+				if result.TaskID != "" {
+					promptID = result.TaskID
+				}
+				promptResult, promptErr = service.GetRunPrompt(promptID)
 			}
-			promptResult, promptErr := service.GetRunPrompt(promptID)
 
 			if useJson {
 				jsonOutput := struct {
@@ -146,6 +161,16 @@ func init() {
 	resultsCmd.Flags().StringVar(&ResultsRepo, "repo", "", "get results for a specific repository instead of the current git repository")
 	resultsCmd.Flags().StringVar(&ResultsDefinition, "definition", "", "get results for a specific definition path")
 	resultsCmd.Flags().StringVar(&ResultsCommit, "commit", "", "get results for a specific commit SHA")
+	resultsCmd.Flags().StringVar(&ResultsTaskKey, "task", "", "task key (e.g., ci.checks.lint); resolves the task by key instead of ID")
+}
+
+func handleResultsTaskKeyError(err error) error {
+	var ambiguousErr *api.AmbiguousTaskKeyError
+	if errors.As(err, &ambiguousErr) {
+		return errors.WrapSentinel(errors.New(ambiguousErr.Error()), errors.ErrAmbiguousTaskKey)
+	}
+
+	return err
 }
 
 func HandleAmbiguousDefinitionPathError(err error, branch, repo string) error {

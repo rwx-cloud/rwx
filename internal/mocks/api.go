@@ -42,6 +42,7 @@ type API struct {
 	MockGetArtifactDownloadRequestByTaskKey     func(string, string, string) (api.ArtifactDownloadRequestResult, error)
 	MockDownloadArtifact                        func(api.ArtifactDownloadRequestResult) ([]byte, error)
 	MockGetRunPrompt                            func(string) (string, error)
+	MockGetRunPromptByTaskKey                   func(string, string) (string, error)
 	MockGetSandboxInitTemplate                  func() (api.SandboxInitTemplateResult, error)
 	MockListSandboxRuns                         func() (*api.ListSandboxRunsResult, error)
 	MockCancelRun                               func(runID, scopedToken string) error
@@ -330,6 +331,14 @@ func (c *API) GetRunPrompt(runID string) (string, error) {
 	}
 
 	return "", errors.New("MockGetRunPrompt was not configured")
+}
+
+func (c *API) GetRunPromptByTaskKey(runID, taskKey string) (string, error) {
+	if c.MockGetRunPromptByTaskKey != nil {
+		return c.MockGetRunPromptByTaskKey(runID, taskKey)
+	}
+
+	return "", errors.New("MockGetRunPromptByTaskKey was not configured")
 }
 
 func (c *API) ListSandboxRuns() (*api.ListSandboxRunsResult, error) {
