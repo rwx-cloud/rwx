@@ -1,0 +1,353 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  # Neither .agents nor .claude exists — installs to .agents, no symlink (non-TTY)
+  - key: test-install-neither-dir
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+
+      rwx skill install --yes
+
+      if [ ! -f "$tmpdir/.agents/skills/rwx/SKILL.md" ]; then
+        echo "SKILL.md was not created at .agents/skills/rwx/SKILL.md"
+        exit 1
+      fi
+
+      if ! grep -q "metadata:" "$tmpdir/.agents/skills/rwx/SKILL.md"; then
+        echo "SKILL.md does not contain expected frontmatter"
+        cat "$tmpdir/.agents/skills/rwx/SKILL.md"
+        exit 1
+      fi
+
+      # No .claude symlink in non-TTY without --symlink flag
+      if [ -e "$tmpdir/.claude/skills" ]; then
+        echo ".claude/skills should not exist in non-TTY without --symlink claude"
+        exit 1
+      fi
+
+  # Neither dir exists + --symlink claude — installs to .agents with symlink
+  - key: test-install-neither-dir-symlink-flag
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+
+      rwx skill install --yes --symlink claude
+
+      if [ ! -f "$tmpdir/.agents/skills/rwx/SKILL.md" ]; then
+        echo "SKILL.md was not created at .agents/skills/rwx/SKILL.md"
+        exit 1
+      fi
+
+      if [ ! -L "$tmpdir/.claude/skills" ]; then
+        echo ".claude/skills should be a symlink"
+        ls -la "$tmpdir/.claude/" 2>&1 || true
+        exit 1
+      fi
+
+      target=$(readlink "$tmpdir/.claude/skills")
+      expected="$tmpdir/.agents/skills"
+      if [ "$target" != "$expected" ]; then
+        echo ".claude/skills symlink target mismatch: got '$target', expected '$expected'"
+        exit 1
+      fi
+
+      if [ ! -f "$tmpdir/.claude/skills/rwx/SKILL.md" ]; then
+        echo "SKILL.md not reachable via .claude/skills symlink"
+        exit 1
+      fi
+
+  # Only .agents exists — installs to .agents, no symlink
+  - key: test-install-agents-only
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+      mkdir -p "$tmpdir/.agents"
+
+      rwx skill install --yes
+
+      if [ ! -f "$tmpdir/.agents/skills/rwx/SKILL.md" ]; then
+        echo "SKILL.md was not created at .agents/skills/rwx/SKILL.md"
+        exit 1
+      fi
+
+      if [ -e "$tmpdir/.claude" ]; then
+        echo ".claude should not exist when only .agents was present"
+        exit 1
+      fi
+
+  # Only .claude exists — installs directly to .claude/skills/rwx/SKILL.md
+  - key: test-install-claude-only
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+      mkdir -p "$tmpdir/.claude"
+
+      rwx skill install --yes
+
+      if [ ! -f "$tmpdir/.claude/skills/rwx/SKILL.md" ]; then
+        echo "SKILL.md was not created at .claude/skills/rwx/SKILL.md"
+        exit 1
+      fi
+
+      if ! grep -q "metadata:" "$tmpdir/.claude/skills/rwx/SKILL.md"; then
+        echo "SKILL.md does not contain expected frontmatter"
+        cat "$tmpdir/.claude/skills/rwx/SKILL.md"
+        exit 1
+      fi
+
+      # .agents should not have been created
+      if [ -e "$tmpdir/.agents" ]; then
+        echo ".agents should not exist when only .claude was present"
+        exit 1
+      fi
+
+  # Both .agents and .claude exist — installs to .agents, auto-symlinks
+  - key: test-install-both-dirs
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+      mkdir -p "$tmpdir/.agents"
+      mkdir -p "$tmpdir/.claude"
+
+      rwx skill install --yes
+
+      if [ ! -f "$tmpdir/.agents/skills/rwx/SKILL.md" ]; then
+        echo "SKILL.md was not created at .agents/skills/rwx/SKILL.md"
+        exit 1
+      fi
+
+      # Should have auto-symlinked .claude/skills to .agents/skills
+      if [ ! -L "$tmpdir/.claude/skills" ]; then
+        echo ".claude/skills should be a symlink when both dirs exist"
+        ls -la "$tmpdir/.claude/" 2>&1 || true
+        exit 1
+      fi
+
+      if [ ! -f "$tmpdir/.claude/skills/rwx/SKILL.md" ]; then
+        echo "SKILL.md not reachable via .claude/skills symlink"
+        exit 1
+      fi
+
+  # Both dirs exist + .claude/skills is already a real dir with content
+  - key: test-install-both-dirs-existing-claude-skills
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+      mkdir -p "$tmpdir/.agents"
+      mkdir -p "$tmpdir/.claude/skills/other-skill"
+      echo "other content" > "$tmpdir/.claude/skills/other-skill/SKILL.md"
+
+      rwx skill install --yes
+
+      if [ ! -f "$tmpdir/.agents/skills/rwx/SKILL.md" ]; then
+        echo "SKILL.md was not created at .agents/skills/rwx/SKILL.md"
+        exit 1
+      fi
+
+      # .claude/skills should remain a real directory
+      if [ -L "$tmpdir/.claude/skills" ]; then
+        echo ".claude/skills should remain a real directory, not a symlink"
+        exit 1
+      fi
+
+      # .claude/skills/rwx should be a symlink to .agents/skills/rwx
+      if [ ! -L "$tmpdir/.claude/skills/rwx" ]; then
+        echo ".claude/skills/rwx should be a symlink"
+        ls -la "$tmpdir/.claude/skills/"
+        exit 1
+      fi
+
+      target=$(readlink "$tmpdir/.claude/skills/rwx")
+      expected="$tmpdir/.agents/skills/rwx"
+      if [ "$target" != "$expected" ]; then
+        echo ".claude/skills/rwx symlink target mismatch: got '$target', expected '$expected'"
+        exit 1
+      fi
+
+      # Existing content should be preserved
+      if [ ! -f "$tmpdir/.claude/skills/other-skill/SKILL.md" ]; then
+        echo "Existing .claude/skills content was clobbered"
+        exit 1
+      fi
+
+      if [ ! -f "$tmpdir/.claude/skills/rwx/SKILL.md" ]; then
+        echo "SKILL.md not reachable via .claude/skills/rwx symlink"
+        exit 1
+      fi
+
+  - key: test-skill-update
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+
+      # Install a skill with a stale version so update has something to do
+      mkdir -p "$tmpdir/.agents/skills/rwx"
+      cat > "$tmpdir/.agents/skills/rwx/SKILL.md" << 'EOF'
+      ---
+      metadata:
+        version: "0.0.1"
+      ---
+      Stale content
+      EOF
+
+      output=$(rwx skill update 2>&1)
+
+      if echo "$output" | grep -q "All skills are up to date"; then
+        echo "Update reported no changes, but v0.0.1 should be outdated"
+        exit 1
+      fi
+
+      # The file should have been overwritten with fresh content from GitHub
+      if grep -q "Stale content" "$tmpdir/.agents/skills/rwx/SKILL.md"; then
+        echo "SKILL.md still contains stale content after update"
+        cat "$tmpdir/.agents/skills/rwx/SKILL.md"
+        exit 1
+      fi
+
+      if ! grep -q "metadata:" "$tmpdir/.agents/skills/rwx/SKILL.md"; then
+        echo "Updated SKILL.md does not contain expected frontmatter"
+        cat "$tmpdir/.agents/skills/rwx/SKILL.md"
+        exit 1
+      fi
+
+  - key: test-skill-update-symlink-claude
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+
+      mkdir -p "$tmpdir/.agents/skills/rwx"
+      cat > "$tmpdir/.agents/skills/rwx/SKILL.md" << 'EOF'
+      ---
+      metadata:
+        version: "0.0.1"
+      ---
+      Stale content
+      EOF
+
+      rwx skill update --symlink claude
+
+      # .claude/skills should be a symlink to .agents/skills
+      if [ ! -L "$tmpdir/.claude/skills" ]; then
+        echo ".claude/skills should be a symlink after update --symlink claude"
+        ls -la "$tmpdir/.claude/" 2>&1 || true
+        exit 1
+      fi
+
+      target=$(readlink "$tmpdir/.claude/skills")
+      expected="$tmpdir/.agents/skills"
+      if [ "$target" != "$expected" ]; then
+        echo ".claude/skills symlink target mismatch: got '$target', expected '$expected'"
+        exit 1
+      fi
+
+  - key: test-skill-update-up-to-date
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+
+      # Install the skill fresh, then immediately update — should be a no-op
+      rwx skill install --yes
+
+      output=$(rwx skill update 2>&1)
+
+      if ! echo "$output" | grep -q "All skills are up to date"; then
+        echo "Expected 'All skills are up to date' after fresh install, got:"
+        echo "$output"
+        exit 1
+      fi
+
+  - key: test-skill-status
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+
+      # Status with no installations should suggest installing
+      output=$(rwx skill status)
+      if ! echo "$output" | grep -q "rwx skill install"; then
+        echo "Expected install instructions when no skill is installed, got:"
+        echo "$output"
+        exit 1
+      fi
+
+      # Install the skill, then check status reports it
+      rwx skill install --yes
+
+      output=$(rwx skill status)
+      if ! echo "$output" | grep -q "Agent Skill Installations"; then
+        echo "Expected 'Agent Skill Installations' header after install, got:"
+        echo "$output"
+        exit 1
+      fi
+
+      if ! echo "$output" | grep -q "project"; then
+        echo "Expected 'project' scope in status output, got:"
+        echo "$output"
+        exit 1
+      fi
+
+      # JSON output should include the installation
+      json=$(rwx skill status --output json)
+      count=$(echo "$json" | jq '[.Installations[] | select(.Detected == true)] | length')
+      if [ "$count" -lt 1 ]; then
+        echo "Expected at least one detected installation in JSON output, got:"
+        echo "$json"
+        exit 1
+      fi

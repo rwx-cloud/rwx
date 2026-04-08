@@ -184,6 +184,11 @@ tasks:
     init:
       ref: ${{ init.commit-sha }}
 
+  - key: run-rwx-skill-test
+    call: ${{ run.dir }}/integration/skill-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
   - key: run-rwx-whoami-test
     call: ${{ run.dir }}/integration/whoami-test.yml
     init:
