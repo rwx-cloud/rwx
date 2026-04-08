@@ -190,6 +190,7 @@ var (
 
 func init() {
 	runCmd.Flags().BoolVar(&NoCache, "no-cache", false, "do not read or write to the cache")
+	_ = runCmd.Flags().MarkHidden("no-cache")
 	runCmd.Flags().StringArrayVar(&InitParameters, flagInit, []string{}, "initialization parameters for the run, available in the `init` context. Can be specified multiple times")
 	runCmd.Flags().StringArrayVar(&TargetedTasks, "target", []string{}, "task to target for execution. Can be specified multiple times")
 	runCmd.Flags().StringVarP(&MintFilePath, "file", "f", "", "an RWX config file to use for sourcing task definitions (required)")
