@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -137,7 +138,7 @@ func (s Service) outputOutdatedSkillMessage() {
 		fmt.Fprintf(w, "\nA new version of the RWX agent skill is available: v%s\n", latestVersion)
 	}
 	if outdatedSources["agents"] {
-		fmt.Fprintln(w, "To upgrade: npx skills update rwx")
+		fmt.Fprintln(w, "To upgrade: rwx skill update")
 	}
 	if outdatedSources["marketplace"] {
 		fmt.Fprintln(w, "To upgrade the Claude Code marketplace: claude plugin marketplace update rwx && claude plugin update rwx@rwx")
@@ -193,6 +194,240 @@ func (s Service) fetchLatestSkillVersion() string {
 	_ = versions.SetSkillLatestVersion(versionStr)
 	versions.SaveLatestSkillVersionToFile(s.SkillVersionsBackend)
 	return versionStr
+}
+
+type SkillUpdateEntry struct {
+	Installation skill.Installation
+	OldVersion   string
+	NewVersion   string
+	Action       string // "updated" or "skipped"
+}
+
+type SkillUpdateResult struct {
+	Entries []SkillUpdateEntry
+}
+
+// SkillUpdate updates outdated agents skill installations by fetching
+// the latest SKILL.md from GitHub. Marketplace installations are skipped.
+func (s Service) SkillUpdate(symlink string) (*SkillUpdateResult, error) {
+	result, err := skill.Detect()
+	if err != nil {
+		return nil, err
+	}
+
+	if !result.AnyFound {
+		return &SkillUpdateResult{}, nil
+	}
+
+	latestVersionStr := s.fetchLatestSkillVersion()
+	if latestVersionStr == "" {
+		return nil, errors.New("unable to determine the latest skill version")
+	}
+	latestVersion, err := semver.NewVersion(latestVersionStr)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to parse latest skill version")
+	}
+
+	var entries []SkillUpdateEntry
+	var needsFetch bool
+
+	for _, inst := range result.Installations {
+		if !skill.IsDetected(inst) {
+			continue
+		}
+
+		outdated := false
+		if inst.Version == "" {
+			outdated = true
+		} else {
+			v, err := semver.NewVersion(inst.Version)
+			if err == nil && latestVersion.GreaterThan(v) {
+				outdated = true
+			}
+		}
+
+		if !outdated {
+			continue
+		}
+
+		if inst.Source == "marketplace" {
+			entries = append(entries, SkillUpdateEntry{
+				Installation: inst,
+				OldVersion:   inst.Version,
+				Action:       "skipped",
+			})
+			continue
+		}
+
+		needsFetch = true
+		entries = append(entries, SkillUpdateEntry{
+			Installation: inst,
+			OldVersion:   inst.Version,
+			NewVersion:   latestVersionStr,
+			Action:       "updated",
+		})
+	}
+
+	if needsFetch {
+		content, err := skill.FetchSkillContent()
+		if err != nil {
+			return nil, err
+		}
+
+		for _, entry := range entries {
+			if entry.Action != "updated" {
+				continue
+			}
+			if err := os.WriteFile(entry.Installation.Path, []byte(content), 0o644); err != nil {
+				return nil, errors.Wrap(err, "unable to write skill file")
+			}
+		}
+	}
+
+	if needsFetch && symlink == "claude" {
+		cwd, err := os.Getwd()
+		if err == nil {
+			s.ensureClaudeSkillsSymlink(cwd)
+		}
+	}
+
+	return &SkillUpdateResult{Entries: entries}, nil
+}
+
+type SkillInstallResult struct {
+	Path string
+}
+
+// SkillInstall installs the RWX agent skill at the project level. The
+// install location and symlink behavior are inferred from the project:
+//   - Neither .agents nor .claude exists: install to .agents, prompt for .claude symlink
+//   - Both exist: install to .agents, auto-symlink to .claude
+//   - Only .claude exists: install directly to .claude/skills/rwx/SKILL.md
+//   - Only .agents exists: install to .agents, no symlink
+//
+// The --symlink claude flag forces symlink creation (useful in non-TTY).
+func (s Service) SkillInstall(yes bool, symlink string) (*SkillInstallResult, error) {
+	detected, err := skill.Detect()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, inst := range detected.Installations {
+		if skill.IsDetected(inst) && inst.Source == "agents" {
+			fmt.Fprintf(s.Stderr, "An existing %s installation was found at %s\n", inst.Scope, inst.Path)
+			if err := s.confirmDestruction("Install at the project level anyway?", yes); err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+
+	content, err := skill.FetchSkillContent()
+	if err != nil {
+		return nil, err
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to determine working directory")
+	}
+
+	hasAgents := dirExists(filepath.Join(cwd, ".agents"))
+	hasClaude := dirExists(filepath.Join(cwd, ".claude"))
+
+	var skillPath string
+	switch {
+	case hasClaude && !hasAgents:
+		// Only .claude exists — install directly there.
+		skillDir := filepath.Join(cwd, ".claude", "skills", "rwx")
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			return nil, errors.Wrap(err, "unable to create skill directory")
+		}
+		skillPath = filepath.Join(skillDir, "SKILL.md")
+
+	default:
+		// Install to .agents (the canonical location).
+		skillDir := filepath.Join(cwd, ".agents", "skills", "rwx")
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			return nil, errors.Wrap(err, "unable to create skill directory")
+		}
+		skillPath = filepath.Join(skillDir, "SKILL.md")
+
+		shouldSymlink := symlink == "claude"
+		if !shouldSymlink && hasAgents && hasClaude {
+			// Both directories exist — auto-symlink without prompting.
+			shouldSymlink = true
+		}
+		if !shouldSymlink && !hasAgents && !hasClaude {
+			// Neither directory exists — prompt in TTY, or honor the flag.
+			shouldSymlink = s.promptForClaudeSymlink()
+		}
+		if shouldSymlink {
+			s.ensureClaudeSkillsSymlink(cwd)
+		}
+	}
+
+	if err := os.WriteFile(skillPath, []byte(content), 0o644); err != nil {
+		return nil, errors.Wrap(err, "unable to write skill file")
+	}
+
+	return &SkillInstallResult{Path: skillPath}, nil
+}
+
+// promptForClaudeSymlink asks the user whether to create a Claude Code symlink.
+// Returns true if the user confirms. Only prompts in TTY mode.
+func (s Service) promptForClaudeSymlink() bool {
+	if !s.StderrIsTTY {
+		return false
+	}
+
+	fmt.Fprintf(s.Stderr, "\nSymlink .claude/skills? This is required for Claude Code to discover the skill in .agents/skills/rwx/SKILL.md, so it's recommended if anyone on this project uses Claude Code.\n")
+	fmt.Fprintf(s.Stderr, "Create symlink? [y/N]: ")
+	scanner := bufio.NewScanner(s.Stdin)
+	if !scanner.Scan() {
+		return false
+	}
+
+	answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+	return answer == "y" || answer == "yes"
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// ensureClaudeSkillsSymlink ensures Claude Code can discover the installed
+// skill. If .claude/skills doesn't exist, it's created as a symlink to
+// .agents/skills. If it already exists as a directory, a symlink is created
+// at .claude/skills/rwx pointing to .agents/skills/rwx.
+func (s Service) ensureClaudeSkillsSymlink(projectDir string) {
+	claudeSkills := filepath.Join(projectDir, ".claude", "skills")
+	agentsSkills := filepath.Join(projectDir, ".agents", "skills")
+
+	info, err := os.Lstat(claudeSkills)
+	if err != nil {
+		// .claude/skills doesn't exist — create it as a symlink to .agents/skills.
+		_ = os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755)
+		_ = os.Symlink(agentsSkills, claudeSkills)
+		return
+	}
+
+	// If it's already a symlink, check whether it points to .agents/skills.
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(claudeSkills)
+		if err == nil && target == agentsSkills {
+			return
+		}
+	}
+
+	// .claude/skills exists as a real directory (or a symlink to somewhere else).
+	// Add a per-skill symlink so we don't clobber existing content.
+	claudeRwx := filepath.Join(claudeSkills, "rwx")
+	agentsRwx := filepath.Join(agentsSkills, "rwx")
+	if _, err := os.Lstat(claudeRwx); err != nil {
+		_ = os.Symlink(agentsRwx, claudeRwx)
+	}
 }
 
 // recordTelemetry enqueues a telemetry event if a collector is configured.

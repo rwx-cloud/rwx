@@ -37,10 +37,46 @@ var (
 			return nil
 		},
 	}
+
+	skillUpdateCmd = &cobra.Command{
+		Use:   "update",
+		Short: "Update outdated RWX agent skill installations",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			symlink, _ := cmd.Flags().GetString("symlink")
+			result, err := service.SkillUpdate(symlink)
+			if err != nil {
+				return err
+			}
+
+			outputSkillUpdateText(result)
+			return nil
+		},
+	}
+
+	skillInstallCmd = &cobra.Command{
+		Use:   "install",
+		Short: "Install the RWX agent skill at the project level (.agents/skills/rwx/SKILL.md)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			yes, _ := cmd.Flags().GetBool("yes")
+			symlink, _ := cmd.Flags().GetString("symlink")
+			result, err := service.SkillInstall(yes, symlink)
+			if err != nil {
+				return err
+			}
+
+			fmt.Fprintf(os.Stdout, "Installed RWX agent skill at %s\n", shortenPath(result.Path))
+			return nil
+		},
+	}
 )
 
 func init() {
+	skillInstallCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
+	skillInstallCmd.Flags().String("symlink", "", "force a .claude/skills symlink even if .claude doesn't exist yet (use \"claude\")")
+	skillUpdateCmd.Flags().String("symlink", "", "create a .claude/skills symlink so Claude Code discovers the skill (use \"claude\")")
+	skillCmd.AddCommand(skillInstallCmd)
 	skillCmd.AddCommand(skillStatusCmd)
+	skillCmd.AddCommand(skillUpdateCmd)
 }
 
 type skillStatusJSON struct {
@@ -95,7 +131,7 @@ func outputSkillStatusText(result *cli.SkillStatusResult) {
 
 	if !result.AnyFound {
 		fmt.Fprintln(os.Stdout, "To install:")
-		fmt.Fprintln(os.Stdout, "  npx skills add rwx-cloud/skills")
+		fmt.Fprintln(os.Stdout, "  rwx skill install")
 		return
 	}
 
@@ -137,10 +173,31 @@ func outputSkillStatusText(result *cli.SkillStatusResult) {
 		fmt.Fprintf(os.Stdout, "A new version of the RWX agent skill is available: v%s\n", latestVersion)
 	}
 	if outdatedSources["agents"] {
-		fmt.Fprintln(os.Stdout, "To upgrade: npx skills update rwx")
+		fmt.Fprintln(os.Stdout, "To upgrade: rwx skill update")
 	}
 	if outdatedSources["marketplace"] {
 		fmt.Fprintln(os.Stdout, "To upgrade the Claude Code marketplace: claude plugin marketplace update rwx && claude plugin update rwx@rwx")
+	}
+}
+
+func outputSkillUpdateText(result *cli.SkillUpdateResult) {
+	if len(result.Entries) == 0 {
+		fmt.Fprintln(os.Stdout, "All skills are up to date.")
+		return
+	}
+
+	for _, entry := range result.Entries {
+		switch entry.Action {
+		case "updated":
+			if entry.OldVersion != "" {
+				fmt.Fprintf(os.Stdout, "Updated %s (v%s → v%s)\n", shortenPath(entry.Installation.Path), entry.OldVersion, entry.NewVersion)
+			} else {
+				fmt.Fprintf(os.Stdout, "Updated %s (v%s)\n", shortenPath(entry.Installation.Path), entry.NewVersion)
+			}
+		case "skipped":
+			fmt.Fprintf(os.Stdout, "Skipped %s (marketplace)\n", shortenPath(entry.Installation.Path))
+			fmt.Fprintln(os.Stdout, "  To upgrade: claude plugin marketplace update rwx && claude plugin update rwx@rwx")
+		}
 	}
 }
 
