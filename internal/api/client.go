@@ -74,6 +74,34 @@ func NewClientWithRoundTrip(rt func(*http.Request) (*http.Response, error)) Clie
 	return Client{roundTripFunc(rt)}
 }
 
+func (c Client) GetSkillContent() (string, error) {
+	req, err := http.NewRequest(http.MethodGet, "/api/skill/content", nil)
+	if err != nil {
+		return "", errors.Wrap(err, "unable to create new HTTP request")
+	}
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return "", errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return "", errors.New(msg)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", errors.Wrap(err, "unable to read response body")
+	}
+
+	return string(body), nil
+}
+
 func (c Client) GetSkillLatestVersion() (string, error) {
 	req, err := http.NewRequest(http.MethodGet, "/api/skill/latest", nil)
 	if err != nil {

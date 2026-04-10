@@ -269,7 +269,7 @@ func (s Service) SkillUpdate(symlink string) (*SkillUpdateResult, error) {
 	}
 
 	if needsFetch {
-		content, err := skill.FetchSkillContent()
+		content, err := s.APIClient.GetSkillContent()
 		if err != nil {
 			return nil, err
 		}
@@ -322,7 +322,7 @@ func (s Service) SkillInstall(yes bool, symlink string) (*SkillInstallResult, er
 		}
 	}
 
-	content, err := skill.FetchSkillContent()
+	content, err := s.APIClient.GetSkillContent()
 	if err != nil {
 		return nil, err
 	}

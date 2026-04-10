@@ -12,6 +12,7 @@ import (
 )
 
 type APIClient interface {
+	GetSkillContent() (string, error)
 	GetSkillLatestVersion() (string, error)
 	GetDebugConnectionInfo(debugKey string) (api.DebugConnectionInfo, error)
 	GetSandboxConnectionInfo(runID, scopedToken string) (api.SandboxConnectionInfo, error)
