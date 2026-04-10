@@ -46,7 +46,7 @@ tasks:
       GITHUB_TOKEN: ${{ github['rwx-cloud'].token }}
 
   - key: create-pull-request
-    call: github/create-pull-request 1.0.5
+    call: github/create-pull-request 1.0.6
     use: update-ref
     with:
       github-token: ${{ github-apps.rwx-cloud-bot.token }}
