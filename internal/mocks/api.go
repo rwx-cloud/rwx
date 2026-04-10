@@ -6,6 +6,7 @@ import (
 )
 
 type API struct {
+	MockGetSkillContent                         func() (string, error)
 	MockGetSkillLatestVersion                   func() (string, error)
 	MockInitiateRun                             func(api.InitiateRunConfig) (*api.InitiateRunResult, error)
 	MockGetDebugConnectionInfo                  func(runID string) (api.DebugConnectionInfo, error)
@@ -46,6 +47,14 @@ type API struct {
 	MockGetSandboxInitTemplate                  func() (api.SandboxInitTemplateResult, error)
 	MockListSandboxRuns                         func() (*api.ListSandboxRunsResult, error)
 	MockCancelRun                               func(runID, scopedToken string) error
+}
+
+func (c *API) GetSkillContent() (string, error) {
+	if c.MockGetSkillContent != nil {
+		return c.MockGetSkillContent()
+	}
+
+	return "", errors.New("MockGetSkillContent was not configured")
 }
 
 func (c *API) GetSkillLatestVersion() (string, error) {

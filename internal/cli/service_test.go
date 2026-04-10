@@ -301,6 +301,37 @@ func TestSkillUpdate(t *testing.T) {
 		require.Empty(t, result.Entries)
 	})
 
+	t.Run("updates outdated installation with content from API", func(t *testing.T) {
+		s := setupSkillTest(t)
+		seedSkillFile(t, s.tmp, "1.0.0")
+
+		backend := versions.NewMemoryBackend()
+		_ = backend.Set("2.0.0")
+		s.config.SkillVersionsBackend = backend
+
+		newContent := "---\nmetadata:\n  version: 2.0.0\n---\nUpdated skill content\n"
+		s.mockAPI.MockGetSkillContent = func() (string, error) {
+			return newContent, nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillUpdate("")
+		require.NoError(t, err)
+		require.Len(t, result.Entries, 1)
+		require.Equal(t, "updated", result.Entries[0].Action)
+		require.Equal(t, "1.0.0", result.Entries[0].OldVersion)
+		require.Equal(t, "2.0.0", result.Entries[0].NewVersion)
+
+		written, err := os.ReadFile(result.Entries[0].Installation.Path)
+		require.NoError(t, err)
+		require.Equal(t, newContent, string(written))
+	})
+
 	t.Run("skips marketplace installations", func(t *testing.T) {
 		s := setupSkillTest(t)
 		seedMarketplaceSkillFile(t, s.tmp, "1.0.0")
@@ -331,16 +362,25 @@ func TestSkillInstall(t *testing.T) {
 	t.Run("writes SKILL.md to project directory", func(t *testing.T) {
 		s := setupSkillTest(t)
 
+		skillContent := "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n"
+		s.mockAPI.MockGetSkillContent = func() (string, error) {
+			return skillContent, nil
+		}
+
 		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
 		require.NoError(t, err)
 
-		// We can't easily mock FetchSkillContent since it hits GitHub.
-		// This test verifies the path logic by checking the result struct.
-		// Full integration testing requires network access.
+		result, err := s.service.SkillInstall(true, "")
+		require.NoError(t, err)
+
 		expectedPath := filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md")
-		_ = expectedPath // path validation only; actual fetch would need network
+		require.Equal(t, expectedPath, result.Path)
+
+		written, err := os.ReadFile(expectedPath)
+		require.NoError(t, err)
+		require.Equal(t, skillContent, string(written))
 	})
 }
