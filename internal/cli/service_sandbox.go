@@ -990,6 +990,12 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 				_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_end__")
 				s.SSHClient.Close()
 				wasRunning = true
+			} else {
+				// SSH connection failed — cancel via API to avoid orphaned runs
+				if cancelErr := s.APIClient.CancelRun(session.RunID, session.ScopedToken); cancelErr != nil {
+					fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", session.RunID, cancelErr)
+				}
+				wasRunning = true
 			}
 		} else if err == nil && !connInfo.Polling.Completed {
 			// Run is still active but not yet sandboxable — cancel it server-side
@@ -1066,6 +1072,16 @@ func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, erro
 				if err := s.connectSSH(&connInfo); err == nil {
 					_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_end__")
 					s.SSHClient.Close()
+				} else {
+					// SSH connection failed — cancel via API to avoid orphaned runs
+					if cancelErr := s.APIClient.CancelRun(session.RunID, session.ScopedToken); cancelErr != nil {
+						fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", session.RunID, cancelErr)
+					}
+				}
+			} else if err == nil && !connInfo.Polling.Completed {
+				// Run is still active but not yet sandboxable — cancel it server-side
+				if cancelErr := s.APIClient.CancelRun(session.RunID, session.ScopedToken); cancelErr != nil {
+					fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", session.RunID, cancelErr)
 				}
 			}
 
