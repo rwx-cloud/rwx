@@ -34,6 +34,16 @@ AAAEC6442PQKevgYgeT0SIu9zwlnEMl6MF59ZgM+i0ByMv4eLJPqG3xnZcEQmktHj/GY2i
 	sandboxPublicTestKey = `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOLJPqG3xnZcEQmktHj/GY2i6rkoN2fkb75xRxMfgSHP rwx CLI testing`
 )
 
+// netTimeoutError implements net.Error with Timeout() returning true,
+// simulating a dial timeout caused by a firewall blocking the port.
+type netTimeoutError struct {
+	msg string
+}
+
+func (e *netTimeoutError) Error() string   { return e.msg }
+func (e *netTimeoutError) Timeout() bool   { return true }
+func (e *netTimeoutError) Temporary() bool { return false }
+
 func TestService_ListSandboxes(t *testing.T) {
 	t.Run("returns list without error", func(t *testing.T) {
 		setup := setupTest(t)
@@ -632,6 +642,67 @@ func TestService_ExecSandbox(t *testing.T) {
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "completed before becoming ready")
+	})
+
+	t.Run("shows firewall hint when SSH connection times out", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-timeout"
+		address := "192.168.1.1:43215"
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			return &netTimeoutError{msg: "dial tcp 192.168.1.1:43215: connect: operation timed out"}
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "firewall or network configuration blocking outbound connections on port 43215")
+	})
+
+	t.Run("shows generic sandbox timeout hint for non-timeout SSH errors", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-ssh-fail"
+		address := "192.168.1.1:43215"
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			return fmt.Errorf("connection refused")
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "The sandbox may have timed out")
+		require.NotContains(t, err.Error(), "firewall")
 	})
 }
 
