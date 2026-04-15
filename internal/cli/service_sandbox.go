@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -653,6 +654,14 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	// Connect via SSH
 	err = s.connectSSH(connInfo)
 	if err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			port := "43215"
+			if _, p, splitErr := net.SplitHostPort(connInfo.Address); splitErr == nil {
+				port = p
+			}
+			return nil, fmt.Errorf("Failed to connect to sandbox '%s': %v\nThis is likely caused by a firewall or network configuration blocking outbound connections on port %s.", runID, err, port)
+		}
 		return nil, fmt.Errorf("Failed to connect to sandbox '%s': %v\nThe sandbox may have timed out. Run 'rwx sandbox reset %s' to restart.", runID, err, configFile)
 	}
 	defer s.SSHClient.Close()
