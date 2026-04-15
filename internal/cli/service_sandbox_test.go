@@ -2360,11 +2360,15 @@ func TestService_StopSandbox(t *testing.T) {
 		seedSandboxStorage(t, setup.tmp, "run-initializing", "scoped-token-123")
 
 		cancelCalled := false
+		connInfoCalls := atomic.Int32{}
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
-			return api.SandboxConnectionInfo{
-				Sandboxable: false,
-				Polling:     api.PollingResult{Completed: false},
-			}, nil
+			if connInfoCalls.Add(1) == 1 {
+				return api.SandboxConnectionInfo{
+					Sandboxable: false,
+					Polling:     api.PollingResult{Completed: false},
+				}, nil
+			}
+			return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
 		}
 		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
 			require.Equal(t, "run-initializing", runID)
@@ -2392,11 +2396,15 @@ func TestService_StopSandbox(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorage(t, setup.tmp, "run-cancel-fail", "token-456")
 
+		connInfoCalls := atomic.Int32{}
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
-			return api.SandboxConnectionInfo{
-				Sandboxable: false,
-				Polling:     api.PollingResult{Completed: false},
-			}, nil
+			if connInfoCalls.Add(1) == 1 {
+				return api.SandboxConnectionInfo{
+					Sandboxable: false,
+					Polling:     api.PollingResult{Completed: false},
+				}, nil
+			}
+			return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
 		}
 		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
 			return errors.New("server error")
@@ -2417,13 +2425,17 @@ func TestService_StopSandbox(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorage(t, setup.tmp, "run-sandboxable", "token-789")
 
+		connInfoCalls := atomic.Int32{}
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
-			return api.SandboxConnectionInfo{
-				Sandboxable:    true,
-				Address:        "192.168.1.1:22",
-				PrivateUserKey: sandboxPrivateTestKey,
-				PublicHostKey:  sandboxPublicTestKey,
-			}, nil
+			if connInfoCalls.Add(1) == 1 {
+				return api.SandboxConnectionInfo{
+					Sandboxable:    true,
+					Address:        "192.168.1.1:22",
+					PrivateUserKey: sandboxPrivateTestKey,
+					PublicHostKey:  sandboxPublicTestKey,
+				}, nil
+			}
+			return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
 		}
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
 			return nil
@@ -2450,13 +2462,17 @@ func TestService_StopSandbox(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorage(t, setup.tmp, "run-ssh-fail", "token-ssh")
 
+		connInfoCalls := atomic.Int32{}
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
-			return api.SandboxConnectionInfo{
-				Sandboxable:    true,
-				Address:        "192.168.1.1:22",
-				PrivateUserKey: sandboxPrivateTestKey,
-				PublicHostKey:  sandboxPublicTestKey,
-			}, nil
+			if connInfoCalls.Add(1) == 1 {
+				return api.SandboxConnectionInfo{
+					Sandboxable:    true,
+					Address:        "192.168.1.1:22",
+					PrivateUserKey: sandboxPrivateTestKey,
+					PublicHostKey:  sandboxPublicTestKey,
+				}, nil
+			}
+			return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
 		}
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
 			return errors.New("connection timed out")
@@ -2507,6 +2523,146 @@ func TestService_StopSandbox(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, result.Stopped, 1)
 		require.False(t, result.Stopped[0].WasRunning)
+	})
+}
+
+func TestService_StopSandbox_WaitsForCompletion(t *testing.T) {
+	t.Run("polls until server confirms completion", func(t *testing.T) {
+		setup := setupTest(t)
+		seedSandboxStorage(t, setup.tmp, "run-poll", "token-poll")
+
+		callCount := atomic.Int32{}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			n := callCount.Add(1)
+			if n == 1 {
+				// First call: stop check — sandbox is still active
+				return api.SandboxConnectionInfo{
+					Sandboxable: false,
+					Polling:     api.PollingResult{Completed: false},
+				}, nil
+			}
+			if n == 2 {
+				// Second call: first poll — still in progress
+				return api.SandboxConnectionInfo{
+					Polling: api.PollingResult{Completed: false},
+				}, nil
+			}
+			// Third call: completed
+			return api.SandboxConnectionInfo{
+				Polling: api.PollingResult{Completed: true},
+			}, nil
+		}
+		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+			return nil
+		}
+
+		result, err := setup.service.StopSandbox(cli.StopSandboxConfig{
+			RunID: "run-poll",
+			Json:  true,
+		})
+
+		require.NoError(t, err)
+		require.Len(t, result.Stopped, 1)
+		require.True(t, result.Stopped[0].WasRunning)
+		require.Equal(t, int32(3), callCount.Load(), "should have polled until completion")
+	})
+
+	t.Run("stops polling when server returns an error", func(t *testing.T) {
+		setup := setupTest(t)
+		seedSandboxStorage(t, setup.tmp, "run-err", "token-err")
+
+		callCount := atomic.Int32{}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			n := callCount.Add(1)
+			if n == 1 {
+				// First call: stop check
+				return api.SandboxConnectionInfo{
+					Sandboxable: false,
+					Polling:     api.PollingResult{Completed: false},
+				}, nil
+			}
+			// Second call: run is gone
+			return api.SandboxConnectionInfo{}, errors.New("not found")
+		}
+		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+			return nil
+		}
+
+		result, err := setup.service.StopSandbox(cli.StopSandboxConfig{
+			RunID: "run-err",
+			Json:  true,
+		})
+
+		require.NoError(t, err)
+		require.Len(t, result.Stopped, 1)
+		require.Equal(t, int32(2), callCount.Load(), "should stop polling on error")
+	})
+
+	t.Run("respects server-provided backoff", func(t *testing.T) {
+		setup := setupTest(t)
+		seedSandboxStorage(t, setup.tmp, "run-backoff", "token-backoff")
+
+		var pollTimes []time.Time
+		callCount := atomic.Int32{}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			n := callCount.Add(1)
+			if n == 1 {
+				// First call: stop check
+				return api.SandboxConnectionInfo{
+					Sandboxable: false,
+					Polling:     api.PollingResult{Completed: false},
+				}, nil
+			}
+			pollTimes = append(pollTimes, time.Now())
+			if n == 2 {
+				backoff := 100
+				return api.SandboxConnectionInfo{
+					Polling: api.PollingResult{Completed: false, BackoffMs: &backoff},
+				}, nil
+			}
+			return api.SandboxConnectionInfo{
+				Polling: api.PollingResult{Completed: true},
+			}, nil
+		}
+		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+			return nil
+		}
+
+		_, err := setup.service.StopSandbox(cli.StopSandboxConfig{
+			RunID: "run-backoff",
+			Json:  true,
+		})
+
+		require.NoError(t, err)
+		require.Len(t, pollTimes, 2)
+		// The interval between polls should be at least the backoff (100ms)
+		gap := pollTimes[1].Sub(pollTimes[0])
+		require.GreaterOrEqual(t, gap.Milliseconds(), int64(90), "should respect server backoff")
+	})
+
+	t.Run("does not poll for already-completed sandbox", func(t *testing.T) {
+		setup := setupTest(t)
+		seedSandboxStorage(t, setup.tmp, "run-done", "token-done")
+
+		callCount := atomic.Int32{}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			callCount.Add(1)
+			return api.SandboxConnectionInfo{
+				Sandboxable: false,
+				Polling:     api.PollingResult{Completed: true},
+			}, nil
+		}
+
+		result, err := setup.service.StopSandbox(cli.StopSandboxConfig{
+			RunID: "run-done",
+			Json:  true,
+		})
+
+		require.NoError(t, err)
+		require.Len(t, result.Stopped, 1)
+		require.False(t, result.Stopped[0].WasRunning)
+		// Only the initial check call, no polling
+		require.Equal(t, int32(1), callCount.Load())
 	})
 }
 
@@ -2577,11 +2733,15 @@ func TestService_ResetSandbox(t *testing.T) {
 		seedResetStorage(t, setup, "run-initializing", "scoped-token-123")
 
 		cancelCalled := false
+		connInfoCalls := atomic.Int32{}
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
-			return api.SandboxConnectionInfo{
-				Sandboxable: false,
-				Polling:     api.PollingResult{Completed: false},
-			}, nil
+			if connInfoCalls.Add(1) == 1 {
+				return api.SandboxConnectionInfo{
+					Sandboxable: false,
+					Polling:     api.PollingResult{Completed: false},
+				}, nil
+			}
+			return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
 		}
 		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
 			require.Equal(t, "run-initializing", runID)
@@ -2610,13 +2770,17 @@ func TestService_ResetSandbox(t *testing.T) {
 		setupResetMocks(setup)
 		seedResetStorage(t, setup, "run-ssh-fail", "token-ssh")
 
+		connInfoCalls := atomic.Int32{}
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
-			return api.SandboxConnectionInfo{
-				Sandboxable:    true,
-				Address:        "192.168.1.1:22",
-				PrivateUserKey: sandboxPrivateTestKey,
-				PublicHostKey:  sandboxPublicTestKey,
-			}, nil
+			if connInfoCalls.Add(1) == 1 {
+				return api.SandboxConnectionInfo{
+					Sandboxable:    true,
+					Address:        "192.168.1.1:22",
+					PrivateUserKey: sandboxPrivateTestKey,
+					PublicHostKey:  sandboxPublicTestKey,
+				}, nil
+			}
+			return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
 		}
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
 			return errors.New("connection timed out")

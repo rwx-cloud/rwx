@@ -1009,6 +1009,12 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 			cancelMethod = "api"
 		}
 
+		// Wait for the server to confirm the run has completed so that
+		// immediately-following commands (exec, list, etc.) see consistent state.
+		if wasRunning {
+			s.waitForSandboxCompletion(session.RunID, session.ScopedToken)
+		}
+
 		// Remove from storage
 		delete(storage.Sandboxes, keys[i])
 
@@ -1041,6 +1047,37 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 	}
 
 	return &StopSandboxResult{Stopped: stopped}, nil
+}
+
+// waitForSandboxCompletion polls the server until the run is confirmed
+// completed. This prevents immediately-following commands from finding
+// a stale in-progress run during the window between stop signal and
+// server-side teardown.
+func (s Service) waitForSandboxCompletion(runID, scopedToken string) {
+	const (
+		timeout         = 30 * time.Second
+		defaultInterval = 500 * time.Millisecond
+	)
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		connInfo, err := s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
+		if err != nil {
+			// Error (404, 410, etc.) means the run is no longer active
+			return
+		}
+		if connInfo.Polling.Completed {
+			return
+		}
+
+		interval := defaultInterval
+		if connInfo.Polling.BackoffMs != nil && *connInfo.Polling.BackoffMs > 0 {
+			interval = time.Duration(*connInfo.Polling.BackoffMs) * time.Millisecond
+		}
+		time.Sleep(interval)
+	}
+
+	fmt.Fprintf(s.Stderr, "Warning: timed out waiting for sandbox %s to fully stop\n", runID)
 }
 
 func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, error) {
@@ -1092,6 +1129,13 @@ func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, erro
 					fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", session.RunID, cancelErr)
 				}
 				cancelMethod = "api"
+			}
+
+			// Wait for the server to confirm the old run has completed before
+			// starting a new sandbox, avoiding a window where the old run is
+			// still in-progress and could conflict with the new one.
+			if cancelMethod != "" {
+				s.waitForSandboxCompletion(session.RunID, session.ScopedToken)
 			}
 
 			// Remove old session
