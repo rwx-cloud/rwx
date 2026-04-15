@@ -2382,6 +2382,10 @@ func TestService_StopSandbox(t *testing.T) {
 		require.True(t, cancelCalled, "CancelRun should have been called")
 		require.Len(t, result.Stopped, 1)
 		require.True(t, result.Stopped[0].WasRunning)
+
+		stopEvent := findEvent(setup.drainEvents(), "sandbox.stop")
+		require.NotNil(t, stopEvent)
+		require.Equal(t, "api", stopEvent.Props["cancel_method"])
 	})
 
 	t.Run("logs warning when CancelRun fails but still succeeds", func(t *testing.T) {
@@ -2442,6 +2446,44 @@ func TestService_StopSandbox(t *testing.T) {
 		require.True(t, result.Stopped[0].WasRunning)
 	})
 
+	t.Run("calls CancelRun when SSH connection fails for sandboxable run", func(t *testing.T) {
+		setup := setupTest(t)
+		seedSandboxStorage(t, setup.tmp, "run-ssh-fail", "token-ssh")
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			return errors.New("connection timed out")
+		}
+		cancelCalled := false
+		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+			require.Equal(t, "run-ssh-fail", runID)
+			require.Equal(t, "token-ssh", scopedToken)
+			cancelCalled = true
+			return nil
+		}
+
+		result, err := setup.service.StopSandbox(cli.StopSandboxConfig{
+			RunID: "run-ssh-fail",
+			Json:  true,
+		})
+
+		require.NoError(t, err)
+		require.True(t, cancelCalled, "CancelRun should have been called when SSH fails")
+		require.Len(t, result.Stopped, 1)
+		require.True(t, result.Stopped[0].WasRunning)
+
+		stopEvent := findEvent(setup.drainEvents(), "sandbox.stop")
+		require.NotNil(t, stopEvent)
+		require.Equal(t, "api", stopEvent.Props["cancel_method"])
+	})
+
 	t.Run("does not call CancelRun for completed run", func(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorage(t, setup.tmp, "run-completed", "token-done")
@@ -2465,6 +2507,171 @@ func TestService_StopSandbox(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, result.Stopped, 1)
 		require.False(t, result.Stopped[0].WasRunning)
+	})
+}
+
+func TestService_ResetSandbox(t *testing.T) {
+	// setupResetMocks configures the mocks needed for StartSandbox to succeed after the old sandbox is stopped.
+	setupResetMocks := func(setup *testSetup) {
+		configPath := filepath.Join(setup.tmp, ".rwx", "sandbox.yml")
+		_ = os.WriteFile(configPath, []byte("tasks:\n  - key: test\n"), 0o644)
+
+		setup.mockGit.MockGetBranch = "main"
+		setup.mockGit.MockGetCommit = "abc123"
+		setup.mockGit.MockGetOriginUrl = "https://github.com/test/repo"
+		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+
+		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			return &api.InitiateRunResult{
+				RunID:  "run-new",
+				RunURL: "https://cloud.rwx.com/runs/run-new",
+			}, nil
+		}
+		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
+			return &api.CreateSandboxTokenResult{Token: "token"}, nil
+		}
+		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
+			return api.DefaultBaseResult{}, nil
+		}
+		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{}, nil
+		}
+	}
+
+	// seedResetStorage initializes a git repo on "main" and writes a sandbox session
+	// keyed by branch+configFile so ResetSandbox can find it via GetCurrentGitBranch.
+	seedResetStorage := func(t *testing.T, setup *testSetup, runID, scopedToken string) {
+		t.Helper()
+
+		// GetCurrentGitBranch uses a real git client, so the temp dir must be a repo.
+		cmd := exec.Command("git", "init", "-b", "main")
+		cmd.Dir = setup.tmp
+		require.NoError(t, cmd.Run())
+		cmd = exec.Command("git", "commit", "--allow-empty", "-m", "init")
+		cmd.Dir = setup.tmp
+		require.NoError(t, cmd.Run())
+
+		storageDir := filepath.Join(setup.tmp, ".rwx", "sandboxes")
+		require.NoError(t, os.MkdirAll(storageDir, 0o755))
+
+		configFile := filepath.Join(setup.tmp, ".rwx", "sandbox.yml")
+		key := cli.SessionKey("main", configFile)
+		storage := cli.SandboxStorage{
+			Version: 1,
+			Sandboxes: map[string]cli.SandboxSession{
+				key: {
+					RunID:       runID,
+					ConfigFile:  configFile,
+					ScopedToken: scopedToken,
+				},
+			},
+		}
+		data, err := json.Marshal(storage)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(storageDir, "sandboxes.json"), data, 0o644))
+	}
+
+	t.Run("calls CancelRun for active but not yet sandboxable run", func(t *testing.T) {
+		setup := setupTest(t)
+		setupResetMocks(setup)
+		seedResetStorage(t, setup, "run-initializing", "scoped-token-123")
+
+		cancelCalled := false
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable: false,
+				Polling:     api.PollingResult{Completed: false},
+			}, nil
+		}
+		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+			require.Equal(t, "run-initializing", runID)
+			require.Equal(t, "scoped-token-123", scopedToken)
+			cancelCalled = true
+			return nil
+		}
+
+		result, err := setup.service.ResetSandbox(cli.ResetSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.True(t, cancelCalled, "CancelRun should have been called")
+		require.Equal(t, "run-initializing", result.OldRunID)
+		require.Equal(t, "run-new", result.NewRunID)
+
+		resetEvent := findEvent(setup.drainEvents(), "sandbox.reset")
+		require.NotNil(t, resetEvent)
+		require.Equal(t, "api", resetEvent.Props["cancel_method"])
+	})
+
+	t.Run("calls CancelRun when SSH connection fails for sandboxable run", func(t *testing.T) {
+		setup := setupTest(t)
+		setupResetMocks(setup)
+		seedResetStorage(t, setup, "run-ssh-fail", "token-ssh")
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			return errors.New("connection timed out")
+		}
+		cancelCalled := false
+		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+			require.Equal(t, "run-ssh-fail", runID)
+			require.Equal(t, "token-ssh", scopedToken)
+			cancelCalled = true
+			return nil
+		}
+
+		result, err := setup.service.ResetSandbox(cli.ResetSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.True(t, cancelCalled, "CancelRun should have been called when SSH fails")
+		require.Equal(t, "run-ssh-fail", result.OldRunID)
+		require.Equal(t, "run-new", result.NewRunID)
+
+		resetEvent := findEvent(setup.drainEvents(), "sandbox.reset")
+		require.NotNil(t, resetEvent)
+		require.Equal(t, "api", resetEvent.Props["cancel_method"])
+	})
+
+	t.Run("does not call CancelRun for completed run", func(t *testing.T) {
+		setup := setupTest(t)
+		setupResetMocks(setup)
+		seedResetStorage(t, setup, "run-completed", "token-done")
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable: false,
+				Polling:     api.PollingResult{Completed: true},
+			}, nil
+		}
+		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+			t.Fatal("CancelRun should not be called for completed runs")
+			return nil
+		}
+
+		result, err := setup.service.ResetSandbox(cli.ResetSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-completed", result.OldRunID)
+		require.Equal(t, "run-new", result.NewRunID)
+
+		resetEvent := findEvent(setup.drainEvents(), "sandbox.reset")
+		require.NotNil(t, resetEvent)
+		require.Equal(t, "", resetEvent.Props["cancel_method"])
 	})
 }
 
