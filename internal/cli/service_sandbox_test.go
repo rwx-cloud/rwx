@@ -2382,6 +2382,10 @@ func TestService_StopSandbox(t *testing.T) {
 		require.True(t, cancelCalled, "CancelRun should have been called")
 		require.Len(t, result.Stopped, 1)
 		require.True(t, result.Stopped[0].WasRunning)
+
+		stopEvent := findEvent(setup.drainEvents(), "sandbox.stop")
+		require.NotNil(t, stopEvent)
+		require.Equal(t, "api", stopEvent.Props["cancel_method"])
 	})
 
 	t.Run("logs warning when CancelRun fails but still succeeds", func(t *testing.T) {
@@ -2474,6 +2478,10 @@ func TestService_StopSandbox(t *testing.T) {
 		require.True(t, cancelCalled, "CancelRun should have been called when SSH fails")
 		require.Len(t, result.Stopped, 1)
 		require.True(t, result.Stopped[0].WasRunning)
+
+		stopEvent := findEvent(setup.drainEvents(), "sandbox.stop")
+		require.NotNil(t, stopEvent)
+		require.Equal(t, "api", stopEvent.Props["cancel_method"])
 	})
 
 	t.Run("does not call CancelRun for completed run", func(t *testing.T) {
@@ -2591,6 +2599,10 @@ func TestService_ResetSandbox(t *testing.T) {
 		require.True(t, cancelCalled, "CancelRun should have been called")
 		require.Equal(t, "run-initializing", result.OldRunID)
 		require.Equal(t, "run-new", result.NewRunID)
+
+		resetEvent := findEvent(setup.drainEvents(), "sandbox.reset")
+		require.NotNil(t, resetEvent)
+		require.Equal(t, "api", resetEvent.Props["cancel_method"])
 	})
 
 	t.Run("calls CancelRun when SSH connection fails for sandboxable run", func(t *testing.T) {
@@ -2626,6 +2638,10 @@ func TestService_ResetSandbox(t *testing.T) {
 		require.True(t, cancelCalled, "CancelRun should have been called when SSH fails")
 		require.Equal(t, "run-ssh-fail", result.OldRunID)
 		require.Equal(t, "run-new", result.NewRunID)
+
+		resetEvent := findEvent(setup.drainEvents(), "sandbox.reset")
+		require.NotNil(t, resetEvent)
+		require.Equal(t, "api", resetEvent.Props["cancel_method"])
 	})
 
 	t.Run("does not call CancelRun for completed run", func(t *testing.T) {
@@ -2652,6 +2668,10 @@ func TestService_ResetSandbox(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "run-completed", result.OldRunID)
 		require.Equal(t, "run-new", result.NewRunID)
+
+		resetEvent := findEvent(setup.drainEvents(), "sandbox.reset")
+		require.NotNil(t, resetEvent)
+		require.Equal(t, "", resetEvent.Props["cancel_method"])
 	})
 }
 

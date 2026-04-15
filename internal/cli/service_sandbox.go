@@ -982,6 +982,7 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 	now := time.Now().UTC()
 	for i, session := range toStop {
 		wasRunning := false
+		cancelMethod := ""
 
 		// Check if sandbox is still active and send stop command (use scoped token if available)
 		connInfo, err := s.APIClient.GetSandboxConnectionInfo(session.RunID, session.ScopedToken)
@@ -990,12 +991,14 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 				_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_end__")
 				s.SSHClient.Close()
 				wasRunning = true
+				cancelMethod = "ssh"
 			} else {
 				// SSH connection failed — cancel via API to avoid orphaned runs
 				if cancelErr := s.APIClient.CancelRun(session.RunID, session.ScopedToken); cancelErr != nil {
 					fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", session.RunID, cancelErr)
 				}
 				wasRunning = true
+				cancelMethod = "api"
 			}
 		} else if err == nil && !connInfo.Polling.Completed {
 			// Run is still active but not yet sandboxable — cancel it server-side
@@ -1003,6 +1006,7 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 				fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", session.RunID, cancelErr)
 			}
 			wasRunning = true
+			cancelMethod = "api"
 		}
 
 		// Remove from storage
@@ -1021,8 +1025,9 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 			lifetimeS = int64(now.Sub(*session.CreatedAt).Seconds())
 		}
 		s.recordTelemetry("sandbox.stop", map[string]any{
-			"lifetime_s": lifetimeS,
-			"exec_count": session.ExecCount,
+			"lifetime_s":    lifetimeS,
+			"exec_count":    session.ExecCount,
+			"cancel_method": cancelMethod,
 		})
 
 		stopped = append(stopped, StoppedSandbox{
@@ -1046,6 +1051,7 @@ func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, erro
 	branch := GetCurrentGitBranch(cwd)
 
 	var oldRunID string
+	cancelMethod := ""
 
 	// Check for existing sandbox with same config file.
 	// Lock around the load+delete+save to cooperate with concurrent writers.
@@ -1072,17 +1078,20 @@ func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, erro
 				if err := s.connectSSH(&connInfo); err == nil {
 					_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_end__")
 					s.SSHClient.Close()
+					cancelMethod = "ssh"
 				} else {
 					// SSH connection failed — cancel via API to avoid orphaned runs
 					if cancelErr := s.APIClient.CancelRun(session.RunID, session.ScopedToken); cancelErr != nil {
 						fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", session.RunID, cancelErr)
 					}
+					cancelMethod = "api"
 				}
 			} else if err == nil && !connInfo.Polling.Completed {
 				// Run is still active but not yet sandboxable — cancel it server-side
 				if cancelErr := s.APIClient.CancelRun(session.RunID, session.ScopedToken); cancelErr != nil {
 					fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", session.RunID, cancelErr)
 				}
+				cancelMethod = "api"
 			}
 
 			// Remove old session
@@ -1111,7 +1120,9 @@ func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, erro
 		return nil, err
 	}
 
-	s.recordTelemetry("sandbox.reset", map[string]any{})
+	s.recordTelemetry("sandbox.reset", map[string]any{
+		"cancel_method": cancelMethod,
+	})
 
 	return &ResetSandboxResult{
 		OldRunID: oldRunID,
