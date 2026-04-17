@@ -207,6 +207,7 @@ CONFIG FILE
 			Json:           useJson,
 			Sync:           !sandboxNoSync,
 			InitParameters: initParams,
+			Reset:          sandboxReset,
 		})
 		if err != nil {
 			return err
@@ -388,6 +389,7 @@ var (
 	sandboxOpen       bool
 	sandboxWait       bool
 	sandboxNoSync     bool
+	sandboxReset      bool
 	sandboxInitParams []string
 )
 
@@ -411,6 +413,7 @@ func init() {
 	sandboxExecCmd.Flags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")
 	sandboxExecCmd.Flags().BoolVar(&sandboxOpen, "open", false, "Open the run in a browser")
 	sandboxExecCmd.Flags().BoolVar(&sandboxNoSync, "no-sync", false, "Skip syncing local changes before execution")
+	sandboxExecCmd.Flags().BoolVar(&sandboxReset, "reset", false, "Reset the sandbox before executing")
 	sandboxExecCmd.Flags().StringArrayVar(&sandboxInitParams, "init", []string{}, "initialization parameters for the sandbox run, available in the `init` context. Can be specified multiple times")
 
 	// stop flags
