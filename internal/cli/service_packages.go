@@ -194,6 +194,56 @@ func (s Service) parsePackageVersion(str string) PackageVersion {
 	}
 }
 
+func (s Service) updatePackageReferenceAtPath(
+	doc *YAMLDoc,
+	yamlPath string,
+	original string,
+	update bool,
+	packageVersions *api.PackageVersionsResult,
+	versionPicker func(versions api.PackageVersionsResult, rwxPackage string, major string) (string, error),
+	replacements map[string]string,
+) (bool, error) {
+	// Expressions can't be statically resolved, so skip them
+	if strings.Contains(original, "${{") {
+		return false, nil
+	}
+
+	packageVersion := s.parsePackageVersion(original)
+	if packageVersion.Name == "" {
+		return false, nil
+	} else if !update && packageVersion.MajorVersion != "" {
+		return false, nil
+	}
+
+	newName := packageVersions.Renames[packageVersion.Name]
+	if newName == "" {
+		newName = packageVersion.Name
+	}
+
+	targetPackageVersion, err := versionPicker(*packageVersions, newName, packageVersion.MajorVersion)
+	if err != nil {
+		fmt.Fprintln(s.Stderr, err.Error())
+		return false, nil
+	}
+
+	newPackage := fmt.Sprintf("%s %s", newName, targetPackageVersion)
+	if newPackage == original {
+		return false, nil
+	}
+
+	if err := doc.ReplaceAtPath(yamlPath, newPackage); err != nil {
+		return false, err
+	}
+
+	if newName != packageVersion.Name {
+		replacements[packageVersion.Original] = fmt.Sprintf("%s %s", newName, targetPackageVersion)
+	} else {
+		replacements[packageVersion.Original] = targetPackageVersion
+	}
+
+	return true, nil
+}
+
 func (s Service) resolveOrUpdatePackagesForFiles(mintFiles []*MintYAMLFile, update bool, versionPicker func(versions api.PackageVersionsResult, rwxPackage string, major string) (string, error)) (map[string]string, error) {
 	packageVersions, err := s.APIClient.GetPackageVersions()
 	if err != nil {
@@ -216,48 +266,30 @@ func (s Service) resolveOrUpdatePackagesForFiles(mintFiles []*MintYAMLFile, upda
 		}
 
 		err = file.Doc.ForEachNode(nodePath, func(node ast.Node) error {
-			// Expressions can't be statically resolved, so skip them
-			if strings.Contains(node.String(), "${{") {
-				return nil
-			}
-
-			packageVersion := s.parsePackageVersion(node.String())
-			if packageVersion.Name == "" {
-				return nil
-			} else if !update && packageVersion.MajorVersion != "" {
-				return nil
-			}
-
-			newName := packageVersions.Renames[packageVersion.Name]
-			if newName == "" {
-				newName = packageVersion.Name
-			}
-
-			targetPackageVersion, err := versionPicker(*packageVersions, newName, packageVersion.MajorVersion)
+			changed, err := s.updatePackageReferenceAtPath(file.Doc, node.GetPath(), node.String(), update, packageVersions, versionPicker, replacements)
 			if err != nil {
-				fmt.Fprintln(s.Stderr, err.Error())
-				return nil
-			}
-
-			newPackage := fmt.Sprintf("%s %s", newName, targetPackageVersion)
-			if newPackage == node.String() {
-				return nil
-			}
-
-			if err = file.Doc.ReplaceAtPath(node.GetPath(), newPackage); err != nil {
 				return err
 			}
-
-			if newName != packageVersion.Name {
-				replacements[packageVersion.Original] = fmt.Sprintf("%s %s", newName, targetPackageVersion)
-			} else {
-				replacements[packageVersion.Original] = targetPackageVersion
+			if changed {
+				hasChange = true
 			}
-			hasChange = true
 			return nil
 		})
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to replace package references")
+		}
+
+		if file.Doc.IsRunDefinition() {
+			baseConfig := file.Doc.TryReadStringAtPath("$.base.config")
+			if baseConfig != "" && baseConfig != "none" {
+				changed, err := s.updatePackageReferenceAtPath(file.Doc, "$.base.config", baseConfig, update, packageVersions, versionPicker, replacements)
+				if err != nil {
+					return nil, errors.Wrap(err, "unable to replace base.config package reference")
+				}
+				if changed {
+					hasChange = true
+				}
+			}
 		}
 
 		if hasChange {

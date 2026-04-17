@@ -290,4 +290,100 @@ tasks:
 			})
 		})
 	})
+
+	t.Run("resolves base.config package reference", func(t *testing.T) {
+		t.Run("pins a versionless base.config to the latest version", func(t *testing.T) {
+			s := setupTest(t)
+
+			s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+				return &api.PackageVersionsResult{
+					LatestMajor: map[string]string{"rwx/base": "1.2.3"},
+				}, nil
+			}
+
+			originalContents := `base:
+  image: ubuntu:24.04
+  config: rwx/base
+
+tasks:
+  - key: foo
+    run: echo hello
+`
+			err := os.WriteFile(filepath.Join(s.tmp, "foo.yaml"), []byte(originalContents), 0o644)
+			require.NoError(t, err)
+
+			_, err = s.service.ResolvePackages(cli.ResolvePackagesConfig{
+				Files:               []string{filepath.Join(s.tmp, "foo.yaml")},
+				LatestVersionPicker: cli.PickLatestMajorVersion,
+			})
+			require.NoError(t, err)
+
+			contents, err := os.ReadFile(filepath.Join(s.tmp, "foo.yaml"))
+			require.NoError(t, err)
+			require.Contains(t, string(contents), "config: rwx/base 1.2.3")
+		})
+
+		t.Run("leaves an already-pinned base.config untouched", func(t *testing.T) {
+			s := setupTest(t)
+
+			s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+				return &api.PackageVersionsResult{
+					LatestMajor: map[string]string{"rwx/base": "1.2.3"},
+				}, nil
+			}
+
+			originalContents := `base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: foo
+    run: echo hello
+`
+			err := os.WriteFile(filepath.Join(s.tmp, "foo.yaml"), []byte(originalContents), 0o644)
+			require.NoError(t, err)
+
+			_, err = s.service.ResolvePackages(cli.ResolvePackagesConfig{
+				Files:               []string{filepath.Join(s.tmp, "foo.yaml")},
+				LatestVersionPicker: cli.PickLatestMajorVersion,
+			})
+			require.NoError(t, err)
+
+			contents, err := os.ReadFile(filepath.Join(s.tmp, "foo.yaml"))
+			require.NoError(t, err)
+			require.Equal(t, originalContents, string(contents))
+		})
+
+		t.Run("leaves config: none untouched", func(t *testing.T) {
+			s := setupTest(t)
+
+			s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+				return &api.PackageVersionsResult{
+					LatestMajor: map[string]string{"nodejs/install": "1.2.3"},
+				}, nil
+			}
+
+			originalContents := `base:
+  image: ubuntu:24.04
+  config: none
+
+tasks:
+  - key: foo
+    call: nodejs/install
+`
+			err := os.WriteFile(filepath.Join(s.tmp, "foo.yaml"), []byte(originalContents), 0o644)
+			require.NoError(t, err)
+
+			_, err = s.service.ResolvePackages(cli.ResolvePackagesConfig{
+				Files:               []string{filepath.Join(s.tmp, "foo.yaml")},
+				LatestVersionPicker: cli.PickLatestMajorVersion,
+			})
+			require.NoError(t, err)
+
+			contents, err := os.ReadFile(filepath.Join(s.tmp, "foo.yaml"))
+			require.NoError(t, err)
+			require.Contains(t, string(contents), "config: none")
+			require.Contains(t, string(contents), "call: nodejs/install 1.2.3")
+		})
+	})
 }
