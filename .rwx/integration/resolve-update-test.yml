@@ -103,6 +103,39 @@ tasks:
     env:
       RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
 
+  - key: test-update-packages-bumps-base-config
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+      cat > "$tmpdir/.rwx/ci.yml" << 'EOF'
+      base:
+        image: ubuntu:24.04
+        config: rwx/base 1.0.0
+      tasks:
+        - key: noop
+          run: echo hello
+      EOF
+
+      rwx update packages -d "$tmpdir"
+      if grep -q "config: rwx/base 1.0.0" "$tmpdir/.rwx/ci.yml"; then
+        echo "update packages did not bump base.config from 1.0.0"
+        cat "$tmpdir/.rwx/ci.yml"
+        rm -rf "$tmpdir"
+        exit 1
+      fi
+      if ! grep -qE "config: rwx/base [0-9]+\.[0-9]+\.[0-9]+" "$tmpdir/.rwx/ci.yml"; then
+        echo "update packages did not leave base.config with a pinned version"
+        cat "$tmpdir/.rwx/ci.yml"
+        rm -rf "$tmpdir"
+        exit 1
+      fi
+      rm -rf "$tmpdir"
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
   - key: test-update-base-updates-base-image
     use: rwx-cli
     run: |

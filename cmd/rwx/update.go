@@ -38,7 +38,8 @@ var (
 		Long: "Update base images in RWX run configurations.\n" +
 			"Adds a base image to run configurations that don't have one, and migrates\n" +
 			"deprecated 'os' and 'tag' fields to the new 'image' and 'config' format.",
-		Use: "base [flags] [files...]",
+		Use:    "base [flags] [files...]",
+		Hidden: true,
 	}
 
 	updatePackagesCmd = &cobra.Command{
