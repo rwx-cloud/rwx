@@ -52,6 +52,7 @@ type ExecSandboxConfig struct {
 	Json           bool
 	Sync           bool
 	InitParameters map[string]string
+	Reset          bool
 }
 
 type ListSandboxesConfig struct {
@@ -434,6 +435,9 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	var scopedToken string
 	var sessionRunURL string
 	var storedConfigHash string
+	var execCount int
+	var resetNagShown bool
+	isNewSandbox := false
 
 	// Sandbox selection priority:
 	// 1. --id flag
@@ -501,6 +505,8 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 					scopedToken = session.ScopedToken
 					sessionRunURL = session.RunURL
 					storedConfigHash = session.ConfigHash
+					execCount = session.ExecCount
+					resetNagShown = session.ResetNagShown
 				}
 			}
 		} else {
@@ -533,6 +539,8 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 				scopedToken = activeSessions[0].ScopedToken
 				sessionRunURL = activeSessions[0].RunURL
 				storedConfigHash = activeSessions[0].ConfigHash
+				execCount = activeSessions[0].ExecCount
+				resetNagShown = activeSessions[0].ResetNagShown
 				found = true
 			} else if len(activeSessions) > 1 {
 				UnlockSandboxStorage(lockFile)
@@ -606,10 +614,40 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 			}
 		}
 
+		if found && cfg.Reset {
+			connInfo, connErr := s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
+			if connErr == nil && connInfo.Sandboxable {
+				if sshErr := s.connectSSH(&connInfo); sshErr == nil {
+					_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_end__")
+					s.SSHClient.Close()
+				} else {
+					if cancelErr := s.APIClient.CancelRun(runID, scopedToken); cancelErr != nil {
+						fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", runID, cancelErr)
+					}
+				}
+			} else if connErr == nil && !connInfo.Polling.Completed {
+				if cancelErr := s.APIClient.CancelRun(runID, scopedToken); cancelErr != nil {
+					fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", runID, cancelErr)
+				}
+			}
+			s.waitForSandboxCompletion(runID, scopedToken)
+			storage.DeleteSession(branch, configFile)
+			if saveErr := storage.Save(); saveErr != nil {
+				fmt.Fprintf(s.Stderr, "Warning: unable to save sandbox sessions: %v\n", saveErr)
+			}
+			found = false
+			runID = ""
+			configFile = ""
+			scopedToken = ""
+			sessionRunURL = ""
+			storedConfigHash = ""
+		}
+
 		if !found {
 			// Pass the lock to StartSandbox so the "no session found → create
 			// new sandbox → persist session" sequence is atomic. StartSandbox
 			// will release it after the initial session is saved.
+			isNewSandbox = true
 			startResult, err := s.StartSandbox(StartSandboxConfig{
 				ConfigFile:     cfgFile,
 				RwxDirectory:   cfg.RwxDirectory,
@@ -634,6 +672,20 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 			// Resolution complete — release the file lock so concurrent execs
 			// can proceed. The agent-side lock serializes from here.
 			UnlockSandboxStorage(lockFile)
+		}
+	}
+
+	if !isNewSandbox && execCount >= 1 && !resetNagShown {
+		fmt.Fprintf(s.Stderr, "Reconnecting to existing sandbox. To re-run setup tasks, use: rwx sandbox exec --reset -- <command>\n")
+		if nagLock, nagLockErr := s.lockSandboxStorageWithInfo(cfg.Json); nagLockErr == nil {
+			if nagStorage, nagLoadErr := LoadSandboxStorage(); nagLoadErr == nil {
+				if nagSession, ok := nagStorage.GetSession(branch, configFile); ok {
+					nagSession.ResetNagShown = true
+					nagStorage.SetSession(branch, configFile, *nagSession)
+					_ = nagStorage.Save()
+				}
+			}
+			UnlockSandboxStorage(nagLock)
 		}
 	}
 
