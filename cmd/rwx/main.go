@@ -104,6 +104,8 @@ func classifyError(err error) string {
 		return "ambiguous_task_key"
 	case errors.Is(err, internalerrors.ErrNetworkTransient):
 		return "network_transient_error"
+	case errors.Is(err, internalerrors.ErrSandboxSetupFailure):
+		return "sandbox_setup_failure"
 	default:
 		return "unknown"
 	}
