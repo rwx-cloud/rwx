@@ -6,6 +6,7 @@ type SandboxConnectionInfo struct {
 	PublicHostKey  string        `json:"public_host_key"`
 	PrivateUserKey string        `json:"private_user_key"`
 	Polling        PollingResult `json:"polling"`
+	FailureReason  string        `json:"failure_reason,omitempty"`
 }
 
 type SandboxConnectionInfoError struct {

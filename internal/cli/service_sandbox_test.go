@@ -644,6 +644,202 @@ func TestService_ExecSandbox(t *testing.T) {
 		require.Contains(t, err.Error(), "completed before becoming ready")
 	})
 
+	t.Run("prints run failure output to stderr on polling completion", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-setup-failed"
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable: false,
+				Polling:     api.PollingResult{Completed: true},
+			}, nil
+		}
+
+		setup.mockAPI.MockGetRunPrompt = func(id string) (string, error) {
+			require.Equal(t, runID, id)
+			return "# Failed task:\n\n- setup\n", nil
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "completed before becoming ready")
+		require.Contains(t, setup.mockStderr.String(), "Failed task")
+	})
+
+	t.Run("prints run failure output to stderr when polling loop completes", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-polling-failed"
+		calls := atomic.Int32{}
+		backoff := 0
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			if calls.Add(1) == 1 {
+				return api.SandboxConnectionInfo{
+					Sandboxable: false,
+					Polling:     api.PollingResult{Completed: false, BackoffMs: &backoff},
+				}, nil
+			}
+			return api.SandboxConnectionInfo{
+				Sandboxable: false,
+				Polling:     api.PollingResult{Completed: true},
+			}, nil
+		}
+
+		setup.mockAPI.MockGetRunPrompt = func(id string) (string, error) {
+			require.Equal(t, runID, id)
+			return "# Failed task:\n\n- setup\n", nil
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "completed before becoming ready")
+		require.Contains(t, setup.mockStderr.String(), "Failed task")
+	})
+
+	t.Run("gracefully degrades when GetRunPrompt fails on polling completion", func(t *testing.T) {
+		setup := setupTest(t)
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable: false,
+				Polling:     api.PollingResult{Completed: true},
+			}, nil
+		}
+
+		setup.mockAPI.MockGetRunPrompt = func(id string) (string, error) {
+			return "", errors.New("server unavailable")
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      "run-no-prompt",
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "completed before becoming ready")
+		require.Empty(t, setup.mockStderr.String())
+	})
+
+	t.Run("prints run failure output to stderr when GetSandboxConnectionInfo returns an error", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-conn-error"
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{}, errors.New("This run or task is no longer available for sandbox")
+		}
+
+		setup.mockAPI.MockGetRunPrompt = func(id string) (string, error) {
+			require.Equal(t, runID, id)
+			return "# Failed task:\n\n- preflight\n", nil
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unable to get sandbox connection info")
+		require.Contains(t, setup.mockStderr.String(), "Failed task")
+	})
+
+	t.Run("uses timed_out FailureReason for natural error message", func(t *testing.T) {
+		setup := setupTest(t)
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:   false,
+				Polling:       api.PollingResult{Completed: true},
+				FailureReason: "timed_out",
+			}, nil
+		}
+
+		setup.mockAPI.MockGetRunPrompt = func(id string) (string, error) {
+			return "", nil
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      "run-timed-out",
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "timed out before becoming ready")
+	})
+
+	t.Run("uses cancelled FailureReason for natural error message", func(t *testing.T) {
+		setup := setupTest(t)
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:   false,
+				Polling:       api.PollingResult{Completed: true},
+				FailureReason: "cancelled",
+			}, nil
+		}
+
+		setup.mockAPI.MockGetRunPrompt = func(id string) (string, error) {
+			return "", nil
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      "run-cancelled",
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "was cancelled before becoming ready")
+	})
+
+	t.Run("uses failed FailureReason for natural error message", func(t *testing.T) {
+		setup := setupTest(t)
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:   false,
+				Polling:       api.PollingResult{Completed: true},
+				FailureReason: "failed",
+			}, nil
+		}
+
+		setup.mockAPI.MockGetRunPrompt = func(id string) (string, error) {
+			return "", nil
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      "run-failed",
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed before becoming ready")
+	})
+
 	t.Run("shows firewall hint when SSH connection times out", func(t *testing.T) {
 		setup := setupTest(t)
 

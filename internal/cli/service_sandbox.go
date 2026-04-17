@@ -1510,6 +1510,7 @@ func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMod
 	// Check once before showing spinner - sandbox may already be ready
 	connInfo, err := s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
 	if err != nil {
+		s.printSandboxRunPrompt(runID)
 		return nil, errors.Wrap(err, "unable to get sandbox connection info")
 	}
 
@@ -1518,7 +1519,7 @@ func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMod
 	}
 
 	if connInfo.Polling.Completed {
-		return nil, fmt.Errorf("Sandbox run '%s' completed before becoming ready", runID)
+		return nil, s.sandboxCompletedError(runID, connInfo)
 	}
 
 	// Sandbox not ready yet - start spinner and poll
@@ -1538,6 +1539,7 @@ func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMod
 
 		connInfo, err = s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
 		if err != nil {
+			s.printSandboxRunPrompt(runID)
 			return nil, errors.Wrap(err, "unable to get sandbox connection info")
 		}
 
@@ -1546,8 +1548,33 @@ func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMod
 		}
 
 		if connInfo.Polling.Completed {
-			return nil, fmt.Errorf("Sandbox run '%s' completed before becoming ready", runID)
+			return nil, s.sandboxCompletedError(runID, connInfo)
 		}
+	}
+}
+
+// sandboxCompletedError prints run failure output to stderr and returns an appropriate error.
+// The prompt fetch is best-effort and silently skipped if unavailable.
+func (s Service) sandboxCompletedError(runID string, connInfo api.SandboxConnectionInfo) error {
+	s.printSandboxRunPrompt(runID)
+
+	switch connInfo.FailureReason {
+	case "timed_out":
+		return errors.WrapSentinel(fmt.Errorf("Sandbox run '%s' timed out before becoming ready", runID), errors.ErrSandboxSetupFailure)
+	case "cancelled":
+		return errors.WrapSentinel(fmt.Errorf("Sandbox run '%s' was cancelled before becoming ready", runID), errors.ErrSandboxSetupFailure)
+	case "failed":
+		return errors.WrapSentinel(fmt.Errorf("Sandbox run '%s' failed before becoming ready", runID), errors.ErrSandboxSetupFailure)
+	default:
+		return errors.WrapSentinel(fmt.Errorf("Sandbox run '%s' completed before becoming ready", runID), errors.ErrSandboxSetupFailure)
+	}
+}
+
+// printSandboxRunPrompt fetches and prints the run prompt to stderr.
+// Best-effort: silently skipped if the prompt is unavailable or the run is still in progress.
+func (s Service) printSandboxRunPrompt(runID string) {
+	if prompt, err := s.APIClient.GetRunPrompt(runID); err == nil && prompt != "" {
+		fmt.Fprintf(s.Stderr, "\n%s", prompt)
 	}
 }
 

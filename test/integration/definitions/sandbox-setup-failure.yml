@@ -1,0 +1,9 @@
+tasks:
+  - key: preflight
+    run: |
+      echo "intentional-setup-failure"
+      exit 1
+
+  - key: sandbox
+    use: preflight
+    run: rwx-sandbox
