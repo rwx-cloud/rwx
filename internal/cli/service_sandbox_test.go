@@ -3476,3 +3476,401 @@ func TestService_ExecSandbox_DefinitionDrift(t *testing.T) {
 		require.NotContains(t, setup.mockStderr.String(), "has changed since this sandbox was started")
 	})
 }
+
+func TestService_ExecSandbox_Reset(t *testing.T) {
+	// seedExecResetStorage creates the config file and seeds a session under the
+	// "detached" branch key (what GetCurrentGitBranch returns in a non-git temp dir).
+	seedExecResetStorage := func(t *testing.T, setup *testSetup, runID, scopedToken string, execCount int) string {
+		t.Helper()
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		require.NoError(t, os.WriteFile(configFile, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+		key := cli.SessionKey("detached", configFile)
+		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+			key: {
+				RunID:       runID,
+				ConfigFile:  configFile,
+				ScopedToken: scopedToken,
+				ExecCount:   execCount,
+			},
+		})
+		return configFile
+	}
+
+	// setupNewSandboxMocks configures the mocks needed for StartSandbox to succeed
+	// and create "run-new".
+	setupNewSandboxMocks := func(setup *testSetup) {
+		setup.mockGit.MockGetBranch = "main"
+		setup.mockGit.MockGetCommit = "abc123"
+		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			return &api.InitiateRunResult{
+				RunID:  "run-new",
+				RunURL: "https://cloud.rwx.com/runs/run-new",
+			}, nil
+		}
+		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
+			return &api.CreateSandboxTokenResult{Token: "new-token"}, nil
+		}
+		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
+			return api.DefaultBaseResult{}, nil
+		}
+		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{}, nil
+		}
+	}
+
+	t.Run("stops existing sandbox via SSH and creates fresh sandbox", func(t *testing.T) {
+		setup := setupTest(t)
+		configFile := seedExecResetStorage(t, setup, "run-existing", "scoped-token", 2)
+		setupNewSandboxMocks(setup)
+
+		oldConnCalls := atomic.Int32{}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			if runID == "run-existing" {
+				n := oldConnCalls.Add(1)
+				if n >= 3 {
+					return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
+				}
+				return api.SandboxConnectionInfo{
+					Sandboxable:    true,
+					Address:        "192.168.1.1:22",
+					PrivateUserKey: sandboxPrivateTestKey,
+					PublicHostKey:  sandboxPublicTestKey,
+				}, nil
+			}
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		sshEndSent := false
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			if cmd == "__rwx_sandbox_end__" {
+				sshEndSent = true
+			}
+			return 0, nil
+		}
+		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+			Reset:      true,
+		})
+
+		require.NoError(t, err)
+		require.True(t, sshEndSent, "expected __rwx_sandbox_end__ to be sent to old sandbox")
+		require.Equal(t, "run-new", result.RunID)
+
+		storage, loadErr := cli.LoadSandboxStorage()
+		require.NoError(t, loadErr)
+		_, _, foundOld := storage.FindByRunID("run-existing")
+		require.False(t, foundOld, "old session should have been removed from storage")
+	})
+
+	t.Run("cancels via API when existing sandbox is not yet sandboxable", func(t *testing.T) {
+		setup := setupTest(t)
+		configFile := seedExecResetStorage(t, setup, "run-initializing", "scoped-token", 0)
+		setupNewSandboxMocks(setup)
+
+		oldConnCalls := atomic.Int32{}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			if runID == "run-initializing" {
+				n := oldConnCalls.Add(1)
+				if n >= 3 {
+					return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
+				}
+				return api.SandboxConnectionInfo{
+					Sandboxable: false,
+					Polling:     api.PollingResult{Completed: false},
+				}, nil
+			}
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		cancelCalled := false
+		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+			require.Equal(t, "run-initializing", runID)
+			require.Equal(t, "scoped-token", scopedToken)
+			cancelCalled = true
+			return nil
+		}
+
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
+		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+			Reset:      true,
+		})
+
+		require.NoError(t, err)
+		require.True(t, cancelCalled, "CancelRun should have been called for pre-sandboxable run")
+		require.Equal(t, "run-new", result.RunID)
+	})
+
+	t.Run("cancels via API when SSH fails for sandboxable existing sandbox", func(t *testing.T) {
+		setup := setupTest(t)
+		configFile := seedExecResetStorage(t, setup, "run-ssh-fail", "token-ssh", 0)
+		setupNewSandboxMocks(setup)
+
+		oldConnCalls := atomic.Int32{}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			if runID == "run-ssh-fail" {
+				n := oldConnCalls.Add(1)
+				if n >= 3 {
+					return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
+				}
+				return api.SandboxConnectionInfo{
+					Sandboxable:    true,
+					Address:        "192.168.1.1:22",
+					PrivateUserKey: sandboxPrivateTestKey,
+					PublicHostKey:  sandboxPublicTestKey,
+				}, nil
+			}
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		cancelCalled := false
+		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+			require.Equal(t, "run-ssh-fail", runID)
+			require.Equal(t, "token-ssh", scopedToken)
+			cancelCalled = true
+			return nil
+		}
+
+		connectCalls := atomic.Int32{}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			if connectCalls.Add(1) == 1 {
+				return errors.New("connection refused")
+			}
+			return nil
+		}
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
+		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+			Reset:      true,
+		})
+
+		require.NoError(t, err)
+		require.True(t, cancelCalled, "CancelRun should have been called when SSH fails")
+		require.Equal(t, "run-new", result.RunID)
+	})
+
+	t.Run("creates new sandbox when no existing session", func(t *testing.T) {
+		setup := setupTest(t)
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		require.NoError(t, os.WriteFile(configFile, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+		setupNewSandboxMocks(setup)
+
+		// No session in storage — ListSandboxRuns is called during remote recovery
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+		}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
+		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+			Reset:      true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-new", result.RunID)
+	})
+}
+
+func TestService_ExecSandbox_ReconnectionHint(t *testing.T) {
+	// seedHintStorage creates the config file and seeds a session with the given
+	// ExecCount and ResetNagShown under the "detached" branch key.
+	seedHintStorage := func(t *testing.T, setup *testSetup, runID string, execCount int, resetNagShown bool) string {
+		t.Helper()
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		require.NoError(t, os.WriteFile(configFile, []byte("tasks:\n  - key: sandbox\n"), 0o644))
+		key := cli.SessionKey("detached", configFile)
+		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+			key: {
+				RunID:         runID,
+				ConfigFile:    configFile,
+				ScopedToken:   "scoped-token",
+				ExecCount:     execCount,
+				ResetNagShown: resetNagShown,
+			},
+		})
+		return configFile
+	}
+
+	// setupExecMocks configures standard SSH and connection info mocks for a
+	// successful exec against an existing sandbox.
+	setupExecMocks := func(setup *testSetup) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
+		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+	}
+
+	t.Run("shows reconnection hint on second exec", func(t *testing.T) {
+		setup := setupTest(t)
+		configFile := seedHintStorage(t, setup, "run-hint", 1, false)
+		setupExecMocks(setup)
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Contains(t, setup.mockStderr.String(), "Reconnecting to existing sandbox")
+		require.Contains(t, setup.mockStderr.String(), "--reset")
+	})
+
+	t.Run("persists ResetNagShown to storage after showing hint", func(t *testing.T) {
+		setup := setupTest(t)
+		configFile := seedHintStorage(t, setup, "run-nag-persist", 1, false)
+		setupExecMocks(setup)
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+
+		storage, loadErr := cli.LoadSandboxStorage()
+		require.NoError(t, loadErr)
+		session, found := storage.GetSession("detached", configFile)
+		require.True(t, found)
+		require.True(t, session.ResetNagShown, "ResetNagShown should be persisted as true after hint is shown")
+	})
+
+	t.Run("does not show reconnection hint on first exec", func(t *testing.T) {
+		setup := setupTest(t)
+		configFile := seedHintStorage(t, setup, "run-first-exec", 0, false)
+		setupExecMocks(setup)
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.NotContains(t, setup.mockStderr.String(), "Reconnecting to existing sandbox")
+	})
+
+	t.Run("does not show reconnection hint after it has been shown before", func(t *testing.T) {
+		setup := setupTest(t)
+		configFile := seedHintStorage(t, setup, "run-nag-done", 5, true)
+		setupExecMocks(setup)
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.NotContains(t, setup.mockStderr.String(), "Reconnecting to existing sandbox")
+	})
+
+	t.Run("does not show reconnection hint for new sandboxes", func(t *testing.T) {
+		setup := setupTest(t)
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		require.NoError(t, os.WriteFile(configFile, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+
+		setup.mockGit.MockGetBranch = "main"
+		setup.mockGit.MockGetCommit = "abc123"
+		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+		}
+		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			return &api.InitiateRunResult{RunID: "run-brand-new", RunURL: "https://cloud.rwx.com/runs/run-brand-new"}, nil
+		}
+		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
+			return &api.CreateSandboxTokenResult{Token: "token"}, nil
+		}
+		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
+			return api.DefaultBaseResult{}, nil
+		}
+		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{}, nil
+		}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
+		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.NotContains(t, setup.mockStderr.String(), "Reconnecting to existing sandbox")
+	})
+}
