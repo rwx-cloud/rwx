@@ -448,6 +448,41 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, storage.Sandboxes)
 	})
+
+	t.Run("keeps sandbox as active when fallback reports Sandboxable=true with Polling.Completed=true", func(t *testing.T) {
+		setup := setupTest(t)
+		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+			"main:" + setup.absConfig(".rwx/sandbox.yml"): {
+				RunID:       "run-ready",
+				ConfigFile:  setup.absConfig(".rwx/sandbox.yml"),
+				ScopedToken: "token-ready",
+			},
+		})
+
+		// Bulk API hasn't picked up the run yet, forcing the fallback path
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+		}
+
+		// Ready sandbox: Sandboxable=true, Polling.Completed=true
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, scopedToken string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable: true,
+				Polling:     api.PollingResult{Completed: true},
+			}, nil
+		}
+
+		result, err := setup.service.ListSandboxes(cli.ListSandboxesConfig{Json: true})
+
+		require.NoError(t, err)
+		require.Len(t, result.Sandboxes, 1)
+		require.Equal(t, "run-ready", result.Sandboxes[0].RunID)
+		require.Equal(t, "active", result.Sandboxes[0].Status)
+
+		storage, err := cli.LoadSandboxStorage()
+		require.NoError(t, err)
+		require.Len(t, storage.Sandboxes, 1)
+	})
 }
 
 func seedSandboxStorageMulti(t *testing.T, tmpHome string, sessions map[string]cli.SandboxSession) {
@@ -2515,6 +2550,163 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "run-new", result.RunID)
 		require.True(t, initiatedRun, "should have initiated a new run")
+	})
+}
+
+func TestService_ExecSandbox_SessionReuse(t *testing.T) {
+	// A ready sandbox reports Sandboxable=true with Polling.Completed=true.
+	// The session must be reused, not pruned as expired.
+
+	mockReadySandbox := func(setup *testSetup) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+				Polling:        api.PollingResult{Completed: true},
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
+		setup.mockSSH.MockExecuteCommand = func(string) (int, error) { return 0, nil }
+		setup.mockGit.MockGeneratePatch = func([]string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+	}
+
+	t.Run("config-provided lookup reuses ready sandbox (Polling.Completed=true, Sandboxable=true)", func(t *testing.T) {
+		setup := setupTest(t)
+
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		runID := "run-ready-config"
+		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+			"detached:" + configFile: {
+				RunID:       runID,
+				ConfigFile:  configFile,
+				ScopedToken: "token-ready",
+			},
+		})
+
+		mockReadySandbox(setup)
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, runID, result.RunID)
+
+		// Session should still be in storage
+		storage, err := cli.LoadSandboxStorage()
+		require.NoError(t, err)
+		_, found := storage.GetSession("detached", configFile)
+		require.True(t, found, "session should not have been pruned")
+	})
+
+	t.Run("branch-only lookup reuses ready sandbox (Polling.Completed=true, Sandboxable=true)", func(t *testing.T) {
+		setup := setupTest(t)
+
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		runID := "run-ready-branch"
+		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+			"detached:" + configFile: {
+				RunID:       runID,
+				ConfigFile:  configFile,
+				ScopedToken: "token-ready",
+			},
+		})
+
+		mockReadySandbox(setup)
+
+		// No ConfigFile — exercises the branch-only session lookup path
+		// that the CI regression landed in.
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			Command: []string{"echo", "hello"},
+			Json:    true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, runID, result.RunID)
+
+		storage, err := cli.LoadSandboxStorage()
+		require.NoError(t, err)
+		_, found := storage.GetSession("detached", configFile)
+		require.True(t, found, "session should not have been pruned")
+	})
+
+	t.Run("config-provided lookup prunes session when run finished without becoming sandboxable", func(t *testing.T) {
+		setup := setupTest(t)
+
+		// Provide a config file on disk so auto-create can succeed after pruning.
+		rwxDir := filepath.Join(setup.tmp, ".rwx")
+		require.NoError(t, os.MkdirAll(rwxDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		staleRunID := "run-finished"
+		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+			"detached:" + configFile: {
+				RunID:       staleRunID,
+				ConfigFile:  configFile,
+				ScopedToken: "token-stale",
+			},
+		})
+
+		// Return stale-run connection info on the first call (for the session
+		// health check) and a fresh sandbox on subsequent calls (auto-create).
+		connCalls := atomic.Int32{}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			if connCalls.Add(1) == 1 {
+				require.Equal(t, staleRunID, id)
+				return api.SandboxConnectionInfo{
+					Sandboxable:   false,
+					Polling:       api.PollingResult{Completed: true},
+					FailureReason: "failed",
+				}, nil
+			}
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		// Auto-create mocks
+		setup.mockGit.MockGetBranch = "main"
+		setup.mockGit.MockGetCommit = "abc123"
+		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
+			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
+		}
+		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{LatestMajor: map[string]string{}, LatestMinor: map[string]map[string]string{}}, nil
+		}
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+		}
+		setup.mockAPI.MockInitiateRun = func(api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			return &api.InitiateRunResult{RunID: "run-fresh", RunURL: "https://cloud.rwx.com/mint/runs/run-fresh"}, nil
+		}
+		setup.mockAPI.MockCreateSandboxToken = func(api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
+			return &api.CreateSandboxTokenResult{Token: "token-fresh"}, nil
+		}
+		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
+		setup.mockSSH.MockExecuteCommand = func(string) (int, error) { return 0, nil }
+		setup.mockGit.MockGeneratePatch = func([]string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-fresh", result.RunID, "stale session should be pruned and a new run created")
 	})
 }
 

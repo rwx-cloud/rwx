@@ -179,8 +179,8 @@ func (s Service) CheckExistingSandbox(configFile string) (*CheckExistingSandboxR
 		}, nil
 	}
 
-	if connInfo.Polling.Completed {
-		// Run has completed, not active
+	if connInfo.Polling.Completed && !connInfo.Sandboxable {
+		// Run finished without becoming sandboxable — not active
 		return &CheckExistingSandboxResult{
 			Exists:     true,
 			Active:     false,
@@ -226,7 +226,7 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 			return nil, errors.Wrapf(err, "unable to get sandbox info for %s", cfg.RunID)
 		}
 
-		if connInfo.Polling.Completed {
+		if connInfo.Polling.Completed && !connInfo.Sandboxable {
 			return nil, fmt.Errorf("Run '%s' is no longer active (timed out or cancelled).\nRun 'rwx sandbox start %s' to create a new sandbox.", cfg.RunID, cfg.ConfigFile)
 		}
 
@@ -489,13 +489,15 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 				}
 			}
 			if found {
-				// Check if session is still valid (use scoped token if available)
+				// Check if session is still valid (use scoped token if available).
+				// Polling.Completed=true with Sandboxable=true is a ready sandbox,
+				// not an expired one; only prune when the run finished without becoming sandboxable.
 				connInfo, err := s.APIClient.GetSandboxConnectionInfo(session.RunID, session.ScopedToken)
 				if err != nil {
 					storage.DeleteSession(branch, cfg.ConfigFile)
 					_ = storage.Save()
 					found = false
-				} else if connInfo.Polling.Completed {
+				} else if connInfo.Polling.Completed && !connInfo.Sandboxable {
 					storage.DeleteSession(branch, cfg.ConfigFile)
 					_ = storage.Save()
 					found = false
@@ -520,11 +522,13 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 				}
 			}
 
-			// Filter to only active sessions
+			// Filter to only active sessions. A ready sandbox reports
+			// Polling.Completed=true with Sandboxable=true; only prune when
+			// the run finished without becoming sandboxable.
 			var activeSessions []SandboxSession
 			for _, sess := range sessions {
 				connInfo, err := s.APIClient.GetSandboxConnectionInfo(sess.RunID, sess.ScopedToken)
-				if err == nil && !connInfo.Polling.Completed {
+				if err == nil && (connInfo.Sandboxable || !connInfo.Polling.Completed) {
 					activeSessions = append(activeSessions, sess)
 				} else {
 					// Clean up expired session
@@ -575,9 +579,11 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 						}
 					}
 					if branchMatch && state.ConfigFile == cfgFile {
-						// Verify the remote sandbox is still alive before reusing
+						// Verify the remote sandbox is still alive before reusing.
+						// A ready sandbox reports Polling.Completed=true with Sandboxable=true;
+						// only skip when the run finished without becoming sandboxable.
 						connInfo, connErr := s.APIClient.GetSandboxConnectionInfo(run.ID, "")
-						if connErr != nil || connInfo.Polling.Completed {
+						if connErr != nil || (connInfo.Polling.Completed && !connInfo.Sandboxable) {
 							continue
 						}
 
@@ -923,10 +929,11 @@ func (s Service) ListSandboxes(cfg ListSandboxesConfig) (*ListSandboxesResult, e
 		} else {
 			// Not in the bulk list — could be initializing or genuinely expired.
 			// Verify individually: only keep as active if the API positively
-			// confirms the run is still alive (200 OK, not completed).
+			// confirms the run is still alive. A ready sandbox reports
+			// Polling.Completed=true with Sandboxable=true.
 			status := "expired"
 			connInfo, connErr := s.APIClient.GetSandboxConnectionInfo(session.RunID, session.ScopedToken)
-			if connErr == nil && !connInfo.Polling.Completed {
+			if connErr == nil && (connInfo.Sandboxable || !connInfo.Polling.Completed) {
 				status = "active"
 			}
 
@@ -1127,7 +1134,9 @@ func (s Service) waitForSandboxCompletion(runID, scopedToken string) {
 			// Error (404, 410, etc.) means the run is no longer active
 			return
 		}
-		if connInfo.Polling.Completed {
+		// Polling.Completed=true with Sandboxable=true means the sandbox is
+		// ready, not ended; keep waiting until it transitions to Sandboxable=false.
+		if connInfo.Polling.Completed && !connInfo.Sandboxable {
 			return
 		}
 
