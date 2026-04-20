@@ -21,4 +21,4 @@ tasks:
     run: exit 1
 
   - key: fail-slow
-    run: sleep 10 && exit 1
+    run: sleep 60 && exit 1
