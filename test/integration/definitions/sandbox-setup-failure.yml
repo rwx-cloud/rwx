@@ -1,5 +1,13 @@
 tasks:
+  - key: code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: main
+      preserve-git-dir: true
+
   - key: preflight
+    use: code
     run: |
       echo "intentional-setup-failure"
       exit 1
