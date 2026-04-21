@@ -745,6 +745,68 @@ func TestService_ExecSandbox(t *testing.T) {
 		require.Contains(t, setup.mockStdout.String(), "Failed task")
 	})
 
+	t.Run("prints run failure output to stdout when connection info fetch fails", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-conn-info-gone"
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{}, errors.New("This run is no longer available for sandbox")
+		}
+
+		setup.mockAPI.MockGetRunPrompt = func(id string) (string, error) {
+			require.Equal(t, runID, id)
+			return "# Failed task:\n\n- preflight\n", nil
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unable to get sandbox connection info")
+		require.Contains(t, setup.mockStdout.String(), "Failed task")
+		require.Contains(t, setup.mockStdout.String(), "preflight")
+	})
+
+	t.Run("prints run failure output to stdout when polling-loop connection info fetch fails", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-conn-info-gone-mid-poll"
+		calls := atomic.Int32{}
+		backoff := 0
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			if calls.Add(1) == 1 {
+				return api.SandboxConnectionInfo{
+					Sandboxable: false,
+					Polling:     api.PollingResult{Completed: false, BackoffMs: &backoff},
+				}, nil
+			}
+			return api.SandboxConnectionInfo{}, errors.New("This run is no longer available for sandbox")
+		}
+
+		setup.mockAPI.MockGetRunPrompt = func(id string) (string, error) {
+			require.Equal(t, runID, id)
+			return "# Failed task:\n\n- preflight\n", nil
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unable to get sandbox connection info")
+		require.Contains(t, setup.mockStdout.String(), "Failed task")
+		require.Contains(t, setup.mockStdout.String(), "preflight")
+	})
+
 	t.Run("gracefully degrades when GetRunPrompt fails on polling completion", func(t *testing.T) {
 		setup := setupTest(t)
 

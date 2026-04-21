@@ -1521,6 +1521,10 @@ func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMod
 	// Check once before showing spinner - sandbox may already be ready
 	connInfo, err := s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
 	if err != nil {
+		// The run may have failed before becoming sandboxable (e.g. preflight task failed),
+		// in which case the API returns an error here rather than a Polling.Completed result.
+		// Surface the run prompt so the user can see what failed.
+		s.printSandboxRunPrompt(runID)
 		return nil, errors.Wrap(err, "unable to get sandbox connection info")
 	}
 
@@ -1549,6 +1553,9 @@ func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMod
 
 		connInfo, err = s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
 		if err != nil {
+			// As above: a mid-poll failure (e.g. preflight task failure) can surface as an
+			// API error rather than Polling.Completed. Best-effort surface the run prompt.
+			s.printSandboxRunPrompt(runID)
 			return nil, errors.Wrap(err, "unable to get sandbox connection info")
 		}
 
