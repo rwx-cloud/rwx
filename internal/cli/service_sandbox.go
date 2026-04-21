@@ -310,7 +310,7 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 		Json:           cfg.Json,
 		Title:          title,
 		InitParameters: cfg.InitParameters,
-		Patchable:      false,
+		Patchable:      true,
 		CliState:       EncodeCliState(branch, cfg.ConfigFile),
 	})
 
@@ -753,7 +753,9 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 
 	// Clean up any dirty state from a previous interrupted exec.
 	// This makes exec self-healing — no manual reset needed after crashes.
-	if cfg.Sync {
+	// Skip on new sandboxes: no prior exec could have left dirty state, and
+	// checkout+clean would wipe setup artifacts written by the setup tasks.
+	if cfg.Sync && !isNewSandbox {
 		if cleanErr := s.cleanSandboxState(); cleanErr != nil {
 			fmt.Fprintf(s.Stderr, "Warning: failed to clean sandbox state: %v\n", cleanErr)
 		}
@@ -764,7 +766,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	var syncPushPatchBytes int
 	if cfg.Sync {
 		syncPushStart := time.Now()
-		patchBytes, err := s.syncChangesToSandbox(cfg.Json)
+		patchBytes, err := s.syncChangesToSandbox(cfg.Json, isNewSandbox)
 		syncPushMs = time.Since(syncPushStart).Milliseconds()
 		syncPushPatchBytes = patchBytes
 		if err != nil {
@@ -1519,7 +1521,6 @@ func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMod
 	// Check once before showing spinner - sandbox may already be ready
 	connInfo, err := s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
 	if err != nil {
-		s.printSandboxRunPrompt(runID)
 		return nil, errors.Wrap(err, "unable to get sandbox connection info")
 	}
 
@@ -1527,7 +1528,7 @@ func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMod
 		return &connInfo, nil
 	}
 
-	if connInfo.Polling.Completed {
+	if connInfo.Polling.Completed || connInfo.FailureReason != "" {
 		return nil, s.sandboxCompletedError(runID, connInfo)
 	}
 
@@ -1548,7 +1549,6 @@ func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMod
 
 		connInfo, err = s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
 		if err != nil {
-			s.printSandboxRunPrompt(runID)
 			return nil, errors.Wrap(err, "unable to get sandbox connection info")
 		}
 
@@ -1556,34 +1556,47 @@ func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMod
 			return &connInfo, nil
 		}
 
-		if connInfo.Polling.Completed {
+		if connInfo.Polling.Completed || connInfo.FailureReason != "" {
 			return nil, s.sandboxCompletedError(runID, connInfo)
 		}
 	}
 }
 
-// sandboxCompletedError prints run failure output to stderr and returns an appropriate error.
-// The prompt fetch is best-effort and silently skipped if unavailable.
+// sandboxCompletedError prints the error header to stderr, then the failing
+// run's prompt to stdout (so they appear in a sensible order under combined
+// output), and returns a handled error so main.go doesn't re-print the header.
+// The returned error still carries ErrSandboxSetupFailure for telemetry
+// classification.
 func (s Service) sandboxCompletedError(runID string, connInfo api.SandboxConnectionInfo) error {
-	s.printSandboxRunPrompt(runID)
-
+	var msg error
 	switch connInfo.FailureReason {
 	case "timed_out":
-		return errors.WrapSentinel(fmt.Errorf("Sandbox run '%s' timed out before becoming ready", runID), errors.ErrSandboxSetupFailure)
+		msg = fmt.Errorf("Sandbox run '%s' timed out before becoming ready", runID)
 	case "cancelled":
-		return errors.WrapSentinel(fmt.Errorf("Sandbox run '%s' was cancelled before becoming ready", runID), errors.ErrSandboxSetupFailure)
+		msg = fmt.Errorf("Sandbox run '%s' was cancelled before becoming ready", runID)
 	case "failed":
-		return errors.WrapSentinel(fmt.Errorf("Sandbox run '%s' failed before becoming ready", runID), errors.ErrSandboxSetupFailure)
+		msg = fmt.Errorf("Sandbox run '%s' failed before becoming ready", runID)
 	default:
-		return errors.WrapSentinel(fmt.Errorf("Sandbox run '%s' completed before becoming ready", runID), errors.ErrSandboxSetupFailure)
+		msg = fmt.Errorf("Sandbox run '%s' completed before becoming ready", runID)
 	}
+
+	fmt.Fprintf(s.Stderr, "Error: %s\n", msg)
+	s.printSandboxRunPrompt(runID)
+
+	return errors.WrapSentinel(errors.WrapSentinel(msg, HandledError), errors.ErrSandboxSetupFailure)
 }
 
-// printSandboxRunPrompt fetches and prints the run prompt to stderr.
-// Best-effort: silently skipped if the prompt is unavailable or the run is still in progress.
+// printSandboxRunPrompt fetches and prints the run prompt to stdout.
+// Polls /status first to ensure results are indexed before fetching the prompt.
+// Best-effort: silently skipped if unavailable.
 func (s Service) printSandboxRunPrompt(runID string) {
+	_, _ = s.GetRunStatus(GetRunStatusConfig{
+		RunID: runID,
+		Wait:  true,
+		Json:  true,
+	})
 	if prompt, err := s.APIClient.GetRunPrompt(runID); err == nil && prompt != "" {
-		fmt.Fprintf(s.Stderr, "\n%s", prompt)
+		fmt.Fprintf(s.Stdout, "\n%s", prompt)
 	}
 }
 
@@ -1648,7 +1661,7 @@ func SandboxTitle(cwd, branch, configFile string) string {
 	return title
 }
 
-func (s Service) syncChangesToSandbox(jsonMode bool) (int, error) {
+func (s Service) syncChangesToSandbox(jsonMode bool, baselineOnly bool) (int, error) {
 	// Warn if .rej files from a previous failed pull are still present
 	if cwd, err := os.Getwd(); err == nil {
 		if rejFiles := findAllRejFiles(cwd); len(rejFiles) > 0 {
@@ -1720,8 +1733,14 @@ func (s Service) syncChangesToSandbox(jsonMode bool) (int, error) {
 		return 0, syncPushErr
 	}
 
-	// Apply patch on remote (use full path since sandbox session may have minimal PATH)
-	exitCode, applyOutput, err := s.SSHClient.ExecuteCommandWithStdinAndCombinedOutput("/usr/bin/git apply --allow-empty -", bytes.NewReader(patch))
+	// Apply patch on remote (use full path since sandbox session may have minimal PATH).
+	// On a new sandbox the patch is already applied to the working tree server-side, so we only
+	// stage it to the index (--cached) to establish the refs/rwx-sync baseline without double-applying.
+	applyCmd := "/usr/bin/git apply --allow-empty -"
+	if baselineOnly {
+		applyCmd = "/usr/bin/git apply --cached --allow-empty -"
+	}
+	exitCode, applyOutput, err := s.SSHClient.ExecuteCommandWithStdinAndCombinedOutput(applyCmd, bytes.NewReader(patch))
 
 	// Mark end of sync operations
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
@@ -1750,7 +1769,13 @@ func (s Service) syncChangesToSandbox(jsonMode bool) (int, error) {
 	// before this point, pull still has the previous baseline to diff against.
 	// Wrap in sync markers so these internal git commands don't appear in task logs.
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	snapshotExitCode, snapshotErr := s.SSHClient.ExecuteCommand("/usr/bin/git update-ref -d refs/rwx-sync 2>/dev/null; /usr/bin/git add -A && /usr/bin/git -c user.name=rwx -c user.email=rwx commit --allow-empty -m rwx-sync >/dev/null 2>&1 && /usr/bin/git update-ref refs/rwx-sync HEAD")
+	// On baseline-only the patch is already staged via --cached; skip git add -A to avoid
+	// capturing unrelated working-tree state left by setup tasks.
+	snapshotCmd := "/usr/bin/git update-ref -d refs/rwx-sync 2>/dev/null; /usr/bin/git add -A && /usr/bin/git -c user.name=rwx -c user.email=rwx commit --allow-empty -m rwx-sync >/dev/null 2>&1 && /usr/bin/git update-ref refs/rwx-sync HEAD"
+	if baselineOnly {
+		snapshotCmd = "/usr/bin/git update-ref -d refs/rwx-sync 2>/dev/null; /usr/bin/git -c user.name=rwx -c user.email=rwx commit --allow-empty -m rwx-sync >/dev/null 2>&1 && /usr/bin/git update-ref refs/rwx-sync HEAD"
+	}
+	snapshotExitCode, snapshotErr := s.SSHClient.ExecuteCommand(snapshotCmd)
 	if snapshotErr != nil {
 		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 		syncPushErr = errors.Wrap(snapshotErr, "failed to create sync snapshot ref")
