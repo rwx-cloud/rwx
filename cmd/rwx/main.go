@@ -88,10 +88,16 @@ func classifyError(err error) string {
 	switch {
 	case errors.Is(err, internalerrors.ErrBadRequest):
 		return "bad_request"
+	case errors.Is(err, internalerrors.ErrUnauthenticated):
+		return "unauthenticated"
 	case errors.Is(err, internalerrors.ErrNotFound):
 		return "not_found"
+	case errors.Is(err, internalerrors.ErrFileNotExists):
+		return "file_not_found"
 	case errors.Is(err, internalerrors.ErrGone):
 		return "gone"
+	case errors.Is(err, internalerrors.ErrInternalServerError):
+		return "internal_server_error"
 	case errors.Is(err, internalerrors.ErrSSH):
 		return "ssh_failed"
 	case errors.Is(err, internalerrors.ErrPatch):
@@ -102,10 +108,14 @@ func classifyError(err error) string {
 		return "lsp_error"
 	case errors.Is(err, internalerrors.ErrAmbiguousTaskKey):
 		return "ambiguous_task_key"
+	case errors.Is(err, internalerrors.ErrAmbiguousDefinitionPath):
+		return "ambiguous_definition_path"
 	case errors.Is(err, internalerrors.ErrNetworkTransient):
 		return "network_transient_error"
 	case errors.Is(err, internalerrors.ErrSandboxSetupFailure):
 		return "sandbox_setup_failure"
+	case errors.Is(err, internalerrors.ErrSandboxNoGitDir):
+		return "sandbox_no_git_dir"
 	default:
 		return "unknown"
 	}
