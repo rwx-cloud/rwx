@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -73,15 +74,49 @@ func recordTelemetry(err error, start time.Time) {
 	})
 
 	if err != nil {
-		telem.Record("cli.error", map[string]any{
+		errType := classifyError(err)
+		handled := errors.Is(err, HandledError)
+		props := map[string]any{
 			"command":    commandName,
 			"flags":      flagNames,
-			"error_type": classifyError(err),
-			"handled":    errors.Is(err, HandledError),
-		})
+			"error_type": errType,
+			"handled":    handled,
+		}
+		// Only attach the raw message for unclassified, non-handled errors:
+		// classified buckets already carry signal via the tag, and handled
+		// errors expose the sentinel string rather than what the user saw.
+		if errType == "unknown" && !handled {
+			props["error_message"] = scrubErrorMessage(err.Error())
+		}
+		telem.Record("cli.error", props)
 	}
 
 	telem.Flush()
+}
+
+const errorMessageMaxRunes = 200
+
+var (
+	// urlCredentialRe matches a URL userinfo segment (e.g. user:token@host).
+	urlCredentialRe = regexp.MustCompile(`://[^@\s/]+@`)
+	// jwtRe matches three base64url-shaped segments separated by dots. Segment
+	// minimum of 10 chars keeps dotted Java-style identifiers out of the match.
+	jwtRe = regexp.MustCompile(`[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}`)
+	// tokenRe matches standalone token-shaped runs (hex/base64/UUID-ish).
+	tokenRe = regexp.MustCompile(`[A-Za-z0-9_\-]{32,}`)
+)
+
+func scrubErrorMessage(msg string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		msg = strings.ReplaceAll(msg, home, "~")
+	}
+	msg = urlCredentialRe.ReplaceAllString(msg, "://<redacted>@")
+	msg = jwtRe.ReplaceAllString(msg, "<redacted>")
+	msg = tokenRe.ReplaceAllString(msg, "<redacted>")
+	if runes := []rune(msg); len(runes) > errorMessageMaxRunes {
+		msg = string(runes[:errorMessageMaxRunes]) + "..."
+	}
+	return msg
 }
 
 func classifyError(err error) string {
