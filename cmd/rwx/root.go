@@ -34,6 +34,7 @@ var (
 	service            cli.Service
 	accessTokenBackend accesstoken.Backend
 	telem              *telemetry.Telemetry
+	telemetryCollector *telemetry.Collector
 
 	// rootCmd represents the main `rwx` command
 	rootCmd = &cobra.Command{
@@ -66,12 +67,6 @@ var (
 				return errors.Wrap(err, "unable to initialize API client")
 			}
 
-			collector := telemetry.NewCollector()
-			retryRT := retry.NewRoundTripper(c)
-			statsRT := telemetry.NewStatsRoundTripper(retryRT)
-			sender := telemetry.NewSender(collector, statsRT)
-			telem = telemetry.New(collector, sender, statsRT)
-
 			dir, err := os.Getwd()
 			if err != nil {
 				return errors.Wrap(err, "unable to initialize CLI")
@@ -99,7 +94,7 @@ var (
 				AccessTokenBackend:   accessTokenBackend,
 				VersionsBackend:      versionsBackend,
 				SkillVersionsBackend: skillVersionsBackend,
-				TelemetryCollector:   collector,
+				TelemetryCollector:   telemetryCollector,
 				Stdin:                os.Stdin,
 				Stdout:               os.Stdout,
 				StdoutIsTTY:          term.IsTerminal(int(os.Stdout.Fd())),
@@ -114,6 +109,43 @@ var (
 		},
 	}
 )
+
+// initTelemetry builds the telemetry pipeline before Execute() runs so events
+// are recorded for invocations that bypass PersistentPreRunE (e.g. unknown
+// commands). Silent on failure — telemetry is best-effort and must never block
+// the CLI.
+func initTelemetry() {
+	accessToken := AccessToken
+	if accessToken == "$RWX_ACCESS_TOKEN" {
+		accessToken = os.Getenv("RWX_ACCESS_TOKEN")
+	}
+
+	fileBackend, err := internalconfig.NewFileBackend([]string{
+		filepath.Join("~", ".config", "rwx"),
+		filepath.Join("~", ".mint"),
+	})
+	if err != nil {
+		return
+	}
+
+	c, err := api.NewClient(api.Config{
+		AccessToken:          accessToken,
+		Host:                 rwxHost,
+		AccessTokenBackend:   accesstoken.NewFileBackend(fileBackend),
+		VersionsBackend:      versions.NewFileBackend(fileBackend),
+		SkillVersionsBackend: versions.NewSkillFileBackend(fileBackend),
+	})
+	if err != nil {
+		return
+	}
+
+	collector := telemetry.NewCollector()
+	retryRT := retry.NewRoundTripper(c)
+	statsRT := telemetry.NewStatsRoundTripper(retryRT)
+	sender := telemetry.NewSender(collector, statsRT)
+	telem = telemetry.New(collector, sender, statsRT)
+	telemetryCollector = collector
+}
 
 func addRwxDirFlag(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&RwxDirectory, "dir", "d", "", "the directory your RWX configuration files are located in, typically `.rwx`. By default, the CLI traverses up until it finds a `.rwx` directory.")
