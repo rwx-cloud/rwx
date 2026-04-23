@@ -60,6 +60,75 @@ func TestClassifyError(t *testing.T) {
 	})
 }
 
+func TestScrubErrorMessage(t *testing.T) {
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	require.NotEmpty(t, home)
+
+	cases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "plain message passes through",
+			input:    "failed to open task.yaml",
+			expected: "failed to open task.yaml",
+		},
+		{
+			name:     "replaces home directory with tilde",
+			input:    "failed to open " + home + "/project/.rwx.yaml",
+			expected: "failed to open ~/project/.rwx.yaml",
+		},
+		{
+			name:     "redacts URL userinfo",
+			input:    "clone failed at https://user:secret@github.com/rwx/repo",
+			expected: "clone failed at https://<redacted>@github.com/rwx/repo",
+		},
+		{
+			name:     "redacts JWT-shaped token",
+			input:    "bad auth: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+			expected: "bad auth: <redacted>",
+		},
+		{
+			name:     "does not redact short dotted identifiers",
+			input:    "parse error at com.example.Foo",
+			expected: "parse error at com.example.Foo",
+		},
+		{
+			name:     "redacts long hex-like token",
+			input:    "invalid token abcdef0123456789abcdef0123456789abcdef01",
+			expected: "invalid token <redacted>",
+		},
+		{
+			name:     "redacts UUID-shaped run",
+			input:    "run 550e8400e29b41d4a716446655440000 not found",
+			expected: "run <redacted> not found",
+		},
+		{
+			name:     "truncates very long messages",
+			input:    strings.Repeat("foo bar ", 40),
+			expected: strings.Repeat("foo bar ", 40)[:errorMessageMaxRunes] + "...",
+		},
+		{
+			name:     "composite: home path + token",
+			input:    "cache miss at " + home + "/.rwx/cache/abcdef0123456789abcdef0123456789abcdef.json",
+			expected: "cache miss at ~/.rwx/cache/<redacted>.json",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.expected, scrubErrorMessage(tc.input))
+		})
+	}
+}
+
 func TestClassifyErrorFromHTTPResponses(t *testing.T) {
 	// Exercises the full path: HTTP response -> api.decodeResponseJSON -> sentinel -> classifyError.
 	// This is the seam the CLI telemetry actually runs through, so regression here matters more
