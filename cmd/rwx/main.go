@@ -19,6 +19,11 @@ var HandledError = cli.HandledError
 
 func main() {
 	start := time.Now()
+
+	// Init telemetry before Execute so errors that bypass PersistentPreRunE
+	// (e.g. unknown commands, bad global flags) are still recorded.
+	initTelemetry()
+
 	err := rootCmd.Execute()
 
 	recordTelemetry(err, start)
@@ -65,15 +70,21 @@ func recordTelemetry(err error, start time.Time) {
 		})
 	}
 
+	// Cobra shows help and returns nil when a non-runnable parent command is
+	// invoked with extra positional args (e.g. `rwx sandbox push`). Treat that
+	// as an unknown_command so we don't silently drop the signal.
+	unknownSubcommand := err == nil && cmd != nil && !cmd.Runnable() && len(cmd.Flags().Args()) > 0
+
 	telem.Record("cli.command", map[string]any{
 		"command":       commandName,
 		"flags":         flagNames,
 		"output_format": Output,
 		"duration_ms":   time.Since(start).Milliseconds(),
-		"success":       err == nil,
+		"success":       err == nil && !unknownSubcommand,
 	})
 
-	if err != nil {
+	switch {
+	case err != nil:
 		errType := classifyError(err)
 		handled := errors.Is(err, HandledError)
 		props := map[string]any{
@@ -89,6 +100,13 @@ func recordTelemetry(err error, start time.Time) {
 			props["error_message"] = scrubErrorMessage(err.Error())
 		}
 		telem.Record("cli.error", props)
+	case unknownSubcommand:
+		telem.Record("cli.error", map[string]any{
+			"command":    commandName,
+			"flags":      flagNames,
+			"error_type": "unknown_command",
+			"handled":    false,
+		})
 	}
 
 	telem.Flush()
@@ -120,6 +138,14 @@ func scrubErrorMessage(msg string) string {
 }
 
 func classifyError(err error) string {
+	// Cobra emits unknown-command errors as a plain fmt.Errorf with no sentinel,
+	// so match by message prefix. The error is surfaced before any PreRun hook
+	// fires, which is why telemetry is initialized in main() rather than in
+	// rootCmd.PersistentPreRunE.
+	if err != nil && strings.HasPrefix(err.Error(), "unknown command ") {
+		return "unknown_command"
+	}
+
 	switch {
 	case errors.Is(err, internalerrors.ErrBadRequest):
 		return "bad_request"

@@ -11,6 +11,7 @@ import (
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
@@ -58,6 +59,33 @@ func TestClassifyError(t *testing.T) {
 		require.Error(t, err)
 		require.Equal(t, "file_not_found", classifyError(err))
 	})
+
+	t.Run("unknown_command matches Cobra's unknown-command error", func(t *testing.T) {
+		// Cobra emits this via fmt.Errorf("unknown command %q for %q...") with no sentinel.
+		// These errors bypass PersistentPreRunE, which is why we match by string.
+		require.Equal(t, "unknown_command", classifyError(fmt.Errorf(`unknown command "bogus" for "rwx"`)))
+		require.Equal(t, "unknown_command", classifyError(fmt.Errorf(`unknown command "bogus" for "rwx"`+"\n\nDid you mean this?\n\tbogon")))
+	})
+}
+
+// Invoking a non-runnable parent command with unrecognized positional args
+// (e.g. `rwx sandbox push`) doesn't produce an error — Cobra shows help and
+// returns nil. recordTelemetry detects this case via cmd.Flags().Args() after
+// Execute has run. This test pins that signal so a Cobra upgrade can't silently
+// regress the detection.
+func TestUnknownSubcommandSignal(t *testing.T) {
+	parent := &cobra.Command{Use: "parent"}
+	parent.AddCommand(&cobra.Command{Use: "valid", Run: func(*cobra.Command, []string) {}})
+
+	root := &cobra.Command{Use: "root", SilenceErrors: true, SilenceUsage: true}
+	root.AddCommand(parent)
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"parent", "notacmd"})
+
+	require.NoError(t, root.Execute())
+	require.False(t, parent.Runnable())
+	require.Equal(t, []string{"notacmd"}, parent.Flags().Args())
 }
 
 func TestScrubErrorMessage(t *testing.T) {
