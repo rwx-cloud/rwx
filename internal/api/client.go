@@ -17,7 +17,9 @@ import (
 	"github.com/rwx-cloud/rwx/internal/versions"
 )
 
-var ErrNotFound = errors.New("not found")
+// ErrNotFound aliases the shared sentinel so existing api.ErrNotFound callers
+// also satisfy errors.Is(err, internalerrors.ErrNotFound) for telemetry classification.
+var ErrNotFound = errors.ErrNotFound
 
 // httpClient uses a transport with a reduced idle connection timeout to avoid
 // reusing connections that the load balancer has already closed (default ALB
@@ -173,7 +175,7 @@ func (c Client) GetDebugConnectionInfo(debugKey string) (DebugConnectionInfo, er
 		if msg == "" {
 			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
 		}
-		return connectionInfo, errors.New(msg)
+		return connectionInfo, classifyHTTPStatusError(resp.StatusCode, msg)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&connectionInfo); err != nil {
@@ -234,7 +236,7 @@ func (c Client) GetSandboxConnectionInfo(runID, scopedToken string) (SandboxConn
 		if msg == "" {
 			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
 		}
-		return connectionInfo, errors.New(msg)
+		return connectionInfo, classifyHTTPStatusError(resp.StatusCode, msg)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&connectionInfo); err != nil {
@@ -1593,10 +1595,21 @@ func decodeResponseJSON(resp *http.Response, result any) error {
 		errMsg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
 	}
 
-	if resp.StatusCode == http.StatusNotFound {
-		return errors.Wrap(ErrNotFound, errMsg)
-	}
+	return classifyHTTPStatusError(resp.StatusCode, errMsg)
+}
 
+// classifyHTTPStatusError returns an error wrapped with a sentinel that matches
+// the HTTP status class, so CLI telemetry can distinguish user-actionable
+// failures (401/403/404) from server-side issues (5xx).
+func classifyHTTPStatusError(statusCode int, errMsg string) error {
+	switch {
+	case statusCode == http.StatusUnauthorized, statusCode == http.StatusForbidden:
+		return errors.WrapSentinel(errors.New(errMsg), errors.ErrUnauthenticated)
+	case statusCode == http.StatusNotFound:
+		return errors.Wrap(ErrNotFound, errMsg)
+	case statusCode >= 500 && statusCode < 600:
+		return errors.WrapSentinel(errors.New(errMsg), errors.ErrInternalServerError)
+	}
 	return errors.New(errMsg)
 }
 

@@ -72,6 +72,8 @@ var (
 	ErrAmbiguousTaskKey        = errors.New("ambiguous task key")
 	ErrAmbiguousDefinitionPath = errors.New("ambiguous definition path")
 	ErrNetworkTransient        = errors.New("network transient error")
+	ErrUnauthenticated         = errors.New("unauthenticated")
+	ErrInternalServerError     = errors.New("internal server error")
 
 	// WrapSentinel wraps an error so that errors.Is returns true for the sentinel.
 	WrapSentinel = wrapSentinel
