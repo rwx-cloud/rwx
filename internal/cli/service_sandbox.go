@@ -1428,6 +1428,26 @@ func parsePatchFiles(patch string) []string {
 	return files
 }
 
+// parseNewFilePaths returns the b/ paths from each diff block that has a
+// `new file mode` header — i.e. additions only, not modifications or deletions.
+func parseNewFilePaths(patch []byte) []string {
+	var paths []string
+	var current string
+	for _, line := range strings.Split(string(patch), "\n") {
+		if strings.HasPrefix(line, "diff --git") {
+			current = ""
+			parts := strings.Split(line, " ")
+			if len(parts) >= 4 {
+				current = strings.TrimPrefix(parts[3], "b/")
+			}
+		} else if strings.HasPrefix(line, "new file mode") && current != "" {
+			paths = append(paths, current)
+			current = ""
+		}
+	}
+	return paths
+}
+
 // saveRejectedPatch writes the patch to .rwx/sandboxes/patch-rejected.diff for manual inspection.
 func saveRejectedPatch(patch []byte) string {
 	rwxDir, err := findRwxDirectoryPath("")
@@ -1761,6 +1781,36 @@ func (s Service) syncChangesToSandbox(jsonMode bool, baselineOnly bool) (int, er
 		}
 		syncPushErr = errors.WrapSentinel(fmt.Errorf("failed to sync changes to sandbox: git apply failed with exit code %d", exitCode), errors.ErrPatch)
 		return patchBytes, syncPushErr
+	}
+
+	// In baselineOnly mode, --cached only stages new-file additions in the index. The sandbox-creation
+	// patch (from GeneratePatchFile) excludes untracked files, so the working tree never received them.
+	// Without materializing them here, refs/rwx-sync ends up ahead of the WT, and pull's
+	// `git diff refs/rwx-sync` reports them as deletions — wiping local untracked files.
+	if baselineOnly {
+		if newFilePaths := parseNewFilePaths(patch); len(newFilePaths) > 0 {
+			_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
+			quoted := make([]string, len(newFilePaths))
+			for i, f := range newFilePaths {
+				quoted[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(f, "'", "'\\''"))
+			}
+			checkoutCmd := fmt.Sprintf("/usr/bin/git checkout-index --force -- %s", strings.Join(quoted, " "))
+			checkoutExitCode, checkoutOutput, checkoutErr := s.SSHClient.ExecuteCommandWithOutput(checkoutCmd)
+			_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+			if checkoutErr != nil {
+				syncPushErr = errors.Wrap(checkoutErr, "failed to materialize new files in sandbox")
+				return patchBytes, syncPushErr
+			}
+			if checkoutExitCode != 0 {
+				errMsg := strings.TrimSpace(checkoutOutput)
+				if errMsg != "" {
+					syncPushErr = fmt.Errorf("failed to materialize new files in sandbox: %s", errMsg)
+				} else {
+					syncPushErr = fmt.Errorf("failed to materialize new files in sandbox (exit code %d)", checkoutExitCode)
+				}
+				return patchBytes, syncPushErr
+			}
+		}
 	}
 
 	// Snapshot the synced state as a detached ref so pull can diff against it (exec-only changes).
