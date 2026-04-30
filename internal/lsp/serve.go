@@ -8,16 +8,31 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/rwx-cloud/rwx/cmd/rwx/config"
 	"github.com/rwx-cloud/rwx/internal/errors"
+	"github.com/rwx-cloud/rwx/internal/telemetry"
 )
 
-func Serve() (int, error) {
-	nodePath, err := findNode()
+// minNodeMajor is the minimum supported Node.js major version. The embedded
+// language-server bundle is built with esbuild --target=node18, so anything
+// older fails at runtime with confusing parser/syntax errors.
+const minNodeMajor = 18
+
+// recommendedNodeMajor is the lowest non-EOL Node major. Anything below this
+// (but >= minNodeMajor) is allowed but produces a non-blocking warning.
+const recommendedNodeMajor = 22
+
+func Serve(collector *telemetry.Collector) (int, error) {
+	nodePath, warning, err := findNode(collector)
 	if err != nil {
 		return 0, err
+	}
+	if warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 
 	serverJS, err := ensureBundle()
@@ -28,12 +43,70 @@ func Serve() (int, error) {
 	return runServer(nodePath, serverJS)
 }
 
-func findNode() (string, error) {
+// findNode resolves the node binary on PATH and validates its major version.
+// It returns the resolved path, an optional non-blocking warning (empty when
+// none applies), and an error if node is missing, unparsable, or below
+// minNodeMajor. An lsp.node_check telemetry event is recorded on every call.
+func findNode(collector *telemetry.Collector) (string, string, error) {
+	record := func(props map[string]any) {
+		if collector == nil {
+			return
+		}
+		collector.Record("lsp.node_check", props)
+	}
+
 	path, err := exec.LookPath("node")
 	if err != nil {
-		return "", errors.New("node is required but was not found on PATH. Install Node.js from https://nodejs.org")
+		record(map[string]any{"status": "missing"})
+		return "", "", errors.New("node is required but was not found on PATH. Install Node.js from https://nodejs.org")
 	}
-	return path, nil
+
+	out, err := exec.Command(path, "--version").Output()
+	if err != nil {
+		record(map[string]any{"status": "version_check_failed"})
+		return "", "", errors.Wrapf(err, "unable to determine node version by running %q --version", path)
+	}
+
+	version := strings.TrimSpace(string(out))
+	major, err := parseNodeMajor(version)
+	if err != nil {
+		record(map[string]any{"status": "unparsable", "version": version})
+		return "", "", errors.Wrapf(err, "unable to parse node version %q", version)
+	}
+
+	if major < minNodeMajor {
+		record(map[string]any{"status": "too_old", "version": version, "major": major})
+		return "", "", errors.Errorf(
+			"node %d+ is required (found %s). Upgrade from https://nodejs.org, or run a one-off without upgrading via: npx -y -p node@%d -- rwx lint",
+			minNodeMajor, version, minNodeMajor,
+		)
+	}
+
+	var warning string
+	status := "ok"
+	if major < recommendedNodeMajor {
+		warning = fmt.Sprintf(
+			"warning: Node %s has reached end-of-life. See https://nodejs.org/en/about/previous-releases for more information.",
+			version,
+		)
+		status = "eol_warning"
+	}
+
+	record(map[string]any{"status": status, "version": version, "major": major})
+	return path, warning, nil
+}
+
+func parseNodeMajor(version string) (int, error) {
+	trimmed := strings.TrimPrefix(strings.TrimSpace(version), "v")
+	if trimmed == "" {
+		return 0, errors.New("empty version string")
+	}
+	majorPart, _, _ := strings.Cut(trimmed, ".")
+	major, err := strconv.Atoi(majorPart)
+	if err != nil {
+		return 0, errors.Wrapf(err, "major component %q is not an integer", majorPart)
+	}
+	return major, nil
 }
 
 func bundleHash() (string, error) {

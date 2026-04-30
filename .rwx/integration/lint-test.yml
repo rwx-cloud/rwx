@@ -41,6 +41,16 @@ tasks:
     with:
       node-version: ${{ tasks.tool-versions.values.nodejs }}
 
+  - key: min-supported-node
+    call: nodejs/install 1.1.13
+    with:
+      node-version: 18.0.0
+
+  - key: unsupported-node
+    call: nodejs/install 1.1.13
+    with:
+      node-version: 17.0.0
+
   - key: lsp-code
     call: git/clone 2.0.7
     with:
@@ -159,5 +169,106 @@ tasks:
 
       if ! rwx lint -d "$tmpdir" "$tmpdir/.rwx/ci.yml" --warnings-as-errors; then
         echo "Lint failed when given a specific file argument"
+        exit 1
+      fi
+
+  - key: test-lint-node-version-unsupported
+    use: [unsupported-node, rwx-cli]
+    run: |
+      set -euo pipefail
+
+      echo "node version: $(node --version)"
+
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+
+      cat > "$tmpdir/.rwx/ci.yml" << 'EOF'
+      base:
+        image: ubuntu:24.04
+        config: rwx/base 1.0.0
+
+      tasks:
+        - key: hello
+          run: echo "hello"
+      EOF
+
+      set +e
+      output=$(rwx lint -d "$tmpdir" 2>&1)
+      exit_code=$?
+      set -e
+
+      if [ "$exit_code" -eq 0 ]; then
+        echo "Lint should have failed on Node 17 but exited 0"
+        echo "Output:"
+        echo "$output"
+        exit 1
+      fi
+
+      if ! echo "$output" | grep -q "node 18+ is required"; then
+        echo "Expected lint output to mention 'node 18+ is required'"
+        echo "Output:"
+        echo "$output"
+        exit 1
+      fi
+
+      if ! echo "$output" | grep -q "v17"; then
+        echo "Expected lint output to include the actual Node 17 version string"
+        echo "Output:"
+        echo "$output"
+        exit 1
+      fi
+
+      if ! echo "$output" | grep -qF "npx -y -p node@18 -- rwx lint"; then
+        echo "Expected lint output to suggest the npx workaround"
+        echo "Output:"
+        echo "$output"
+        exit 1
+      fi
+
+  - key: test-lint-node-version-min-supported
+    use: [min-supported-node, rwx-cli]
+    run: |
+      set -euo pipefail
+
+      echo "node version: $(node --version)"
+
+      # Lint the cli repo's own top-level .rwx configs to exercise a wide range
+      # of parser code paths against the floor-supported Node version. The
+      # embedded run definitions under .rwx/integration are excluded since they
+      # are not standalone configs.
+      tmpdir=$(mktemp -d)
+      mkdir -p "$tmpdir/.rwx"
+      cp .rwx/build.yml \
+         .rwx/ci.yml \
+         .rwx/main.yml \
+         .rwx/release.yml \
+         .rwx/language-server-update.yml \
+         "$tmpdir/.rwx/"
+
+      set +e
+      output=$(rwx lint -d "$tmpdir" --warnings-as-errors 2>&1)
+      exit_code=$?
+      set -e
+
+      if [ "$exit_code" -ne 0 ]; then
+        echo "Lint failed on the cli repo's own top-level .rwx configs with Node 18.0.0"
+        echo "Output:"
+        echo "$output"
+        exit 1
+      fi
+
+      # Node 18 is below recommendedNodeMajor (22), so the CLI should print a
+      # non-blocking EOL warning to stderr.
+      if ! echo "$output" | grep -q "end-of-life"; then
+        echo "Expected EOL warning for Node 18 to appear in stderr"
+        echo "Output:"
+        echo "$output"
+        exit 1
+      fi
+
+      if ! echo "$output" | grep -qF "https://nodejs.org/en/about/previous-releases"; then
+        echo "Expected EOL warning to link to nodejs.org/en/about/previous-releases"
+        echo "Output:"
+        echo "$output"
         exit 1
       fi
