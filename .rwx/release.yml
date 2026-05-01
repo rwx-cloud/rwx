@@ -344,6 +344,8 @@ tasks:
     use: [code, linear-release-cli]
     if: ${{ init.kind == "production" }}
     after: publish-production-release
-    run: linear-release complete --release-version=${{ init.version }}
+    run: |
+      linear-release sync --release-version=${{ init.version }} --name="RWX CLI ${{ init.version }}"
+      linear-release complete --release-version=${{ init.version }}
     env:
       LINEAR_ACCESS_KEY: ${{ vaults.rwx_cli_development.secrets.linear-release-access-key }}
