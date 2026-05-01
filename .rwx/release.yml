@@ -323,3 +323,27 @@ tasks:
     env:
       GITHUB_TOKEN: ${{ github-apps.rwx-cloud-bot.token }}
       GH_TOKEN: ${{ github-apps.rwx-cloud-bot.token }}
+
+  - key: linear-release-cli
+    run: |
+      mkdir -p bin
+      curl -fsSL \
+        https://github.com/linear/linear-release/releases/latest/download/linear-release-linux-x64 \
+        -o bin/linear-release
+      chmod +x bin/linear-release
+      echo "$PWD/bin" > $RWX_ENV/PATH
+
+  - key: linear-release-unstable
+    use: [code, linear-release-cli]
+    if: ${{ init.kind == "unstable" }}
+    run: linear-release sync
+    env:
+      LINEAR_ACCESS_KEY: ${{ vaults.rwx_cli_development.secrets.linear-release-access-key }}
+
+  - key: linear-release-production
+    use: [code, linear-release-cli]
+    if: ${{ init.kind == "production" }}
+    after: publish-production-release
+    run: linear-release complete --release-version=${{ init.version }}
+    env:
+      LINEAR_ACCESS_KEY: ${{ vaults.rwx_cli_development.secrets.linear-release-access-key }}
