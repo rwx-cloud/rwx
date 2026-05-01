@@ -18,7 +18,7 @@ var (
 		Use:   "serve",
 		Short: "Start an LSP server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			exitCode, err := lsp.Serve()
+			exitCode, err := lsp.Serve(telemetryCollector)
 			if err != nil {
 				return err
 			}

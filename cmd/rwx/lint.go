@@ -43,6 +43,7 @@ var (
 					if err != nil {
 						return nil, err
 					}
+					cfg.TelemetryCollector = telemetryCollector
 
 					checkResult, err := lsp.Check(cmd.Context(), cfg, os.Stdout)
 					if err != nil {

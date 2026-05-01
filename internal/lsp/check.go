@@ -16,6 +16,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/messages"
+	"github.com/rwx-cloud/rwx/internal/telemetry"
 )
 
 type CheckOutputFormat int
@@ -28,11 +29,12 @@ const (
 )
 
 type CheckConfig struct {
-	RwxDirectory string
-	OutputFormat CheckOutputFormat
-	Timeout      time.Duration
-	Files        []string
-	Fix          bool
+	RwxDirectory       string
+	OutputFormat       CheckOutputFormat
+	Timeout            time.Duration
+	Files              []string
+	Fix                bool
+	TelemetryCollector *telemetry.Collector
 }
 
 type CheckResult struct {
@@ -91,9 +93,12 @@ func NewCheckConfig(rwxDir string, formatString string, timeout time.Duration, f
 }
 
 func Check(ctx context.Context, cfg CheckConfig, stdout io.Writer) (*CheckResult, error) {
-	nodePath, err := findNode()
+	nodePath, warning, err := findNode(cfg.TelemetryCollector)
 	if err != nil {
 		return nil, err
+	}
+	if warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 
 	serverJS, err := ensureBundle()
