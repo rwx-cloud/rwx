@@ -7,6 +7,8 @@ RWX is the only CI/CD platform that:
 
 Read more about RWX at [rwx.com](https://www.rwx.com)
 
+![main](https://cloud.rwx.com/status_badges/rwx.svg?branch=main&definition=.rwx%2Fmain.yml&label=main&repo=rwx)
+
 ## Links
 
 - 🌐 [rwx.com](https://www.rwx.com)
