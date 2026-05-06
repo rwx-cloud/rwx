@@ -16,7 +16,6 @@ var sandboxCmd = &cobra.Command{
 	GroupID: "execution",
 	Use:     "sandbox",
 	Short:   "Run commands in persistent sandboxes",
-	Hidden:  true,
 }
 
 var sandboxStartCmd = &cobra.Command{
