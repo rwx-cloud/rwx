@@ -99,14 +99,23 @@ func recordTelemetry(err error, start time.Time) {
 		if errType == "unknown" && !handled {
 			props["error_message"] = scrubErrorMessage(err.Error())
 		}
+		if errType == "unknown_command" {
+			if attempt := extractUnknownCommandAttempt(err); attempt != "" {
+				props["attempted_command"] = scrubErrorMessage(attempt)
+			}
+		}
 		telem.Record("cli.error", props)
 	case unknownSubcommand:
-		telem.Record("cli.error", map[string]any{
+		props := map[string]any{
 			"command":    commandName,
 			"flags":      flagNames,
 			"error_type": "unknown_command",
 			"handled":    false,
-		})
+		}
+		if extras := cmd.Flags().Args(); len(extras) > 0 {
+			props["attempted_command"] = scrubErrorMessage(extras[0])
+		}
+		telem.Record("cli.error", props)
 	}
 
 	telem.Flush()
@@ -122,6 +131,10 @@ var (
 	jwtRe = regexp.MustCompile(`[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}`)
 	// tokenRe matches standalone token-shaped runs (hex/base64/UUID-ish).
 	tokenRe = regexp.MustCompile(`[A-Za-z0-9_\-]{32,}`)
+	// unknownCommandRe pulls the attempted name out of Cobra's
+	// `unknown command "X" for "Y"` error. Cobra formats X with %q, so
+	// embedded quotes are escaped and the simple [^"] match is safe.
+	unknownCommandRe = regexp.MustCompile(`^unknown command "([^"]+)"`)
 )
 
 func scrubErrorMessage(msg string) string {
@@ -135,6 +148,17 @@ func scrubErrorMessage(msg string) string {
 		msg = string(runes[:errorMessageMaxRunes]) + "..."
 	}
 	return msg
+}
+
+func extractUnknownCommandAttempt(err error) string {
+	if err == nil {
+		return ""
+	}
+	m := unknownCommandRe.FindStringSubmatch(err.Error())
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
 }
 
 func classifyError(err error) string {

@@ -68,6 +68,26 @@ func TestClassifyError(t *testing.T) {
 	})
 }
 
+func TestExtractUnknownCommandAttempt(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{"nil", nil, ""},
+		{"plain", fmt.Errorf(`unknown command "signup" for "rwx"`), "signup"},
+		{"with suggestion", fmt.Errorf(`unknown command "signup" for "rwx"` + "\n\nDid you mean this?\n\tsignuptest"), "signup"},
+		{"unrelated error", fmt.Errorf("some other failure"), ""},
+		{"different prefix", fmt.Errorf(`Error: unknown command "signup" for "rwx"`), ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.expected, extractUnknownCommandAttempt(tc.err))
+		})
+	}
+}
+
 // Invoking a non-runnable parent command with unrecognized positional args
 // (e.g. `rwx sandbox push`) doesn't produce an error — Cobra shows help and
 // returns nil. recordTelemetry detects this case via cmd.Flags().Args() after
