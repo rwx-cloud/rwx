@@ -1,7 +1,6 @@
 on:
-  cron:
-    - key: language-server-update
-      schedule: "0 7 * * * America/New_York" # At 7am daily
+  dispatch:
+    - key: cli-language-server-update
 
 base:
   image: ubuntu:24.04
@@ -46,12 +45,14 @@ tasks:
       GITHUB_TOKEN: ${{ github['rwx-cloud'].token }}
 
   - key: create-pull-request
-    call: github/create-pull-request 1.0.6
+    call: github/create-pull-request 1.0.7
     use: update-ref
     with:
       github-token: ${{ github-apps.rwx-cloud-bot.token }}
       branch-prefix: language-server-update
       pull-request-title: Update language-server-ref
+      enable-auto-merge: true
+      reviewers: rwx-cloud/engineers
       pull-request-body: |
         This PR was generated from ${{ tasks.update-ref.values.run-url }}
 
