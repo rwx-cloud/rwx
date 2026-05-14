@@ -349,3 +349,17 @@ tasks:
       linear-release complete --release-version=${{ init.version }}
     env:
       LINEAR_ACCESS_KEY: ${{ vaults.rwx_cli_development.secrets.linear-release-access-key }}
+
+  - key: rwx-cli
+    call: rwx/install-cli 4.0.4
+
+  - key: homebrew-release
+    use: rwx-cli
+    if: ${{ init.kind == "production" }}
+    after: publish-production-release
+    run: |
+      version="${{ init.version }}"
+      trimmed_version="${version#v}"
+      rwx dispatch release-homebrew-tap --param version="${trimmed_version}"
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
