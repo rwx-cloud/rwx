@@ -58,8 +58,6 @@ tasks:
       AWS_OIDC_TOKEN:
         value: ${{ vaults.rwx_cli_development.oidc.aws }}
         cache-key: excluded
-    outputs:
-      values: [ecr-image]
 
   - key: push-image-gzip
     use: [rwx-cli, aws-role]
