@@ -60,8 +60,6 @@ tasks:
 
   - key: extract-version-details
     after: verify-inputs
-    outputs:
-      values: [full-version, aliased-version]
     run: |
       kind="${{ init.kind }}"
 
