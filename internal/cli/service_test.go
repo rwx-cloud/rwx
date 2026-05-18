@@ -383,4 +383,205 @@ func TestSkillInstall(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, skillContent, string(written))
 	})
+
+	t.Run("--yes installs to repo and prints user-level handoff", func(t *testing.T) {
+		s := setupSkillTest(t)
+
+		s.mockAPI.MockGetSkillContent = func() (string, error) {
+			return "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n", nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillInstall(true, "")
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md"), result.Path)
+
+		stderr := s.mockStderr.String()
+		require.Contains(t, stderr, "npx skills add rwx-cloud/skills")
+		require.Contains(t, stderr, "https://www.rwx.com/docs/ai")
+	})
+
+	t.Run("non-TTY without --yes installs to repo without handoff", func(t *testing.T) {
+		s := setupSkillTest(t)
+
+		s.mockAPI.MockGetSkillContent = func() (string, error) {
+			return "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n", nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillInstall(false, "")
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md"), result.Path)
+
+		require.NotContains(t, s.mockStderr.String(), "npx skills")
+	})
+
+	t.Run("interactive picks repo and installs", func(t *testing.T) {
+		s := setupSkillTest(t)
+		s.config.StderrIsTTY = true
+		s.mockStdin = bytes.NewBufferString("1\n")
+		s.config.Stdin = s.mockStdin
+
+		s.mockAPI.MockGetSkillContent = func() (string, error) {
+			return "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n", nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillInstall(false, "")
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md"), result.Path)
+
+		stderr := s.mockStderr.String()
+		require.Contains(t, stderr, "Where would you like to install the RWX skill?")
+		require.NotContains(t, stderr, "npx skills")
+	})
+
+	t.Run("interactive default (empty) installs to repo", func(t *testing.T) {
+		s := setupSkillTest(t)
+		s.config.StderrIsTTY = true
+		s.mockStdin = bytes.NewBufferString("\n")
+		s.config.Stdin = s.mockStdin
+
+		s.mockAPI.MockGetSkillContent = func() (string, error) {
+			return "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n", nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillInstall(false, "")
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md"), result.Path)
+	})
+
+	t.Run("interactive picks user and prints handoff without installing", func(t *testing.T) {
+		s := setupSkillTest(t)
+		s.config.StderrIsTTY = true
+		s.mockStdin = bytes.NewBufferString("2\n")
+		s.config.Stdin = s.mockStdin
+
+		s.mockAPI.MockGetSkillContent = func() (string, error) {
+			t.Fatal("API should not be called when user picks user-level install")
+			return "", nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillInstall(false, "")
+		require.NoError(t, err)
+		require.Empty(t, result.Path)
+
+		stderr := s.mockStderr.String()
+		require.Contains(t, stderr, "npx skills add rwx-cloud/skills")
+		require.Contains(t, stderr, "https://www.rwx.com/docs/ai")
+
+		_, statErr := os.Stat(filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md"))
+		require.True(t, os.IsNotExist(statErr), "no SKILL.md should be written")
+	})
+
+	t.Run("interactive accepts word form 'repo'", func(t *testing.T) {
+		s := setupSkillTest(t)
+		s.config.StderrIsTTY = true
+		s.mockStdin = bytes.NewBufferString("repo\n")
+		s.config.Stdin = s.mockStdin
+
+		s.mockAPI.MockGetSkillContent = func() (string, error) {
+			return "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n", nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillInstall(false, "")
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md"), result.Path)
+	})
+
+	t.Run("interactive accepts word form 'user'", func(t *testing.T) {
+		s := setupSkillTest(t)
+		s.config.StderrIsTTY = true
+		s.mockStdin = bytes.NewBufferString("user\n")
+		s.config.Stdin = s.mockStdin
+
+		s.mockAPI.MockGetSkillContent = func() (string, error) {
+			t.Fatal("API should not be called when user picks user-level install")
+			return "", nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillInstall(false, "")
+		require.NoError(t, err)
+		require.Empty(t, result.Path)
+		require.Contains(t, s.mockStderr.String(), "npx skills add rwx-cloud/skills")
+	})
+
+	t.Run("--yes with existing install confirms with renamed prompt copy", func(t *testing.T) {
+		s := setupSkillTest(t)
+		seedSkillFile(t, s.tmp, "1.0.0")
+
+		s.mockAPI.MockGetSkillContent = func() (string, error) {
+			return "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n", nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillInstall(true, "")
+		require.NoError(t, err)
+		require.Equal(t, filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md"), result.Path)
+
+		stderr := s.mockStderr.String()
+		require.Contains(t, stderr, "An existing")
+		require.Contains(t, stderr, "installation was found")
+		require.NotContains(t, stderr, "project level")
+	})
+
+	t.Run("interactive invalid choice errors", func(t *testing.T) {
+		s := setupSkillTest(t)
+		s.config.StderrIsTTY = true
+		s.mockStdin = bytes.NewBufferString("nope\n")
+		s.config.Stdin = s.mockStdin
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		_, err = s.service.SkillInstall(false, "")
+		require.Error(t, err)
+	})
 }

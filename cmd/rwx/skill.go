@@ -55,13 +55,17 @@ var (
 
 	skillInstallCmd = &cobra.Command{
 		Use:   "install",
-		Short: "Install the RWX agent skill at the project level (.agents/skills/rwx/SKILL.md)",
+		Short: "Install the RWX agent skill (prompts repo vs user; repo writes to .agents/skills/rwx/SKILL.md, user defers to `npx skills`)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			yes, _ := cmd.Flags().GetBool("yes")
 			symlink, _ := cmd.Flags().GetString("symlink")
 			result, err := service.SkillInstall(yes, symlink)
 			if err != nil {
 				return err
+			}
+
+			if result.Path == "" {
+				return nil
 			}
 
 			fmt.Fprintf(os.Stdout, "Installed RWX agent skill at %s\n", shortenPath(result.Path))

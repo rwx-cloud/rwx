@@ -90,7 +90,7 @@ func TestDetect(t *testing.T) {
 		require.False(t, result.AnyFound)
 	})
 
-	t.Run("agents global only", func(t *testing.T) {
+	t.Run("agents user only", func(t *testing.T) {
 		tmp := t.TempDir()
 		t.Setenv("HOME", tmp)
 		t.Chdir(tmp)
@@ -109,12 +109,12 @@ func TestDetect(t *testing.T) {
 			}
 		}
 		require.NotNil(t, found)
-		require.Equal(t, "global", found.Scope)
+		require.Equal(t, "user", found.Scope)
 		require.Equal(t, "agents", found.Source)
 		require.Equal(t, "1.0.0", found.Version)
 	})
 
-	t.Run("agents project only", func(t *testing.T) {
+	t.Run("agents repo only", func(t *testing.T) {
 		tmp := t.TempDir()
 		t.Setenv("HOME", tmp)
 
@@ -136,7 +136,7 @@ func TestDetect(t *testing.T) {
 			}
 		}
 		require.NotNil(t, found)
-		require.Equal(t, "project", found.Scope)
+		require.Equal(t, "repo", found.Scope)
 		require.Equal(t, "agents", found.Source)
 		require.Equal(t, "2.0.0", found.Version)
 	})
@@ -160,7 +160,7 @@ func TestDetect(t *testing.T) {
 			}
 		}
 		require.NotNil(t, found)
-		require.Equal(t, "global", found.Scope)
+		require.Equal(t, "user", found.Scope)
 		require.Equal(t, "marketplace", found.Source)
 		require.Equal(t, "0.1.3", found.Version)
 	})
