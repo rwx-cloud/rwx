@@ -337,8 +337,14 @@ tasks:
         exit 1
       fi
 
-      if ! echo "$output" | grep -q "project"; then
-        echo "Expected 'project' scope in status output, got:"
+      if ! echo "$output" | grep -q "repo"; then
+        echo "Expected 'repo' scope in status output, got:"
+        echo "$output"
+        exit 1
+      fi
+
+      if echo "$output" | grep -q "project"; then
+        echo "Stale 'project' terminology still present in status output:"
         echo "$output"
         exit 1
       fi
@@ -351,3 +357,88 @@ tasks:
         echo "$json"
         exit 1
       fi
+
+      scope=$(echo "$json" | jq -r '[.Installations[] | select(.Detected == true and .Source == "agents")][0].Scope')
+      if [ "$scope" != "repo" ]; then
+        echo "Expected JSON Scope 'repo' for repo-level install, got '$scope'"
+        echo "$json"
+        exit 1
+      fi
+
+  # --yes always prints the user-level handoff (npx skills + docs link)
+  - key: test-install-yes-prints-handoff
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+
+      stderr=$(rwx skill install --yes 2>&1 >/dev/null)
+
+      if ! echo "$stderr" | grep -q "npx skills add rwx-cloud/skills"; then
+        echo "Expected 'npx skills add rwx-cloud/skills' handoff in stderr after --yes install, got:"
+        echo "$stderr"
+        exit 1
+      fi
+
+      if ! echo "$stderr" | grep -q "https://www.rwx.com/docs/ai"; then
+        echo "Expected docs link in stderr after --yes install, got:"
+        echo "$stderr"
+        exit 1
+      fi
+
+  # --yes over an existing repo install: confirms automatically and uses
+  # the renamed "repo" terminology in the existing-install notice.
+  - key: test-install-yes-existing-uses-repo-terminology
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+
+      mkdir -p "$tmpdir/.agents/skills/rwx"
+      cat > "$tmpdir/.agents/skills/rwx/SKILL.md" << 'EOF'
+      ---
+      metadata:
+        version: "0.0.1"
+      ---
+      Stale content
+      EOF
+
+      stderr=$(rwx skill install --yes 2>&1 >/dev/null)
+
+      if ! echo "$stderr" | grep -q "An existing repo installation"; then
+        echo "Expected 'An existing repo installation' in stderr, got:"
+        echo "$stderr"
+        exit 1
+      fi
+
+      if echo "$stderr" | grep -q "project level"; then
+        echo "Stale 'project level' terminology still present in stderr:"
+        echo "$stderr"
+        exit 1
+      fi
+
+      # Install should still have succeeded (stale content overwritten).
+      if grep -q "Stale content" "$tmpdir/.agents/skills/rwx/SKILL.md"; then
+        echo "SKILL.md still contains stale content after --yes install"
+        exit 1
+      fi
+
+  # Help text reflects the repo/user prompt and `npx skills` handoff
+  - key: test-skill-install-help-text
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      output=$(rwx skill install --help)
+
+      for needle in repo user "npx skills"; do
+        if ! echo "$output" | grep -q "$needle"; then
+          echo "Expected --help output to mention '$needle', got:"
+          echo "$output"
+          exit 1
+        fi
+      done

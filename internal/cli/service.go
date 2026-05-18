@@ -295,10 +295,13 @@ func (s Service) SkillUpdate(symlink string) (*SkillUpdateResult, error) {
 }
 
 type SkillInstallResult struct {
+	// Path is the location of the installed SKILL.md, or "" if no install
+	// was performed (e.g. the user chose a user-level handoff).
 	Path string
 }
 
-// SkillInstall installs the RWX agent skill at the project level. The
+// SkillInstall installs the RWX agent skill at the repo level, or prints a
+// handoff to the `skills` CLI for a user-level install. The repo-level
 // install location and symlink behavior are inferred from the project:
 //   - Neither .agents nor .claude exists: install to .agents, prompt for .claude symlink
 //   - Both exist: install to .agents, auto-symlink to .claude
@@ -306,16 +309,30 @@ type SkillInstallResult struct {
 //   - Only .agents exists: install to .agents, no symlink
 //
 // The --symlink claude flag forces symlink creation (useful in non-TTY).
+// With --yes, install to repo and always print the user-level handoff.
 func (s Service) SkillInstall(yes bool, symlink string) (*SkillInstallResult, error) {
 	detected, err := skill.Detect()
 	if err != nil {
 		return nil, err
 	}
 
+	// In interactive mode, prompt for repo vs user before doing anything.
+	// `--yes` and non-TTY both default to repo without prompting.
+	if !yes && s.StderrIsTTY {
+		choice, err := s.promptForInstallLocation()
+		if err != nil {
+			return nil, err
+		}
+		if choice == installLocationUser {
+			s.printUserLevelHandoff()
+			return &SkillInstallResult{}, nil
+		}
+	}
+
 	for _, inst := range detected.Installations {
 		if skill.IsDetected(inst) && inst.Source == "agents" {
 			fmt.Fprintf(s.Stderr, "An existing %s installation was found at %s\n", inst.Scope, inst.Path)
-			if err := s.confirmDestruction("Install at the project level anyway?", yes); err != nil {
+			if err := s.confirmDestruction("Install at the repo level anyway?", yes); err != nil {
 				return nil, err
 			}
 			break
@@ -371,7 +388,55 @@ func (s Service) SkillInstall(yes bool, symlink string) (*SkillInstallResult, er
 		return nil, errors.Wrap(err, "unable to write skill file")
 	}
 
+	// `--yes` always prints the handoff so non-interactive users learn about
+	// the user-level install path; we don't try to detect existing user-level
+	// installs here.
+	if yes {
+		s.printUserLevelHandoff()
+	}
+
 	return &SkillInstallResult{Path: skillPath}, nil
+}
+
+const (
+	installLocationRepo = "repo"
+	installLocationUser = "user"
+)
+
+// promptForInstallLocation asks the user whether to install the skill at the
+// repo or user level. Defaults to repo on empty input. Returns the user's
+// choice; errors only on IO failures.
+func (s Service) promptForInstallLocation() (string, error) {
+	fmt.Fprintln(s.Stderr, "Where would you like to install the RWX skill?")
+	fmt.Fprintln(s.Stderr, "1 - repo (recommended, best practice is to commit skills to share with your team)")
+	fmt.Fprintln(s.Stderr, "2 - user (installs the skill on this machine, available across projects)")
+	fmt.Fprintf(s.Stderr, "Choose [1]: ")
+
+	scanner := bufio.NewScanner(s.Stdin)
+	if !scanner.Scan() {
+		return installLocationRepo, nil
+	}
+
+	answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+	switch answer {
+	case "", "1", "repo":
+		return installLocationRepo, nil
+	case "2", "user":
+		return installLocationUser, nil
+	default:
+		return "", errors.New("invalid choice; expected 1 (repo) or 2 (user)")
+	}
+}
+
+// printUserLevelHandoff prints instructions for installing the RWX skill at
+// the user (machine-wide) level via the `skills` CLI.
+func (s Service) printUserLevelHandoff() {
+	fmt.Fprintln(s.Stderr, "")
+	fmt.Fprintln(s.Stderr, "To install the RWX skill at the user level, use the `skills` CLI:")
+	fmt.Fprintln(s.Stderr, "")
+	fmt.Fprintln(s.Stderr, "  npx skills add rwx-cloud/skills")
+	fmt.Fprintln(s.Stderr, "")
+	fmt.Fprintln(s.Stderr, "For more details, see https://www.rwx.com/docs/ai")
 }
 
 // promptForClaudeSymlink asks the user whether to create a Claude Code symlink.

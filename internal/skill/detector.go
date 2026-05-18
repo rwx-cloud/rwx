@@ -44,28 +44,28 @@ func Detect() (*DetectResult, error) {
 
 	var installations []Installation
 
-	// Check global agents installation
-	globalPath := filepath.Join(homeDir, ".agents", "skills", "rwx", "SKILL.md")
-	globalInst, err := checkSkillFile("global", "agents", globalPath)
+	// Check user-level agents installation
+	userPath := filepath.Join(homeDir, ".agents", "skills", "rwx", "SKILL.md")
+	userInst, err := checkSkillFile("user", "agents", userPath)
 	if err != nil {
 		return nil, err
 	}
-	installations = append(installations, globalInst)
+	installations = append(installations, userInst)
 
-	// Check project agents installation (walk cwd up), skipping if it resolves
-	// to the same file as the global installation.
+	// Check repo-level agents installation (walk cwd up), skipping if it resolves
+	// to the same file as the user-level installation.
 	skillSubdir := filepath.Join(".agents", "skills", "rwx", "SKILL.md")
-	if projectPath := findFileWalkingUp(cwd, skillSubdir); projectPath != "" {
+	if repoPath := findFileWalkingUp(cwd, skillSubdir); repoPath != "" {
 		skip := false
-		if globalInst.Detected {
-			globalReal, err1 := filepath.EvalSymlinks(globalPath)
-			projectReal, err2 := filepath.EvalSymlinks(projectPath)
-			if err1 == nil && err2 == nil && globalReal == projectReal {
+		if userInst.Detected {
+			userReal, err1 := filepath.EvalSymlinks(userPath)
+			repoReal, err2 := filepath.EvalSymlinks(repoPath)
+			if err1 == nil && err2 == nil && userReal == repoReal {
 				skip = true
 			}
 		}
 		if !skip {
-			inst, err := checkSkillFile("project", "agents", projectPath)
+			inst, err := checkSkillFile("repo", "agents", repoPath)
 			if err != nil {
 				return nil, err
 			}
@@ -75,7 +75,7 @@ func Detect() (*DetectResult, error) {
 
 	// Check Claude Code marketplace installation
 	marketplacePath := filepath.Join(homeDir, ".claude", "plugins", "marketplaces", "rwx", "plugins", "rwx", "skills", "rwx", "SKILL.md")
-	marketplaceInst, err := checkSkillFile("global", "marketplace", marketplacePath)
+	marketplaceInst, err := checkSkillFile("user", "marketplace", marketplacePath)
 	if err != nil {
 		return nil, err
 	}
