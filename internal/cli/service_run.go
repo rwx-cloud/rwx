@@ -1,15 +1,94 @@
 package cli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/git"
 )
+
+// runDefinitionOutsideRwxDir reports whether the resolved run definition file
+// lives outside the resolved rwx directory. If rwxDirectoryPath is empty (no
+// .rwx directory configured or discovered) the file is considered outside.
+func runDefinitionOutsideRwxDir(runDefinitionPath, rwxDirectoryPath string) (bool, error) {
+	if rwxDirectoryPath == "" {
+		return true, nil
+	}
+
+	absRunDef, err := filepath.Abs(runDefinitionPath)
+	if err != nil {
+		return false, err
+	}
+	absRwxDir, err := filepath.Abs(rwxDirectoryPath)
+	if err != nil {
+		return false, err
+	}
+
+	rel, err := filepath.Rel(absRwxDir, absRunDef)
+	if err != nil {
+		return true, nil
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return true, nil
+	}
+	return false, nil
+}
+
+// appendWorkflowUploadEntry adds a synthetic .workflow directory entry and a
+// .workflow/<basename> file entry (sourced from runDef) to entries so the run
+// definition is included in the uploaded rwx directory when it lives outside
+// the resolved rwx directory. If .workflow/<basename> already exists in
+// entries, the file is placed at .workflow/<contentHash>/<basename> instead,
+// where contentHash is a short sha256 of the file contents (deterministic so
+// repeated runs of the same file land at the same path).
+func appendWorkflowUploadEntry(entries []RwxDirectoryEntry, runDef RwxDirectoryEntry) []RwxDirectoryEntry {
+	hasWorkflowDir := false
+	existingPaths := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		existingPaths[e.Path] = true
+		if e.Path == ".workflow" && e.IsDir() {
+			hasWorkflowDir = true
+		}
+	}
+
+	if !hasWorkflowDir {
+		entries = append(entries, RwxDirectoryEntry{
+			Type:        "dir",
+			Path:        ".workflow",
+			Permissions: 0o755,
+		})
+	}
+
+	basename := filepath.Base(runDef.OriginalPath)
+	filePath := ".workflow/" + basename
+
+	if existingPaths[filePath] {
+		sum := sha256.Sum256([]byte(runDef.FileContents))
+		nestedDir := ".workflow/" + hex.EncodeToString(sum[:8])
+		entries = append(entries, RwxDirectoryEntry{
+			Type:        "dir",
+			Path:        nestedDir,
+			Permissions: 0o755,
+		})
+		filePath = nestedDir + "/" + basename
+	}
+
+	entries = append(entries, RwxDirectoryEntry{
+		Type:         "file",
+		Path:         filePath,
+		Permissions:  runDef.Permissions,
+		FileContents: runDef.FileContents,
+	})
+
+	return entries
+}
 
 type InitiateRunConfig struct {
 	InitParameters map[string]string
@@ -222,6 +301,10 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		if err = reloadRunDefinitions(); err != nil {
 			return nil, err
 		}
+	}
+
+	if outside, err := runDefinitionOutsideRwxDir(runDefinitionPath, rwxDirectoryPath); err == nil && outside {
+		rwxDirectory = appendWorkflowUploadEntry(rwxDirectory, runDefinition[0])
 	}
 
 	i := 0
