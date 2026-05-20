@@ -1,6 +1,8 @@
 package cli_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -69,7 +71,7 @@ func TestService_InitiatingRun(t *testing.T) {
 				err = os.MkdirAll(mintDir, 0o755)
 				require.NoError(t, err)
 
-				err = os.WriteFile(filepath.Join(workingDir, "mint.yml"), []byte(originalSpecifiedFileContent), 0o644)
+				err = os.WriteFile(filepath.Join(workingDir, "ci.yml"), []byte(originalSpecifiedFileContent), 0o644)
 				require.NoError(t, err)
 
 				err = os.WriteFile(filepath.Join(mintDir, "mintdir-tasks.yml"), []byte(originalRwxDirFileContent), 0o644)
@@ -85,13 +87,13 @@ func TestService_InitiatingRun(t *testing.T) {
 				err = os.WriteFile(filepath.Join(nestedDir, "tasks.yaml"), []byte("some nested yaml"), 0o644)
 				require.NoError(t, err)
 
-				runConfig.MintFilePath = "mint.yml"
+				runConfig.MintFilePath = "ci.yml"
 				runConfig.RwxDirectory = ""
 
 				s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 					require.Len(t, cfg.TaskDefinitions, 1)
 					require.Equal(t, runConfig.MintFilePath, cfg.TaskDefinitions[0].Path)
-					require.Len(t, cfg.RwxDirectory, 7)
+					require.Len(t, cfg.RwxDirectory, 9)
 					require.Equal(t, ".", cfg.RwxDirectory[0].Path)
 					require.Equal(t, "mintdir-tasks.json", cfg.RwxDirectory[1].Path)
 					require.Equal(t, "mintdir-tasks.yml", cfg.RwxDirectory[2].Path)
@@ -99,6 +101,10 @@ func TestService_InitiatingRun(t *testing.T) {
 					require.Equal(t, "some/nested", cfg.RwxDirectory[4].Path)
 					require.Equal(t, "some/nested/path", cfg.RwxDirectory[5].Path)
 					require.Equal(t, "some/nested/path/tasks.yaml", cfg.RwxDirectory[6].Path)
+					require.Equal(t, ".workflow", cfg.RwxDirectory[7].Path)
+					require.Equal(t, "dir", cfg.RwxDirectory[7].Type)
+					require.Equal(t, ".workflow/ci.yml", cfg.RwxDirectory[8].Path)
+					require.Equal(t, "file", cfg.RwxDirectory[8].Type)
 					require.True(t, cfg.UseCache)
 					require.NotNil(t, cfg.Git)
 					require.Equal(t, branch, cfg.Git.Branch)
@@ -110,7 +116,7 @@ func TestService_InitiatingRun(t *testing.T) {
 						RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						TargetedTaskKeys: []string{},
-						DefinitionPath:   ".mint/mint.yml",
+						DefinitionPath:   ".mint/ci.yml",
 					}, nil
 				}
 
@@ -126,6 +132,8 @@ func TestService_InitiatingRun(t *testing.T) {
 				require.Equal(t, "", receivedRwxDir[4].FileContents)
 				require.Equal(t, "", receivedRwxDir[5].FileContents)
 				require.Equal(t, "some nested yaml", receivedRwxDir[6].FileContents)
+				require.Equal(t, "", receivedRwxDir[7].FileContents)
+				require.Equal(t, originalSpecifiedFileContent, receivedRwxDir[8].FileContents)
 
 				_ = getDefaultBaseCalled
 				_ = getPackageVersionsCalled
@@ -166,24 +174,28 @@ func TestService_InitiatingRun(t *testing.T) {
 				err = os.MkdirAll(mintDir, 0o755)
 				require.NoError(t, err)
 
-				err = os.WriteFile(filepath.Join(workingDir, "mint.yml"), []byte(originalSpecifiedFileContent), 0o644)
+				err = os.WriteFile(filepath.Join(workingDir, "ci.yml"), []byte(originalSpecifiedFileContent), 0o644)
 				require.NoError(t, err)
 
-				runConfig.MintFilePath = "mint.yml"
+				runConfig.MintFilePath = "ci.yml"
 				runConfig.RwxDirectory = ""
 
 				s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 					require.Len(t, cfg.TaskDefinitions, 1)
 					require.Equal(t, runConfig.MintFilePath, cfg.TaskDefinitions[0].Path)
-					require.Len(t, cfg.RwxDirectory, 1)
+					require.Len(t, cfg.RwxDirectory, 3)
 					require.Equal(t, ".", cfg.RwxDirectory[0].Path)
+					require.Equal(t, ".workflow", cfg.RwxDirectory[1].Path)
+					require.Equal(t, "dir", cfg.RwxDirectory[1].Type)
+					require.Equal(t, ".workflow/ci.yml", cfg.RwxDirectory[2].Path)
+					require.Equal(t, "file", cfg.RwxDirectory[2].Type)
 					require.True(t, cfg.UseCache)
 					receivedSpecifiedFileContent = cfg.TaskDefinitions[0].FileContents
 					return &api.InitiateRunResult{
 						RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						TargetedTaskKeys: []string{},
-						DefinitionPath:   ".mint/mint.yml",
+						DefinitionPath:   ".mint/ci.yml",
 					}, nil
 				}
 
@@ -226,26 +238,30 @@ func TestService_InitiatingRun(t *testing.T) {
 				err = os.Chdir(workingDir)
 				require.NoError(t, err)
 
-				err = os.WriteFile(filepath.Join(workingDir, "mint.yml"), []byte(originalSpecifiedFileContent), 0o644)
+				err = os.WriteFile(filepath.Join(workingDir, "ci.yml"), []byte(originalSpecifiedFileContent), 0o644)
 				require.NoError(t, err)
 
-				runConfig.MintFilePath = "mint.yml"
+				runConfig.MintFilePath = "ci.yml"
 				runConfig.RwxDirectory = ""
 
 				s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 					require.Len(t, cfg.TaskDefinitions, 1)
 					require.Equal(t, runConfig.MintFilePath, cfg.TaskDefinitions[0].Path)
 					// When no .rwx directory is specified, a temporary directory is created
-					require.Len(t, cfg.RwxDirectory, 1)
+					require.Len(t, cfg.RwxDirectory, 3)
 					require.Equal(t, ".", cfg.RwxDirectory[0].Path)
 					require.Equal(t, "dir", cfg.RwxDirectory[0].Type)
+					require.Equal(t, ".workflow", cfg.RwxDirectory[1].Path)
+					require.Equal(t, "dir", cfg.RwxDirectory[1].Type)
+					require.Equal(t, ".workflow/ci.yml", cfg.RwxDirectory[2].Path)
+					require.Equal(t, "file", cfg.RwxDirectory[2].Type)
 					require.True(t, cfg.UseCache)
 					receivedSpecifiedFileContent = cfg.TaskDefinitions[0].FileContents
 					return &api.InitiateRunResult{
 						RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						TargetedTaskKeys: []string{},
-						DefinitionPath:   ".mint/mint.yml",
+						DefinitionPath:   ".mint/ci.yml",
 					}, nil
 				}
 
@@ -305,7 +321,7 @@ func TestService_InitiatingRun(t *testing.T) {
 				err = os.MkdirAll(rwxDir, 0o755)
 				require.NoError(t, err)
 
-				err = os.WriteFile(filepath.Join(workingDir, "mint.yml"), []byte(originalSpecifiedFileContent), 0o644)
+				err = os.WriteFile(filepath.Join(workingDir, "ci.yml"), []byte(originalSpecifiedFileContent), 0o644)
 				require.NoError(t, err)
 
 				err = os.WriteFile(filepath.Join(rwxDir, "mintdir-tasks.yml"), []byte(originalRwxDirFileContent), 0o644)
@@ -321,13 +337,13 @@ func TestService_InitiatingRun(t *testing.T) {
 				err = os.WriteFile(filepath.Join(nestedDir, "tasks.yaml"), []byte("some nested yaml"), 0o644)
 				require.NoError(t, err)
 
-				runConfig.MintFilePath = "mint.yml"
+				runConfig.MintFilePath = "ci.yml"
 				runConfig.RwxDirectory = ""
 
 				s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 					require.Len(t, cfg.TaskDefinitions, 1)
 					require.Equal(t, runConfig.MintFilePath, cfg.TaskDefinitions[0].Path)
-					require.Len(t, cfg.RwxDirectory, 7)
+					require.Len(t, cfg.RwxDirectory, 9)
 					require.Equal(t, ".", cfg.RwxDirectory[0].Path)
 					require.Equal(t, "mintdir-tasks.json", cfg.RwxDirectory[1].Path)
 					require.Equal(t, "mintdir-tasks.yml", cfg.RwxDirectory[2].Path)
@@ -335,6 +351,10 @@ func TestService_InitiatingRun(t *testing.T) {
 					require.Equal(t, "some/nested", cfg.RwxDirectory[4].Path)
 					require.Equal(t, "some/nested/path", cfg.RwxDirectory[5].Path)
 					require.Equal(t, "some/nested/path/tasks.yaml", cfg.RwxDirectory[6].Path)
+					require.Equal(t, ".workflow", cfg.RwxDirectory[7].Path)
+					require.Equal(t, "dir", cfg.RwxDirectory[7].Type)
+					require.Equal(t, ".workflow/ci.yml", cfg.RwxDirectory[8].Path)
+					require.Equal(t, "file", cfg.RwxDirectory[8].Type)
 					require.True(t, cfg.UseCache)
 					receivedSpecifiedFileContent = cfg.TaskDefinitions[0].FileContents
 					receivedRwxDir = cfg.RwxDirectory
@@ -342,7 +362,7 @@ func TestService_InitiatingRun(t *testing.T) {
 						RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						TargetedTaskKeys: []string{},
-						DefinitionPath:   ".mint/mint.yml",
+						DefinitionPath:   ".mint/ci.yml",
 					}, nil
 				}
 
@@ -358,6 +378,8 @@ func TestService_InitiatingRun(t *testing.T) {
 				require.Equal(t, "", receivedRwxDir[4].FileContents)
 				require.Equal(t, "", receivedRwxDir[5].FileContents)
 				require.Equal(t, "some nested yaml", receivedRwxDir[6].FileContents)
+				require.Equal(t, "", receivedRwxDir[7].FileContents)
+				require.Equal(t, originalSpecifiedFileContent, receivedRwxDir[8].FileContents)
 			})
 
 			t.Run("when an empty directory is found", func(t *testing.T) {
@@ -395,24 +417,28 @@ func TestService_InitiatingRun(t *testing.T) {
 				err = os.MkdirAll(rwxDir, 0o755)
 				require.NoError(t, err)
 
-				err = os.WriteFile(filepath.Join(workingDir, "mint.yml"), []byte(originalSpecifiedFileContent), 0o644)
+				err = os.WriteFile(filepath.Join(workingDir, "ci.yml"), []byte(originalSpecifiedFileContent), 0o644)
 				require.NoError(t, err)
 
-				runConfig.MintFilePath = "mint.yml"
+				runConfig.MintFilePath = "ci.yml"
 				runConfig.RwxDirectory = ""
 
 				s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 					require.Len(t, cfg.TaskDefinitions, 1)
 					require.Equal(t, runConfig.MintFilePath, cfg.TaskDefinitions[0].Path)
-					require.Len(t, cfg.RwxDirectory, 1)
+					require.Len(t, cfg.RwxDirectory, 3)
 					require.Equal(t, ".", cfg.RwxDirectory[0].Path)
+					require.Equal(t, ".workflow", cfg.RwxDirectory[1].Path)
+					require.Equal(t, "dir", cfg.RwxDirectory[1].Type)
+					require.Equal(t, ".workflow/ci.yml", cfg.RwxDirectory[2].Path)
+					require.Equal(t, "file", cfg.RwxDirectory[2].Type)
 					require.True(t, cfg.UseCache)
 					receivedSpecifiedFileContent = cfg.TaskDefinitions[0].FileContents
 					return &api.InitiateRunResult{
 						RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						TargetedTaskKeys: []string{},
-						DefinitionPath:   ".mint/mint.yml",
+						DefinitionPath:   ".mint/ci.yml",
 					}, nil
 				}
 
@@ -455,26 +481,30 @@ func TestService_InitiatingRun(t *testing.T) {
 				err = os.Chdir(workingDir)
 				require.NoError(t, err)
 
-				err = os.WriteFile(filepath.Join(workingDir, "mint.yml"), []byte(originalSpecifiedFileContent), 0o644)
+				err = os.WriteFile(filepath.Join(workingDir, "ci.yml"), []byte(originalSpecifiedFileContent), 0o644)
 				require.NoError(t, err)
 
-				runConfig.MintFilePath = "mint.yml"
+				runConfig.MintFilePath = "ci.yml"
 				runConfig.RwxDirectory = ""
 
 				s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 					require.Len(t, cfg.TaskDefinitions, 1)
 					require.Equal(t, runConfig.MintFilePath, cfg.TaskDefinitions[0].Path)
 					// When no .rwx directory is specified, a temporary directory is created
-					require.Len(t, cfg.RwxDirectory, 1)
+					require.Len(t, cfg.RwxDirectory, 3)
 					require.Equal(t, ".", cfg.RwxDirectory[0].Path)
 					require.Equal(t, "dir", cfg.RwxDirectory[0].Type)
+					require.Equal(t, ".workflow", cfg.RwxDirectory[1].Path)
+					require.Equal(t, "dir", cfg.RwxDirectory[1].Type)
+					require.Equal(t, ".workflow/ci.yml", cfg.RwxDirectory[2].Path)
+					require.Equal(t, "file", cfg.RwxDirectory[2].Type)
 					require.True(t, cfg.UseCache)
 					receivedSpecifiedFileContent = cfg.TaskDefinitions[0].FileContents
 					return &api.InitiateRunResult{
 						RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						TargetedTaskKeys: []string{},
-						DefinitionPath:   ".mint/mint.yml",
+						DefinitionPath:   ".mint/ci.yml",
 					}, nil
 				}
 
@@ -532,7 +562,7 @@ func TestService_InitiatingRun(t *testing.T) {
 				err = os.MkdirAll(rwxDir, 0o755)
 				require.NoError(t, err)
 
-				err = os.WriteFile(filepath.Join(workingDir, "mint.yml"), []byte(originalSpecifiedFileContent), 0o644)
+				err = os.WriteFile(filepath.Join(workingDir, "ci.yml"), []byte(originalSpecifiedFileContent), 0o644)
 				require.NoError(t, err)
 
 				err = os.WriteFile(filepath.Join(rwxDir, "mintdir-tasks.yml"), []byte(originalRwxDirFileContent), 0o644)
@@ -555,13 +585,13 @@ func TestService_InitiatingRun(t *testing.T) {
 				err = os.WriteFile(filepath.Join(nestedDir, "tasks.yaml"), []byte("some nested yaml"), 0o644)
 				require.NoError(t, err)
 
-				runConfig.MintFilePath = "mint.yml"
+				runConfig.MintFilePath = "ci.yml"
 				runConfig.RwxDirectory = ""
 
 				s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 					require.Len(t, cfg.TaskDefinitions, 1)
 					require.Equal(t, runConfig.MintFilePath, cfg.TaskDefinitions[0].Path)
-					require.Len(t, cfg.RwxDirectory, 7)
+					require.Len(t, cfg.RwxDirectory, 9)
 					require.Equal(t, ".", cfg.RwxDirectory[0].Path)
 					require.Equal(t, "mintdir-tasks.json", cfg.RwxDirectory[1].Path)
 					require.Equal(t, "mintdir-tasks.yml", cfg.RwxDirectory[2].Path)
@@ -569,6 +599,10 @@ func TestService_InitiatingRun(t *testing.T) {
 					require.Equal(t, "some/nested", cfg.RwxDirectory[4].Path)
 					require.Equal(t, "some/nested/path", cfg.RwxDirectory[5].Path)
 					require.Equal(t, "some/nested/path/tasks.yaml", cfg.RwxDirectory[6].Path)
+					require.Equal(t, ".workflow", cfg.RwxDirectory[7].Path)
+					require.Equal(t, "dir", cfg.RwxDirectory[7].Type)
+					require.Equal(t, ".workflow/ci.yml", cfg.RwxDirectory[8].Path)
+					require.Equal(t, "file", cfg.RwxDirectory[8].Type)
 					require.True(t, cfg.UseCache)
 					receivedSpecifiedFileContent = cfg.TaskDefinitions[0].FileContents
 					receivedRwxDir = cfg.RwxDirectory
@@ -576,7 +610,7 @@ func TestService_InitiatingRun(t *testing.T) {
 						RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 						TargetedTaskKeys: []string{},
-						DefinitionPath:   ".mint/mint.yml",
+						DefinitionPath:   ".mint/ci.yml",
 					}, nil
 				}
 
@@ -585,7 +619,7 @@ func TestService_InitiatingRun(t *testing.T) {
 
 				require.Equal(t, originalSpecifiedFileContent, receivedSpecifiedFileContent)
 				require.NotNil(t, receivedRwxDir)
-				require.Equal(t, 7, len(receivedRwxDir))
+				require.Equal(t, 9, len(receivedRwxDir))
 				require.Equal(t, ".", receivedRwxDir[0].Path)
 				require.Equal(t, "mintdir-tasks.json", receivedRwxDir[1].Path)
 				require.Equal(t, "mintdir-tasks.yml", receivedRwxDir[2].Path)
@@ -593,6 +627,8 @@ func TestService_InitiatingRun(t *testing.T) {
 				require.Equal(t, "some/nested", receivedRwxDir[4].Path)
 				require.Equal(t, "some/nested/path", receivedRwxDir[5].Path)
 				require.Equal(t, "some/nested/path/tasks.yaml", receivedRwxDir[6].Path)
+				require.Equal(t, ".workflow", receivedRwxDir[7].Path)
+				require.Equal(t, ".workflow/ci.yml", receivedRwxDir[8].Path)
 			})
 		})
 
@@ -776,7 +812,7 @@ func TestService_InitiatingRun(t *testing.T) {
 			err = os.MkdirAll(mintDir, 0o755)
 			require.NoError(t, err)
 
-			err = os.WriteFile(filepath.Join(workingDir, "mint.yml"), []byte(originalSpecifiedFileContent), 0o644)
+			err = os.WriteFile(filepath.Join(workingDir, "ci.yml"), []byte(originalSpecifiedFileContent), 0o644)
 			require.NoError(t, err)
 
 			err = os.WriteFile(filepath.Join(mintDir, "mintdir-tasks.yml"), []byte(originalRwxDirFileContent), 0o644)
@@ -785,16 +821,20 @@ func TestService_InitiatingRun(t *testing.T) {
 			err = os.WriteFile(filepath.Join(mintDir, "mintdir-tasks.json"), []byte("some json"), 0o644)
 			require.NoError(t, err)
 
-			runConfig.MintFilePath = "mint.yml"
+			runConfig.MintFilePath = "ci.yml"
 			runConfig.RwxDirectory = mintDir
 
 			s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 				require.Len(t, cfg.TaskDefinitions, 1)
 				require.Equal(t, runConfig.MintFilePath, cfg.TaskDefinitions[0].Path)
-				require.Len(t, cfg.RwxDirectory, 3)
+				require.Len(t, cfg.RwxDirectory, 5)
 				require.Equal(t, ".", cfg.RwxDirectory[0].Path)
 				require.Equal(t, "mintdir-tasks.json", cfg.RwxDirectory[1].Path)
 				require.Equal(t, "mintdir-tasks.yml", cfg.RwxDirectory[2].Path)
+				require.Equal(t, ".workflow", cfg.RwxDirectory[3].Path)
+				require.Equal(t, "dir", cfg.RwxDirectory[3].Type)
+				require.Equal(t, ".workflow/ci.yml", cfg.RwxDirectory[4].Path)
+				require.Equal(t, "file", cfg.RwxDirectory[4].Type)
 				require.True(t, cfg.UseCache)
 				receivedSpecifiedFileContent = cfg.TaskDefinitions[0].FileContents
 				receivedRwxDir = cfg.RwxDirectory
@@ -802,7 +842,7 @@ func TestService_InitiatingRun(t *testing.T) {
 					RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 					RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 					TargetedTaskKeys: []string{},
-					DefinitionPath:   ".mint/mint.yml",
+					DefinitionPath:   ".mint/ci.yml",
 				}, nil
 			}
 
@@ -814,6 +854,8 @@ func TestService_InitiatingRun(t *testing.T) {
 			require.Equal(t, "", receivedRwxDir[0].FileContents)
 			require.Equal(t, "some json", receivedRwxDir[1].FileContents)
 			require.Equal(t, originalRwxDirFileContent, receivedRwxDir[2].FileContents)
+			require.Equal(t, "", receivedRwxDir[3].FileContents)
+			require.Equal(t, originalSpecifiedFileContent, receivedRwxDir[4].FileContents)
 		})
 
 		t.Run("when an empty directory is found", func(t *testing.T) {
@@ -851,24 +893,28 @@ func TestService_InitiatingRun(t *testing.T) {
 			err = os.MkdirAll(mintDir, 0o755)
 			require.NoError(t, err)
 
-			err = os.WriteFile(filepath.Join(workingDir, "mint.yml"), []byte(originalSpecifiedFileContent), 0o644)
+			err = os.WriteFile(filepath.Join(workingDir, "ci.yml"), []byte(originalSpecifiedFileContent), 0o644)
 			require.NoError(t, err)
 
-			runConfig.MintFilePath = "mint.yml"
+			runConfig.MintFilePath = "ci.yml"
 			runConfig.RwxDirectory = mintDir
 
 			s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 				require.Len(t, cfg.TaskDefinitions, 1)
 				require.Equal(t, runConfig.MintFilePath, cfg.TaskDefinitions[0].Path)
-				require.Len(t, cfg.RwxDirectory, 1)
+				require.Len(t, cfg.RwxDirectory, 3)
 				require.Equal(t, ".", cfg.RwxDirectory[0].Path)
+				require.Equal(t, ".workflow", cfg.RwxDirectory[1].Path)
+				require.Equal(t, "dir", cfg.RwxDirectory[1].Type)
+				require.Equal(t, ".workflow/ci.yml", cfg.RwxDirectory[2].Path)
+				require.Equal(t, "file", cfg.RwxDirectory[2].Type)
 				require.True(t, cfg.UseCache)
 				receivedSpecifiedFileContent = cfg.TaskDefinitions[0].FileContents
 				return &api.InitiateRunResult{
 					RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 					RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 					TargetedTaskKeys: []string{},
-					DefinitionPath:   ".mint/mint.yml",
+					DefinitionPath:   ".mint/ci.yml",
 				}, nil
 			}
 
@@ -890,14 +936,14 @@ func TestService_InitiatingRun(t *testing.T) {
 			err = os.Chdir(workingDir)
 			require.NoError(t, err)
 
-			err = os.WriteFile(filepath.Join(workingDir, "mint.yml"), []byte("yaml contents"), 0o644)
+			err = os.WriteFile(filepath.Join(workingDir, "ci.yml"), []byte("yaml contents"), 0o644)
 			require.NoError(t, err)
 
 			mintDir := filepath.Join(workingDir, ".mint")
 			err = os.WriteFile(mintDir, []byte("actually a file"), 0o644)
 			require.NoError(t, err)
 
-			runConfig.MintFilePath = "mint.yml"
+			runConfig.MintFilePath = "ci.yml"
 			runConfig.RwxDirectory = mintDir
 
 			_, err = s.service.InitiateRun(runConfig)
@@ -923,10 +969,10 @@ func TestService_InitiatingRun(t *testing.T) {
 
 			mintDir := filepath.Join(s.tmp, "other", "path", "to", ".mint")
 
-			err = os.WriteFile(filepath.Join(workingDir, "mint.yml"), []byte(originalSpecifiedFileContent), 0o644)
+			err = os.WriteFile(filepath.Join(workingDir, "ci.yml"), []byte(originalSpecifiedFileContent), 0o644)
 			require.NoError(t, err)
 
-			runConfig.MintFilePath = "mint.yml"
+			runConfig.MintFilePath = "ci.yml"
 			runConfig.RwxDirectory = mintDir
 
 			_, err = s.service.InitiateRun(runConfig)
@@ -1065,5 +1111,87 @@ tasks:
 		modifiedContent, err := os.ReadFile(testFile)
 		require.NoError(t, err)
 		require.Contains(t, string(modifiedContent), "cli:")
+	})
+
+	t.Run("when .workflow/<filename> already exists in the rwx directory, uploads to .workflow/<contentHash>/<filename>", func(t *testing.T) {
+		s := setupTest(t)
+
+		runConfig := cli.InitiateRunConfig{}
+		baseSpec := "base:\n  image: ubuntu:24.04\n  config: rwx/base 1.0.0\n"
+
+		s.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
+			return api.DefaultBaseResult{
+				Image:  "ubuntu:24.04",
+				Config: "rwx/base 1.0.0",
+				Arch:   "x86_64",
+			}, nil
+		}
+
+		s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{
+				LatestMajor: make(map[string]string),
+				LatestMinor: make(map[string]map[string]string),
+			}, nil
+		}
+
+		specifiedContent := "tasks:\n  - key: outside\n    run: echo 'outside'\n" + baseSpec
+		existingWorkflowContent := "tasks:\n  - key: existing\n    run: echo 'existing'\n" + baseSpec
+
+		workingDir := filepath.Join(s.tmp, "some", "path", "to", "working", "directory")
+		err := os.MkdirAll(workingDir, 0o755)
+		require.NoError(t, err)
+
+		err = os.Chdir(workingDir)
+		require.NoError(t, err)
+
+		rwxDir := filepath.Join(s.tmp, "some", "path", "to", ".rwx")
+		err = os.MkdirAll(filepath.Join(rwxDir, ".workflow"), 0o755)
+		require.NoError(t, err)
+
+		err = os.WriteFile(filepath.Join(workingDir, "ci.yml"), []byte(specifiedContent), 0o644)
+		require.NoError(t, err)
+
+		err = os.WriteFile(filepath.Join(rwxDir, ".workflow", "ci.yml"), []byte(existingWorkflowContent), 0o644)
+		require.NoError(t, err)
+
+		runConfig.MintFilePath = "ci.yml"
+		runConfig.RwxDirectory = ""
+
+		sum := sha256.Sum256([]byte(specifiedContent))
+		expectedHash := hex.EncodeToString(sum[:8])
+		expectedNestedDir := ".workflow/" + expectedHash
+		expectedNestedFile := expectedNestedDir + "/ci.yml"
+
+		s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			require.Len(t, cfg.TaskDefinitions, 1)
+			require.Equal(t, runConfig.MintFilePath, cfg.TaskDefinitions[0].Path)
+
+			// Expected: walk of .rwx yields [., .workflow, .workflow/ci.yml],
+			// then appendWorkflowUploadEntry adds [.workflow/<hash>, .workflow/<hash>/ci.yml]
+			require.Len(t, cfg.RwxDirectory, 5)
+			require.Equal(t, ".", cfg.RwxDirectory[0].Path)
+			require.Equal(t, ".workflow", cfg.RwxDirectory[1].Path)
+			require.Equal(t, "dir", cfg.RwxDirectory[1].Type)
+			require.Equal(t, ".workflow/ci.yml", cfg.RwxDirectory[2].Path)
+			require.Equal(t, "file", cfg.RwxDirectory[2].Type)
+			require.Equal(t, existingWorkflowContent, cfg.RwxDirectory[2].FileContents)
+
+			require.Equal(t, "dir", cfg.RwxDirectory[3].Type)
+			require.Equal(t, expectedNestedDir, cfg.RwxDirectory[3].Path)
+
+			require.Equal(t, "file", cfg.RwxDirectory[4].Type)
+			require.Equal(t, expectedNestedFile, cfg.RwxDirectory[4].Path)
+			require.Equal(t, specifiedContent, cfg.RwxDirectory[4].FileContents)
+
+			return &api.InitiateRunResult{
+				RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
+				RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
+				TargetedTaskKeys: []string{},
+				DefinitionPath:   ".workflow/ci.yml",
+			}, nil
+		}
+
+		_, err = s.service.InitiateRun(runConfig)
+		require.NoError(t, err)
 	})
 }
