@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/git"
+	"github.com/rwx-cloud/rwx/internal/throttle"
 
 	"github.com/skratchdot/open-golang/open"
 	"github.com/spf13/cobra"
@@ -35,6 +37,9 @@ var (
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			taskKeySet := cmd.Flags().Changed("task")
+
+			slot := acquireResultsSlot(cmd.Context())
+			defer slot.Release()
 
 			var runID string
 			runIDFromGit := false
@@ -171,6 +176,43 @@ func handleResultsTaskKeyError(err error) error {
 	}
 
 	return err
+}
+
+// acquireResultsSlot gates concurrent `rwx results` invocations so the API
+// isn't hammered when many short-lived CLI processes (typically from coding
+// agents or scripts) run in parallel. Always returns — failures and timeouts
+// fall through unthrottled so the user's command is never blocked by the
+// throttle itself. The returned Slot is always safe to defer Release on.
+func acquireResultsSlot(ctx context.Context) *throttle.Slot {
+	cfg := throttle.Config{MaxConcurrency: throttle.MaxConcurrencyFromEnv()}
+	maxInUse := cfg.MaxConcurrency
+	if maxInUse <= 0 {
+		maxInUse = throttle.DefaultMaxConcurrency
+	}
+
+	result, err := throttle.Acquire(ctx, "results", cfg)
+	if err != nil {
+		if telemetryCollector != nil {
+			telemetryCollector.Record("cli.results.throttled", map[string]any{
+				"acquired":   false,
+				"wait_ms":    result.WaitDuration.Milliseconds(),
+				"error":      err.Error(),
+				"max_in_use": maxInUse,
+			})
+		}
+		return nil
+	}
+
+	if telemetryCollector != nil && (result.Waited || result.TimedOut) {
+		telemetryCollector.Record("cli.results.throttled", map[string]any{
+			"acquired":   result.Slot != nil,
+			"timed_out":  result.TimedOut,
+			"wait_ms":    result.WaitDuration.Milliseconds(),
+			"max_in_use": maxInUse,
+		})
+	}
+
+	return result.Slot
 }
 
 func HandleAmbiguousDefinitionPathError(err error, branch, repo string) error {
