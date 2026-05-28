@@ -63,15 +63,32 @@ func (c *Client) GetBranch() string {
 }
 
 func (c *Client) GetHead() string {
-	cmd := exec.Command(c.Binary, "rev-parse", "HEAD")
-	cmd.Dir = c.Dir
-
-	out, err := cmd.Output()
+	head, err := c.GetHeadCommit()
 	if err != nil {
 		return ""
 	}
+	return head
+}
 
-	return strings.TrimSpace(string(out))
+func (c *Client) GetHeadCommit() (string, error) {
+	cmd := exec.Command(c.Binary, "rev-parse", "--verify", "HEAD^{commit}")
+	cmd.Dir = c.Dir
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("unable to resolve HEAD: %s", msg)
+	}
+
+	head := strings.TrimSpace(string(out))
+	if head == "" {
+		return "", fmt.Errorf("unable to resolve HEAD")
+	}
+
+	return head, nil
 }
 
 func (c *Client) GetShortHead() string {

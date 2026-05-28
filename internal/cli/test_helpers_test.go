@@ -53,6 +53,7 @@ func setupTest(t *testing.T) *testSetup {
 	setup.mockGit = &mocks.Git{
 		MockIsInstalled:      true,
 		MockIsInsideWorkTree: true,
+		MockGetHead:          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
 	setup.mockDocker = new(mocks.DockerClient)
 	setup.collector = telemetry.NewCollector()

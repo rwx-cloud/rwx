@@ -805,8 +805,8 @@ func TestTelemetry_SandboxSyncPush(t *testing.T) {
 		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
 			return 0, "", nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
-			return patchData, nil, nil
+		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+			return git.DirtyPatches{Unstaged: patchData}, nil
 		}
 
 		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{

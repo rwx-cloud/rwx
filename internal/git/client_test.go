@@ -85,6 +85,40 @@ func TestGetBranch(t *testing.T) {
 	})
 }
 
+func TestGetHeadCommit(t *testing.T) {
+	t.Run("returns HEAD for a repo with commits", func(t *testing.T) {
+		repo, _ := repoFixture(t, "testdata/GetCommit-no-remote")
+		expected := mustGit(t, repo, "rev-parse", "HEAD")
+
+		client := &git.Client{Binary: "git", Dir: repo}
+		sha, err := client.GetHeadCommit()
+
+		require.NoError(t, err)
+		require.Equal(t, expected, sha)
+	})
+
+	t.Run("returns error outside a git repo", func(t *testing.T) {
+		client := &git.Client{Binary: "git", Dir: t.TempDir()}
+
+		sha, err := client.GetHeadCommit()
+
+		require.Equal(t, "", sha)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unable to resolve HEAD")
+	})
+
+	t.Run("returns error for an unborn branch", func(t *testing.T) {
+		repo, _ := repoFixture(t, "testdata/GetCommit-no-commits")
+
+		client := &git.Client{Binary: "git", Dir: repo}
+		sha, err := client.GetHeadCommit()
+
+		require.Equal(t, "", sha)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unable to resolve HEAD")
+	})
+}
+
 func TestGetCommit(t *testing.T) {
 	t.Run("returns empty with no error if git is not installed", func(t *testing.T) {
 		client := &git.Client{Binary: "fake", Dir: ""}

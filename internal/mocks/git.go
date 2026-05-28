@@ -11,6 +11,7 @@ import (
 type Git struct {
 	MockGetBranch              string
 	MockGetHead                string
+	MockGetHeadError           error
 	MockGetCommit              string
 	MockGetCommitError         error
 	MockGetOriginUrl           string
@@ -31,7 +32,15 @@ func (c *Git) GetBranch() string {
 }
 
 func (c *Git) GetHead() string {
-	return c.MockGetHead
+	head, err := c.GetHeadCommit()
+	if err != nil {
+		return ""
+	}
+	return head
+}
+
+func (c *Git) GetHeadCommit() (string, error) {
+	return c.MockGetHead, c.MockGetHeadError
 }
 
 func (c *Git) GetCommit() (string, error) {
