@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1105,6 +1106,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		}
 
 		// Pull mocks (no changes on sandbox)
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			return 0, "", nil
+		}
 
 		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
 			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
@@ -1225,6 +1229,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		}
 
 		// Pull mocks (no changes on sandbox)
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			return 0, "", nil
+		}
 
 		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
 			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
@@ -1393,6 +1400,209 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			}
 		}
 		require.True(t, foundEnd, "snapshot/reset commands should be followed by sync end marker")
+	})
+
+	t.Run("prepares sandbox from local git head and streams missing commits", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-git-state-sync"
+		address := "192.168.1.1:22"
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		knownTip := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		bundlePath := filepath.Join(setup.tmp, "missing.bundle")
+		require.NoError(t, os.WriteFile(bundlePath, []byte("bundle-data"), 0o644))
+
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetBranch = "feature/sync"
+		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+			return git.DirtyPatches{
+				Staged:   []byte("staged-patch"),
+				Unstaged: []byte("unstaged-patch"),
+			}, nil
+		}
+		setup.mockGit.MockHasCommit = func(sha string) bool {
+			return sha == knownTip
+		}
+		var bundleHead string
+		var bundleExcludes []string
+		setup.mockGit.MockCreateBundleFile = func(head string, excludes []string) (git.BundleFile, error) {
+			bundleHead = head
+			bundleExcludes = append([]string{}, excludes...)
+			return git.BundleFile{Path: bundlePath, Ref: "refs/rwx/bundles/test", Size: int64(len("bundle-data"))}, nil
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			return nil
+		}
+
+		var commandOrder []string
+		catFileChecks := 0
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			commandOrder = append(commandOrder, cmd)
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				catFileChecks++
+				if catFileChecks < 3 {
+					return 1, nil
+				}
+				return 0, nil
+			default:
+				return 0, nil
+			}
+		}
+
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			switch {
+			case strings.Contains(cmd, "for-each-ref"):
+				return 0, knownTip + "\ncccccccccccccccccccccccccccccccccccccccc\n", nil
+			case strings.Contains(cmd, "git ls-files --others"):
+				return 0, "", nil
+			case strings.Contains(cmd, "git diff refs/rwx-sync"):
+				return 0, "", nil
+			default:
+				return 0, "", nil
+			}
+		}
+
+		var stdinCommands []string
+		var stdinPayloads []string
+		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
+			data, _ := io.ReadAll(stdin)
+			stdinCommands = append(stdinCommands, command)
+			stdinPayloads = append(stdinPayloads, string(data))
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+			Sync:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, runID, result.RunID)
+		require.Equal(t, localHead, bundleHead)
+		require.Equal(t, []string{knownTip}, bundleExcludes)
+		require.Contains(t, strings.Join(commandOrder, "\n"), "git fetch --prune origin")
+		require.Contains(t, strings.Join(commandOrder, "\n"), "git checkout -B 'feature/sync' '"+localHead+"'")
+		require.Contains(t, strings.Join(commandOrder, "\n"), "git write-tree")
+		require.Contains(t, strings.Join(commandOrder, "\n"), "git clean -fd")
+		require.Contains(t, stdinCommands[0], "git bundle verify")
+		require.Contains(t, stdinCommands[0], "refs/rwx/bundles/test:refs/rwx/bundles/test")
+		require.Equal(t, "bundle-data", stdinPayloads[0])
+		require.Equal(t, "/usr/bin/git apply --index --allow-empty -", stdinCommands[1])
+		require.Equal(t, "staged-patch", stdinPayloads[1])
+		require.Equal(t, "/usr/bin/git apply --allow-empty -", stdinCommands[2])
+		require.Equal(t, "unstaged-patch", stdinPayloads[2])
+	})
+
+	t.Run("recovers pending untracked sandbox files before resetting to local head", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-pending-untracked"
+		address := "192.168.1.1:22"
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		pendingPatch := "diff --git a/created.txt b/created.txt\nnew file mode 100644\nindex 0000000..257cc56\n--- /dev/null\n+++ b/created.txt\n@@ -0,0 +1 @@\n+created\n"
+
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetBranch = "feature/sync"
+		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+			return git.DirtyPatches{}, nil
+		}
+
+		var order []string
+		var appliedPatch string
+		setup.mockGit.MockApplyPatch = func(patch []byte) *exec.Cmd {
+			order = append(order, "local-apply")
+			appliedPatch = string(patch)
+			return exec.Command("true")
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			return nil
+		}
+
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				order = append(order, "sync-ref-check")
+				return 0, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				return 0, nil
+			case strings.Contains(cmd, "checkout -B"):
+				order = append(order, "checkout")
+				return 0, nil
+			default:
+				return 0, nil
+			}
+		}
+
+		lsCalls := 0
+		diffCalls := 0
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			switch {
+			case strings.Contains(cmd, "git ls-files --others"):
+				lsCalls++
+				if lsCalls == 1 {
+					return 0, "created.txt\n", nil
+				}
+				return 0, "", nil
+			case strings.Contains(cmd, "git add -N"):
+				order = append(order, "intent-to-add")
+				return 0, "", nil
+			case strings.Contains(cmd, "git diff refs/rwx-sync"):
+				diffCalls++
+				if diffCalls == 1 {
+					order = append(order, "pending-diff")
+					return 0, pendingPatch, nil
+				}
+				return 0, "", nil
+			case strings.Contains(cmd, "git reset HEAD"):
+				return 0, "", nil
+			default:
+				return 0, "", nil
+			}
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+			Sync:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, runID, result.RunID)
+		require.Equal(t, pendingPatch, appliedPatch)
+		require.GreaterOrEqual(t, diffCalls, 2)
+		pendingDiffIndex := slices.Index(order, "pending-diff")
+		checkoutIndex := slices.Index(order, "checkout")
+		require.NotEqual(t, -1, pendingDiffIndex)
+		require.NotEqual(t, -1, checkoutIndex)
+		require.Less(t, pendingDiffIndex, checkoutIndex)
 	})
 
 	t.Run("returns helpful error when git is not installed", func(t *testing.T) {
@@ -1748,7 +1958,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		require.Equal(t, 1, len(result.PulledFiles))
 	})
 
-	t.Run("treats pull errors as warnings", func(t *testing.T) {
+	t.Run("returns pull errors without cleaning sandbox", func(t *testing.T) {
 		setup := setupTest(t)
 
 		runID := "run-pull-err-123"
@@ -1774,7 +1984,9 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			return 0, "", nil
 		}
 
+		var commandOrder []string
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			commandOrder = append(commandOrder, cmd)
 			return 0, nil
 		}
 
@@ -1786,10 +1998,11 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			Sync:       true,
 		})
 
-		require.NoError(t, err)
-		require.Equal(t, runID, result.RunID)
-		require.Equal(t, 0, result.ExitCode)
-		require.Contains(t, setup.mockStderr.String(), "Warning: failed to pull changes from sandbox")
+		require.Error(t, err)
+		require.Nil(t, result)
+		require.Contains(t, err.Error(), "failed to pull changes from sandbox")
+		commandText := strings.Join(commandOrder, "\n")
+		require.NotContains(t, commandText, "git update-ref refs/rwx-sync HEAD 2>/dev/null")
 	})
 
 	t.Run("skips pull when Sync is false", func(t *testing.T) {
@@ -1904,13 +2117,10 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 			Sync:       true,
 		})
 
-		require.NoError(t, err)
-		require.Equal(t, runID, result.RunID)
-		// Files should still be returned even though apply partially failed
-		require.Contains(t, result.PulledFiles, "file.txt")
-		// Warning should mention .rej files
-		require.Contains(t, setup.mockStderr.String(), "file.txt (see file.txt.rej)")
-		require.Contains(t, setup.mockStderr.String(), "Resolve the conflicts")
+		require.Error(t, err)
+		require.Nil(t, result)
+		require.Contains(t, err.Error(), "file.txt (see file.txt.rej)")
+		require.Contains(t, err.Error(), "Resolve the conflicts")
 	})
 
 	t.Run("cleans up saved patch when --reject succeeds fully", func(t *testing.T) {
@@ -2036,16 +2246,15 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 			Sync:       true,
 		})
 
-		require.NoError(t, err)
-		require.Equal(t, runID, result.RunID)
+		require.Error(t, err)
+		require.Nil(t, result)
 
 		// Verify the patch was saved
 		savedPatch, readErr := os.ReadFile(filepath.Join(rwxDir, "patch-rejected.diff"))
 		require.NoError(t, readErr)
 		require.Equal(t, sandboxPatch, string(savedPatch))
 
-		// Warning should mention the saved patch path
-		require.Contains(t, setup.mockStderr.String(), "patch-rejected.diff")
+		require.Contains(t, err.Error(), "patch-rejected.diff")
 	})
 
 	t.Run("warns about .rej files during sync", func(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Client struct {
@@ -202,6 +203,22 @@ type PatchFile struct {
 	Path            string
 	UntrackedFiles  UntrackedFilesMetadata
 	LFSChangedFiles LFSChangedFilesMetadata
+}
+
+type DirtyPatches struct {
+	Staged          []byte
+	Unstaged        []byte
+	LFSChangedFiles *LFSChangedFilesMetadata
+}
+
+func (p DirtyPatches) Size() int {
+	return len(p.Staged) + len(p.Unstaged)
+}
+
+type BundleFile struct {
+	Path string
+	Ref  string
+	Size int64
 }
 
 // patchResult holds the result of generating patch data
@@ -402,6 +419,152 @@ func (c *Client) GeneratePatch(pathspec []string) ([]byte, *LFSChangedFilesMetad
 	}
 
 	return data.patch, nil, nil
+}
+
+func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
+	cleanup, err := c.AddUntrackedFilesForPatch()
+	if err != nil {
+		cleanup = func() {}
+	}
+	defer cleanup()
+
+	files, err := c.changedFilesForDirtyPatch()
+	if err != nil {
+		return DirtyPatches{}, err
+	}
+
+	lfsChangedFiles := []string{}
+	for _, file := range files {
+		cmd := exec.Command(c.Binary, "check-attr", "filter", "--", file)
+		cmd.Dir = c.Dir
+
+		attrs, err := cmd.CombinedOutput()
+		if err != nil {
+			return DirtyPatches{}, err
+		}
+
+		if strings.Contains(string(attrs), "filter: lfs") {
+			parts := strings.SplitN(string(attrs), ":", 2)
+			lfsFile := strings.TrimSpace(parts[0])
+			lfsChangedFiles = append(lfsChangedFiles, lfsFile)
+		}
+	}
+
+	if len(lfsChangedFiles) > 0 {
+		return DirtyPatches{
+			LFSChangedFiles: &LFSChangedFilesMetadata{
+				Files: lfsChangedFiles,
+				Count: len(lfsChangedFiles),
+			},
+		}, nil
+	}
+
+	staged, err := c.diffBytes("diff", "--cached", "-p", "--binary")
+	if err != nil {
+		return DirtyPatches{}, err
+	}
+	unstaged, err := c.diffBytes("diff", "-p", "--binary")
+	if err != nil {
+		return DirtyPatches{}, err
+	}
+
+	return DirtyPatches{Staged: staged, Unstaged: unstaged}, nil
+}
+
+func (c *Client) changedFilesForDirtyPatch() ([]string, error) {
+	seen := map[string]bool{}
+	var files []string
+
+	for _, args := range [][]string{
+		{"diff", "--cached", "--name-only"},
+		{"diff", "--name-only"},
+	} {
+		cmd := exec.Command(c.Binary, args...)
+		cmd.Dir = c.Dir
+		out, err := cmd.Output()
+		if err != nil {
+			return nil, err
+		}
+
+		for _, file := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if file == "" || seen[file] {
+				continue
+			}
+			seen[file] = true
+			files = append(files, file)
+		}
+	}
+
+	return files, nil
+}
+
+func (c *Client) diffBytes(args ...string) ([]byte, error) {
+	cmd := exec.Command(c.Binary, args...)
+	cmd.Dir = c.Dir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *Client) HasCommit(sha string) bool {
+	if sha == "" {
+		return false
+	}
+	cmd := exec.Command(c.Binary, "cat-file", "-e", sha+"^{commit}")
+	cmd.Dir = c.Dir
+	return cmd.Run() == nil
+}
+
+func (c *Client) CreateBundleFile(head string, excludes []string) (BundleFile, error) {
+	if head == "" {
+		return BundleFile{}, fmt.Errorf("no head commit provided")
+	}
+
+	tmp, err := os.CreateTemp("", "rwx-sandbox-*.bundle")
+	if err != nil {
+		return BundleFile{}, err
+	}
+	path := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(path)
+		return BundleFile{}, err
+	}
+
+	ref := fmt.Sprintf("refs/rwx/bundles/%d-%d", os.Getpid(), time.Now().UnixNano())
+	updateCmd := exec.Command(c.Binary, "update-ref", ref, head)
+	updateCmd.Dir = c.Dir
+	if out, err := updateCmd.CombinedOutput(); err != nil {
+		_ = os.Remove(path)
+		return BundleFile{}, fmt.Errorf("git update-ref failed: %s", strings.TrimSpace(string(out)))
+	}
+	defer func() {
+		deleteCmd := exec.Command(c.Binary, "update-ref", "-d", ref)
+		deleteCmd.Dir = c.Dir
+		_ = deleteCmd.Run()
+	}()
+
+	args := []string{"bundle", "create", path, ref}
+	for _, exclude := range excludes {
+		if exclude != "" && c.HasCommit(exclude) {
+			args = append(args, "^"+exclude)
+		}
+	}
+	cmd := exec.Command(c.Binary, args...)
+	cmd.Dir = c.Dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		_ = os.Remove(path)
+		return BundleFile{}, fmt.Errorf("git bundle create failed: %s", strings.TrimSpace(string(out)))
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		_ = os.Remove(path)
+		return BundleFile{}, err
+	}
+
+	return BundleFile{Path: path, Ref: ref, Size: info.Size()}, nil
 }
 
 // IsAncestor returns true if candidateSHA is an ancestor of (or equal to) headRef.
