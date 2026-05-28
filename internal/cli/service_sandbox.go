@@ -1615,7 +1615,7 @@ func (s Service) ensureSandboxHasCommit(localHead string, jsonMode bool) error {
 }
 
 func (s Service) sandboxHasCommit(sha string) bool {
-	exitCode, err := s.SSHClient.ExecuteCommand(fmt.Sprintf("/usr/bin/git cat-file -e %s^{commit}", quoteShellArg(sha)))
+	exitCode, err := s.SSHClient.ExecuteCommand(fmt.Sprintf("/usr/bin/git cat-file -e %s^{commit} >/dev/null 2>&1", quoteShellArg(sha)))
 	return err == nil && exitCode == 0
 }
 
@@ -1713,7 +1713,7 @@ func (s Service) snapshotSandboxSyncRef() error {
 
 func (s Service) snapshotSandboxSyncRefForPaths(paths []string) error {
 	script := `index_tree=$(/usr/bin/git write-tree) || exit 1; /usr/bin/git update-ref -d refs/rwx-sync 2>/dev/null || true; `
-	if paths != nil && len(paths) > 0 {
+	if len(paths) > 0 {
 		quoted := make([]string, len(paths))
 		for i, path := range paths {
 			quoted[i] = quoteShellArg(path)

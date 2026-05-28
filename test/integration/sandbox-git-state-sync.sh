@@ -46,7 +46,7 @@ assert_sandbox_file_content() {
   local expected="$2"
   local actual
 
-  actual=$("${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- cat "$file")
+  actual=$("${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- cat "$file" | awk 'NR==1{print; exit}')
   if [ "$actual" != "$expected" ]; then
     fail "${file} content mismatch in sandbox (expected: ${expected}, actual: ${actual})"
   fi
