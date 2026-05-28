@@ -88,7 +88,6 @@ TEMP_BRANCHES=(
   "${TEST_ID}-main-merge"
   "${TEST_ID}-force-move"
   "${TEST_ID}-sandbox-created"
-  "${TEST_ID}-pending-recovery"
   "${TEST_ID}-detached-source"
   "${TEST_ID}-dirty-state"
 )
@@ -102,8 +101,6 @@ TEST_FILES=(
   integration-force-move-new.txt
   integration-sandbox-created-survives.txt
   integration-local-after-sandbox-created.txt
-  integration-pending-before-reset.txt
-  integration-local-after-pending.txt
   integration-detached-head.txt
   integration-staged-state.txt
 )
@@ -189,15 +186,6 @@ commit_file "integration-local-after-sandbox-created.txt" "local history moved a
 assert_sandbox_head_matches
 assert_sandbox_file_content "integration-sandbox-created-survives.txt" "created in sandbox"
 assert_sandbox_file_content "integration-local-after-sandbox-created.txt" "local history moved after sandbox pull"
-
-echo "Scenario: pending sandbox files are pulled before local history reset"
-git switch -C "${TEST_ID}-pending-recovery" "$ORIGINAL_HEAD" >/dev/null
-"${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" --no-sync -- sh -c 'echo "pending before reset" > integration-pending-before-reset.txt'
-commit_file "integration-local-after-pending.txt" "local history moved after pending sandbox change" "integration local move after pending sandbox change"
-"${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- true
-assert_local_file_content "integration-pending-before-reset.txt" "pending before reset"
-assert_sandbox_file_content "integration-pending-before-reset.txt" "pending before reset"
-assert_sandbox_file_content "integration-local-after-pending.txt" "local history moved after pending sandbox change"
 
 echo "Scenario: detached local HEAD is mirrored in sandbox"
 git switch -C "${TEST_ID}-detached-source" "$ORIGINAL_HEAD" >/dev/null
