@@ -1495,13 +1495,26 @@ func (s Service) prepareSandboxForExec(cwd string, jsonMode bool, isNewSandbox b
 		return patchBytes, nil
 	}
 
+	if isNewSandbox {
+		if err := s.removePreAppliedNewFilesFromSandbox(patches); err != nil {
+			syncPushErr = err
+			return patchBytes, syncPushErr
+		}
+	}
+
 	if err := s.applyDirtyPatchesToSandbox(patches); err != nil {
 		syncPushErr = err
 		return patchBytes, syncPushErr
 	}
 
-	if err := s.snapshotSandboxSyncRef(); err != nil {
-		syncPushErr = err
+	var snapshotErr error
+	if isNewSandbox {
+		snapshotErr = s.snapshotSandboxSyncRefForPaths(patches.Files)
+	} else {
+		snapshotErr = s.snapshotSandboxSyncRef()
+	}
+	if snapshotErr != nil {
+		syncPushErr = snapshotErr
 		return patchBytes, syncPushErr
 	}
 
@@ -1650,6 +1663,30 @@ func (s Service) applyDirtyPatchesToSandbox(patches git.DirtyPatches) error {
 	return nil
 }
 
+func (s Service) removePreAppliedNewFilesFromSandbox(patches git.DirtyPatches) error {
+	paths := newFilePathsForDirtyPatches(patches)
+	if len(paths) == 0 {
+		return nil
+	}
+
+	quoted := make([]string, len(paths))
+	for i, path := range paths {
+		quoted[i] = quoteShellArg(path)
+	}
+	script := fmt.Sprintf("/usr/bin/git clean -f -- %s >/dev/null 2>&1", strings.Join(quoted, " "))
+
+	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
+	exitCode, err := s.SSHClient.ExecuteCommand("/bin/sh -lc " + quoteShellArg(script))
+	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+	if err != nil {
+		return errors.Wrap(err, "failed to prepare new sandbox files for sync")
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("failed to prepare new sandbox files for sync (exit code %d)", exitCode)
+	}
+	return nil
+}
+
 func (s Service) applyPatchToSandbox(command string, patch []byte) error {
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 	exitCode, output, err := s.SSHClient.ExecuteCommandWithStdinAndCombinedOutput(command, bytes.NewReader(patch))
@@ -1671,8 +1708,24 @@ func (s Service) applyPatchToSandbox(command string, patch []byte) error {
 }
 
 func (s Service) snapshotSandboxSyncRef() error {
+	return s.snapshotSandboxSyncRefForPaths(nil)
+}
+
+func (s Service) snapshotSandboxSyncRefForPaths(paths []string) error {
+	script := `index_tree=$(/usr/bin/git write-tree) || exit 1; /usr/bin/git update-ref -d refs/rwx-sync 2>/dev/null || true; `
+	if paths != nil && len(paths) > 0 {
+		quoted := make([]string, len(paths))
+		for i, path := range paths {
+			quoted[i] = quoteShellArg(path)
+		}
+		script += "/usr/bin/git add -A -- " + strings.Join(quoted, " ") + " && "
+	} else if paths == nil {
+		script += "/usr/bin/git add -A && "
+	}
+	script += `/usr/bin/git -c user.name=rwx -c user.email=rwx commit --allow-empty -m rwx-sync >/dev/null 2>&1 && /usr/bin/git update-ref refs/rwx-sync HEAD && /usr/bin/git reset --mixed HEAD~1 >/dev/null 2>&1 && /usr/bin/git read-tree "$index_tree"`
+
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	exitCode, err := s.SSHClient.ExecuteCommand("/bin/sh -lc 'index_tree=$(/usr/bin/git write-tree) || exit 1; /usr/bin/git update-ref -d refs/rwx-sync 2>/dev/null || true; /usr/bin/git add -A && /usr/bin/git -c user.name=rwx -c user.email=rwx commit --allow-empty -m rwx-sync >/dev/null 2>&1 && /usr/bin/git update-ref refs/rwx-sync HEAD && /usr/bin/git reset --mixed HEAD~1 >/dev/null 2>&1 && /usr/bin/git read-tree \"$index_tree\"'")
+	exitCode, err := s.SSHClient.ExecuteCommand("/bin/sh -lc " + quoteShellArg(script))
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if err != nil {
 		return errors.Wrap(err, "failed to create sync snapshot ref")
@@ -1681,6 +1734,19 @@ func (s Service) snapshotSandboxSyncRef() error {
 		return fmt.Errorf("failed to create sync snapshot ref (exit code %d)", exitCode)
 	}
 	return nil
+}
+
+func newFilePathsForDirtyPatches(patches git.DirtyPatches) []string {
+	seen := map[string]bool{}
+	var paths []string
+	for _, path := range append(parseNewFilePaths(patches.Staged), parseNewFilePaths(patches.Unstaged)...) {
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		paths = append(paths, path)
+	}
+	return paths
 }
 
 func quoteShellArg(s string) string {

@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/sandbox-helpers.sh"
 
+SANDBOX_CONFIG="${SCRIPT_DIR}/definitions/sandbox.yml"
+SANDBOX_RUN_ID=""
+
 fail() {
   echo "FAIL: $*" >&2
   exit 1
@@ -32,7 +35,7 @@ assert_sandbox_head_matches() {
   local actual
 
   expected=$(git rev-parse HEAD)
-  actual=$("${RWX_CLI}" sandbox exec -- git rev-parse HEAD | awk 'NR==1{print $1}')
+  actual=$("${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- git rev-parse HEAD | awk 'NR==1{print $1}')
   if [ "$actual" != "$expected" ]; then
     fail "sandbox HEAD mismatch (local: $expected, sandbox: $actual)"
   fi
@@ -43,7 +46,7 @@ assert_sandbox_file_content() {
   local expected="$2"
   local actual
 
-  actual=$("${RWX_CLI}" sandbox exec -- cat "$file")
+  actual=$("${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- cat "$file")
   if [ "$actual" != "$expected" ]; then
     fail "${file} content mismatch in sandbox (expected: ${expected}, actual: ${actual})"
   fi
@@ -52,7 +55,7 @@ assert_sandbox_file_content() {
 assert_sandbox_file_missing() {
   local file="$1"
 
-  if "${RWX_CLI}" sandbox exec -- test -e "$file"; then
+  if "${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- test -e "$file"; then
     fail "${file} exists in sandbox but should have been removed after local git state changed"
   fi
 }
@@ -102,7 +105,9 @@ TEST_FILES=(
 
 cleanup() {
   set +e
-  "${RWX_CLI}" sandbox stop >/dev/null 2>&1
+  if [ -n "$SANDBOX_RUN_ID" ]; then
+    "${RWX_CLI}" sandbox stop --id "$SANDBOX_RUN_ID" >/dev/null 2>&1
+  fi
   git reset --hard "$ORIGINAL_HEAD" >/dev/null 2>&1
   rm -f "${TEST_FILES[@]}"
   if [ -n "$ORIGINAL_BRANCH" ]; then
@@ -114,7 +119,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-start_sandbox
+sandbox_result=$("${RWX_CLI}" sandbox start "$SANDBOX_CONFIG" --json --init ref=main --init "cli=${COMMIT_SHA}" --wait)
+SANDBOX_RUN_ID=$(echo "$sandbox_result" | jq -r ".RunID")
+sandbox_url=$(echo "$sandbox_result" | jq -r ".RunURL // empty")
+if [ -n "$sandbox_url" ]; then
+  echo "Sandbox URL: ${sandbox_url}"
+  echo "$sandbox_url" > "$RWX_LINKS/Sandbox Run"
+fi
+if [ -z "$SANDBOX_RUN_ID" ] || [ "$SANDBOX_RUN_ID" = "null" ]; then
+  echo "$sandbox_result"
+  fail "sandbox start did not return a run id"
+fi
+rm -rf .rwx/sandboxes
+require_clean_worktree
 
 echo "Scenario: unpushed local commits are bundled and become sandbox HEAD"
 git switch -C "${TEST_ID}-bundle" "$ORIGINAL_HEAD" >/dev/null
@@ -160,7 +177,7 @@ assert_sandbox_file_content "integration-force-move-new.txt" "new branch content
 
 echo "Scenario: sandbox-created files pulled locally survive later local history movement"
 git switch -C "${TEST_ID}-sandbox-created" "$ORIGINAL_HEAD" >/dev/null
-"${RWX_CLI}" sandbox exec -- sh -c 'echo "created in sandbox" > integration-sandbox-created-survives.txt'
+"${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sh -c 'echo "created in sandbox" > integration-sandbox-created-survives.txt'
 assert_local_file_content "integration-sandbox-created-survives.txt" "created in sandbox"
 
 commit_file "integration-local-after-sandbox-created.txt" "local history moved after sandbox pull" "integration local move after sandbox pull"
@@ -174,7 +191,7 @@ printf '%s\n' "staged state content" > integration-staged-state.txt
 git add integration-staged-state.txt
 printf '\n// integration unstaged state\n' >> go.mod
 
-"${RWX_CLI}" sandbox exec -- sh -c '
+"${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sh -c '
   set -e
   git diff --cached --name-only | grep -qx integration-staged-state.txt
   git diff --name-only | grep -qx go.mod

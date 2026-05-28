@@ -356,6 +356,7 @@ func TestGenerateDirtyPatches(t *testing.T) {
 	require.NotContains(t, string(patches.Staged), "untracked.txt")
 	require.Contains(t, string(patches.Unstaged), "tracked.txt")
 	require.Contains(t, string(patches.Unstaged), "untracked.txt")
+	require.ElementsMatch(t, []string{"staged.txt", "tracked.txt", "untracked.txt"}, patches.Files)
 
 	cachedNames := mustGit(t, repo, "diff", "--cached", "--name-only")
 	require.Equal(t, "staged.txt", cachedNames)

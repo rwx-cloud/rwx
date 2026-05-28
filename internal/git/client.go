@@ -208,6 +208,7 @@ type PatchFile struct {
 type DirtyPatches struct {
 	Staged          []byte
 	Unstaged        []byte
+	Files           []string
 	LFSChangedFiles *LFSChangedFilesMetadata
 }
 
@@ -452,6 +453,7 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 
 	if len(lfsChangedFiles) > 0 {
 		return DirtyPatches{
+			Files: files,
 			LFSChangedFiles: &LFSChangedFilesMetadata{
 				Files: lfsChangedFiles,
 				Count: len(lfsChangedFiles),
@@ -468,7 +470,7 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 		return DirtyPatches{}, err
 	}
 
-	return DirtyPatches{Staged: staged, Unstaged: unstaged}, nil
+	return DirtyPatches{Staged: staged, Unstaged: unstaged, Files: files}, nil
 }
 
 func (c *Client) changedFilesForDirtyPatch() ([]string, error) {

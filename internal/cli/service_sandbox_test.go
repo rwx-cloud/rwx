@@ -1509,6 +1509,98 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Equal(t, "unstaged-patch", stdinPayloads[2])
 	})
 
+	t.Run("new sandbox sync removes pre-applied new files and snapshots only local dirty paths", func(t *testing.T) {
+		setup := setupTest(t)
+
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		require.NoError(t, os.WriteFile(configFile, []byte("base:\n  image: ubuntu:24.04\ntasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		newFilePatch := []byte("diff --git a/integration-test-local-change.txt b/integration-test-local-change.txt\nnew file mode 100644\nindex 0000000..c42fa8d\n--- /dev/null\n+++ b/integration-test-local-change.txt\n@@ -0,0 +1 @@\n+local-change-content\n")
+
+		setup.mockGit.MockGetBranch = "feature/new-sandbox"
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetCommit = "base"
+		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+			return git.DirtyPatches{
+				Staged: newFilePatch,
+				Files:  []string{"integration-test-local-change.txt"},
+			}, nil
+		}
+
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+		}
+		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			return &api.InitiateRunResult{
+				RunID:  "run-new",
+				RunURL: "https://cloud.rwx.com/runs/run-new",
+			}, nil
+		}
+		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
+			return &api.CreateSandboxTokenResult{Token: "new-token"}, nil
+		}
+		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{}, nil
+		}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+
+		var order []string
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				return 0, nil
+			}
+			order = append(order, cmd)
+			return 0, nil
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			return 0, "", nil
+		}
+		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
+			order = append(order, command)
+			data, _ := io.ReadAll(stdin)
+			require.Equal(t, string(newFilePatch), string(data))
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"true"},
+			Json:       true,
+			Sync:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-new", result.RunID)
+
+		cleanIndex := slices.IndexFunc(order, func(cmd string) bool {
+			return strings.Contains(cmd, "git clean -f --") && strings.Contains(cmd, "integration-test-local-change.txt")
+		})
+		applyIndex := slices.Index(order, "/usr/bin/git apply --index --allow-empty -")
+		snapshotIndex := slices.IndexFunc(order, func(cmd string) bool {
+			return strings.Contains(cmd, "update-ref refs/rwx-sync HEAD")
+		})
+		require.NotEqual(t, -1, cleanIndex)
+		require.NotEqual(t, -1, applyIndex)
+		require.NotEqual(t, -1, snapshotIndex)
+		require.Less(t, cleanIndex, applyIndex)
+		require.Contains(t, order[snapshotIndex], "/usr/bin/git add -A --")
+		require.Contains(t, order[snapshotIndex], "integration-test-local-change.txt")
+		require.NotContains(t, order[snapshotIndex], "/usr/bin/git add -A &&")
+	})
+
 	t.Run("recovers pending untracked sandbox files before resetting to local head", func(t *testing.T) {
 		setup := setupTest(t)
 
