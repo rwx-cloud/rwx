@@ -209,6 +209,7 @@ type DirtyPatches struct {
 	Staged          []byte
 	Unstaged        []byte
 	Files           []string
+	NewFiles        []string
 	LFSChangedFiles *LFSChangedFilesMetadata
 }
 
@@ -433,6 +434,10 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 	if err != nil {
 		return DirtyPatches{}, err
 	}
+	newFiles, err := c.newFilesForDirtyPatch()
+	if err != nil {
+		return DirtyPatches{}, err
+	}
 
 	lfsChangedFiles := []string{}
 	for _, file := range files {
@@ -453,7 +458,8 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 
 	if len(lfsChangedFiles) > 0 {
 		return DirtyPatches{
-			Files: files,
+			Files:    files,
+			NewFiles: newFiles,
 			LFSChangedFiles: &LFSChangedFilesMetadata{
 				Files: lfsChangedFiles,
 				Count: len(lfsChangedFiles),
@@ -470,7 +476,7 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 		return DirtyPatches{}, err
 	}
 
-	return DirtyPatches{Staged: staged, Unstaged: unstaged, Files: files}, nil
+	return DirtyPatches{Staged: staged, Unstaged: unstaged, Files: files, NewFiles: newFiles}, nil
 }
 
 func (c *Client) changedFilesForDirtyPatch() ([]string, error) {
@@ -480,6 +486,33 @@ func (c *Client) changedFilesForDirtyPatch() ([]string, error) {
 	for _, args := range [][]string{
 		{"diff", "--cached", "--name-only"},
 		{"diff", "--name-only"},
+	} {
+		cmd := exec.Command(c.Binary, args...)
+		cmd.Dir = c.Dir
+		out, err := cmd.Output()
+		if err != nil {
+			return nil, err
+		}
+
+		for _, file := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if file == "" || seen[file] {
+				continue
+			}
+			seen[file] = true
+			files = append(files, file)
+		}
+	}
+
+	return files, nil
+}
+
+func (c *Client) newFilesForDirtyPatch() ([]string, error) {
+	seen := map[string]bool{}
+	var files []string
+
+	for _, args := range [][]string{
+		{"diff", "--cached", "--name-only", "--diff-filter=A"},
+		{"diff", "--name-only", "--diff-filter=A"},
 	} {
 		cmd := exec.Command(c.Binary, args...)
 		cmd.Dir = c.Dir

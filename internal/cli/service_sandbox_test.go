@@ -1515,7 +1515,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		configFile := setup.absConfig(".rwx/sandbox.yml")
 		require.NoError(t, os.WriteFile(configFile, []byte("base:\n  image: ubuntu:24.04\ntasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-		newFilePatch := []byte("diff --git a/integration-test-local-change.txt b/integration-test-local-change.txt\nnew file mode 100644\nindex 0000000..c42fa8d\n--- /dev/null\n+++ b/integration-test-local-change.txt\n@@ -0,0 +1 @@\n+local-change-content\n")
+		newFilePath := "dir with space/quote'file.txt"
+		newFilePatch := []byte("diff --git a/" + newFilePath + " b/" + newFilePath + "\nnew file mode 100644\nindex 0000000..c42fa8d\n--- /dev/null\n+++ b/" + newFilePath + "\n@@ -0,0 +1 @@\n+local-change-content\n")
 
 		setup.mockGit.MockGetBranch = "feature/new-sandbox"
 		setup.mockGit.MockGetHead = localHead
@@ -1524,8 +1525,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
 		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
 			return git.DirtyPatches{
-				Staged: newFilePatch,
-				Files:  []string{"integration-test-local-change.txt"},
+				Staged:   newFilePatch,
+				Files:    []string{newFilePath},
+				NewFiles: []string{newFilePath},
 			}, nil
 		}
 
@@ -1586,7 +1588,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Equal(t, "run-new", result.RunID)
 
 		cleanIndex := slices.IndexFunc(order, func(cmd string) bool {
-			return strings.Contains(cmd, "git clean -f --") && strings.Contains(cmd, "integration-test-local-change.txt")
+			return strings.Contains(cmd, "git clean -f --") && strings.Contains(cmd, "dir with space/quote") && strings.Contains(cmd, "file.txt")
 		})
 		applyIndex := slices.Index(order, "/usr/bin/git apply --index --allow-empty -")
 		snapshotIndex := slices.IndexFunc(order, func(cmd string) bool {
@@ -1597,8 +1599,239 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.NotEqual(t, -1, snapshotIndex)
 		require.Less(t, cleanIndex, applyIndex)
 		require.Contains(t, order[snapshotIndex], "/usr/bin/git add -A --")
-		require.Contains(t, order[snapshotIndex], "integration-test-local-change.txt")
+		require.Contains(t, order[snapshotIndex], "dir with space/quote")
+		require.Contains(t, order[snapshotIndex], "file.txt")
 		require.NotContains(t, order[snapshotIndex], "/usr/bin/git add -A &&")
+	})
+
+	t.Run("fetches remote refs without streaming bundle when fetch provides local head", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-fetch-only"
+		address := "192.168.1.1:22"
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetBranch = "feature/fetch-only"
+		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+			return git.DirtyPatches{}, nil
+		}
+		setup.mockGit.MockCreateBundleFile = func(head string, excludes []string) (git.BundleFile, error) {
+			require.Fail(t, "bundle should not be created when remote fetch provides local head")
+			return git.BundleFile{}, nil
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+
+		var commands []string
+		catFileChecks := 0
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			commands = append(commands, cmd)
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				catFileChecks++
+				if catFileChecks == 1 {
+					return 1, nil
+				}
+				return 0, nil
+			default:
+				return 0, nil
+			}
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+			Sync:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, runID, result.RunID)
+		require.Equal(t, 2, catFileChecks)
+		require.Contains(t, strings.Join(commands, "\n"), "git fetch --prune origin")
+	})
+
+	t.Run("checks out detached local head when local checkout is detached", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-detached"
+		address := "192.168.1.1:22"
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetBranch = ""
+		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+			return git.DirtyPatches{}, nil
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+
+		var commands []string
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			commands = append(commands, cmd)
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				return 0, nil
+			default:
+				return 0, nil
+			}
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+			Sync:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, runID, result.RunID)
+		require.Contains(t, strings.Join(commands, "\n"), "git checkout --detach '"+localHead+"'")
+	})
+
+	t.Run("fails when missing commit bundle exceeds hard limit", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-bundle-too-large"
+		address := "192.168.1.1:22"
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		bundlePath := filepath.Join(setup.tmp, "too-large.bundle")
+		require.NoError(t, os.WriteFile(bundlePath, []byte("bundle-data"), 0o644))
+
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetBranch = "feature/large-bundle"
+		setup.mockGit.MockCreateBundleFile = func(head string, excludes []string) (git.BundleFile, error) {
+			return git.BundleFile{Path: bundlePath, Ref: "refs/rwx/bundles/large", Size: 101 * 1024 * 1024}, nil
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				return 1, nil
+			default:
+				return 0, nil
+			}
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+			Sync:       true,
+		})
+
+		require.Nil(t, result)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "exceeds the 100 MiB sandbox sync limit")
+	})
+
+	t.Run("warns but streams when missing commit bundle exceeds warning threshold", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-bundle-warning"
+		address := "192.168.1.1:22"
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		bundlePath := filepath.Join(setup.tmp, "warning.bundle")
+		require.NoError(t, os.WriteFile(bundlePath, []byte("bundle-data"), 0o644))
+
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetBranch = "feature/warning-bundle"
+		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+			return git.DirtyPatches{}, nil
+		}
+		setup.mockGit.MockCreateBundleFile = func(head string, excludes []string) (git.BundleFile, error) {
+			return git.BundleFile{Path: bundlePath, Ref: "refs/rwx/bundles/warning", Size: 26 * 1024 * 1024}, nil
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+
+		catFileChecks := 0
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				catFileChecks++
+				if catFileChecks < 3 {
+					return 1, nil
+				}
+				return 0, nil
+			default:
+				return 0, nil
+			}
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			return 0, "", nil
+		}
+		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
+			data, _ := io.ReadAll(stdin)
+			require.Equal(t, "bundle-data", string(data))
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       false,
+			Sync:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, runID, result.RunID)
+		require.Contains(t, setup.mockStderr.String(), "Warning: streaming 26.0 MiB of local git commits to the sandbox.")
 	})
 
 	t.Run("recovers pending untracked sandbox files before resetting to local head", func(t *testing.T) {

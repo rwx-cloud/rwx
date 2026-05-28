@@ -347,6 +347,8 @@ func TestGenerateDirtyPatches(t *testing.T) {
 	mustGit(t, repo, "add", "staged.txt")
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("base\nunstaged\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "untracked.txt"), []byte("untracked\n"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(repo, "dir with space"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "dir with space", "quote'file.txt"), []byte("quoted\n"), 0o644))
 
 	client := &git.Client{Binary: "git", Dir: repo}
 	patches, err := client.GenerateDirtyPatches()
@@ -356,7 +358,8 @@ func TestGenerateDirtyPatches(t *testing.T) {
 	require.NotContains(t, string(patches.Staged), "untracked.txt")
 	require.Contains(t, string(patches.Unstaged), "tracked.txt")
 	require.Contains(t, string(patches.Unstaged), "untracked.txt")
-	require.ElementsMatch(t, []string{"staged.txt", "tracked.txt", "untracked.txt"}, patches.Files)
+	require.ElementsMatch(t, []string{"staged.txt", "tracked.txt", "untracked.txt", "dir with space/quote'file.txt"}, patches.Files)
+	require.ElementsMatch(t, []string{"staged.txt", "untracked.txt", "dir with space/quote'file.txt"}, patches.NewFiles)
 
 	cachedNames := mustGit(t, repo, "diff", "--cached", "--name-only")
 	require.Equal(t, "staged.txt", cachedNames)

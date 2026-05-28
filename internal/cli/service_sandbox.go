@@ -1737,6 +1737,10 @@ func (s Service) snapshotSandboxSyncRefForPaths(paths []string) error {
 }
 
 func newFilePathsForDirtyPatches(patches git.DirtyPatches) []string {
+	if len(patches.NewFiles) > 0 {
+		return patches.NewFiles
+	}
+
 	seen := map[string]bool{}
 	var paths []string
 	for _, path := range append(parseNewFilePaths(patches.Staged), parseNewFilePaths(patches.Unstaged)...) {
