@@ -1497,7 +1497,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Equal(t, localHead, bundleHead)
 		require.Equal(t, []string{knownTip}, bundleExcludes)
 		require.Contains(t, strings.Join(commandOrder, "\n"), "git fetch --prune origin")
-		require.Contains(t, strings.Join(commandOrder, "\n"), "git checkout -B 'feature/sync' '"+localHead+"'")
+		require.Contains(t, strings.Join(commandOrder, "\n"), "git checkout -f -B 'feature/sync' '"+localHead+"'")
 		require.Contains(t, strings.Join(commandOrder, "\n"), "git write-tree")
 		require.Contains(t, strings.Join(commandOrder, "\n"), "git clean -fd")
 		require.Contains(t, stdinCommands[0], "git bundle verify")
@@ -1715,7 +1715,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, runID, result.RunID)
-		require.Contains(t, strings.Join(commands, "\n"), "git checkout --detach '"+localHead+"'")
+		require.Contains(t, strings.Join(commands, "\n"), "git checkout -f --detach '"+localHead+"'")
 	})
 
 	t.Run("fails when missing commit bundle exceeds hard limit", func(t *testing.T) {
@@ -1876,7 +1876,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 				return 0, nil
 			case strings.Contains(cmd, "cat-file -e"):
 				return 0, nil
-			case strings.Contains(cmd, "checkout -B"):
+			case strings.Contains(cmd, "checkout -f -B"):
 				order = append(order, "checkout")
 				return 0, nil
 			default:

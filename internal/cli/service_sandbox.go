@@ -1632,9 +1632,9 @@ func (s Service) checkoutSandboxHead(localHead string) error {
 	branch := s.GitClient.GetBranch()
 	var cmd string
 	if branch == "" {
-		cmd = fmt.Sprintf("/usr/bin/git checkout --detach %s >/dev/null 2>&1 && /usr/bin/git reset --hard %s >/dev/null 2>&1", head, head)
+		cmd = fmt.Sprintf("/usr/bin/git checkout -f --detach %s >/dev/null 2>&1 && /usr/bin/git reset --hard %s >/dev/null 2>&1", head, head)
 	} else {
-		cmd = fmt.Sprintf("/usr/bin/git checkout -B %s %s >/dev/null 2>&1 && /usr/bin/git reset --hard %s >/dev/null 2>&1", quoteShellArg(branch), head, head)
+		cmd = fmt.Sprintf("/usr/bin/git checkout -f -B %s %s >/dev/null 2>&1 && /usr/bin/git reset --hard %s >/dev/null 2>&1", quoteShellArg(branch), head, head)
 	}
 
 	exitCode, err := s.SSHClient.ExecuteCommand(cmd)
