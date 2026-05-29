@@ -71,10 +71,14 @@ var _ SSHClient = (*ssh.Client)(nil)
 type GitClient interface {
 	GetBranch() string
 	GetHead() string
+	GetHeadCommit() (string, error)
 	GetCommit() (string, error)
 	GetOriginUrl() string
 	GeneratePatchFile(destDir string, pathspec []string) (git.PatchFile, error)
 	GeneratePatch(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error)
+	GenerateDirtyPatches() (git.DirtyPatches, error)
+	HasCommit(sha string) bool
+	CreateBundleFile(head string, excludes []string) (git.BundleFile, error)
 	ApplyPatch(patch []byte) *exec.Cmd
 	ApplyPatchReject(patch []byte) *exec.Cmd
 	IsInstalled() bool

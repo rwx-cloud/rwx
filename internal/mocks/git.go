@@ -11,12 +11,16 @@ import (
 type Git struct {
 	MockGetBranch              string
 	MockGetHead                string
+	MockGetHeadError           error
 	MockGetCommit              string
 	MockGetCommitError         error
 	MockGetOriginUrl           string
 	MockGeneratePatchFile      git.PatchFile
 	MockGeneratePatchFileError error
 	MockGeneratePatch          func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error)
+	MockGenerateDirtyPatches   func() (git.DirtyPatches, error)
+	MockHasCommit              func(sha string) bool
+	MockCreateBundleFile       func(head string, excludes []string) (git.BundleFile, error)
 	MockApplyPatch             func(patch []byte) *exec.Cmd
 	MockApplyPatchReject       func(patch []byte) *exec.Cmd
 	MockIsInstalled            bool
@@ -28,7 +32,15 @@ func (c *Git) GetBranch() string {
 }
 
 func (c *Git) GetHead() string {
-	return c.MockGetHead
+	head, err := c.GetHeadCommit()
+	if err != nil {
+		return ""
+	}
+	return head
+}
+
+func (c *Git) GetHeadCommit() (string, error) {
+	return c.MockGetHead, c.MockGetHeadError
 }
 
 func (c *Git) GetCommit() (string, error) {
@@ -71,6 +83,27 @@ func (c *Git) GeneratePatch(pathspec []string) ([]byte, *git.LFSChangedFilesMeta
 		return c.MockGeneratePatch(pathspec)
 	}
 	return nil, nil, nil
+}
+
+func (c *Git) GenerateDirtyPatches() (git.DirtyPatches, error) {
+	if c.MockGenerateDirtyPatches != nil {
+		return c.MockGenerateDirtyPatches()
+	}
+	return git.DirtyPatches{}, nil
+}
+
+func (c *Git) HasCommit(sha string) bool {
+	if c.MockHasCommit != nil {
+		return c.MockHasCommit(sha)
+	}
+	return true
+}
+
+func (c *Git) CreateBundleFile(head string, excludes []string) (git.BundleFile, error) {
+	if c.MockCreateBundleFile != nil {
+		return c.MockCreateBundleFile(head, excludes)
+	}
+	return git.BundleFile{}, nil
 }
 
 func (c *Git) ApplyPatch(patch []byte) *exec.Cmd {

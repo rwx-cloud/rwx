@@ -41,6 +41,18 @@ func repoFixture(t *testing.T, fixturePath string) (string, string) {
 	return tempDir, strings.TrimSpace(string(out))
 }
 
+func mustGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func TestGetBranch(t *testing.T) {
 	t.Run("returns empty if git is not installed", func(t *testing.T) {
 		client := &git.Client{Binary: "fake", Dir: ""}
@@ -70,6 +82,40 @@ func TestGetBranch(t *testing.T) {
 		client := &git.Client{Binary: "git", Dir: repo}
 		branch := client.GetBranch()
 		require.Equal(t, expected, branch)
+	})
+}
+
+func TestGetHeadCommit(t *testing.T) {
+	t.Run("returns HEAD for a repo with commits", func(t *testing.T) {
+		repo, _ := repoFixture(t, "testdata/GetCommit-no-remote")
+		expected := mustGit(t, repo, "rev-parse", "HEAD")
+
+		client := &git.Client{Binary: "git", Dir: repo}
+		sha, err := client.GetHeadCommit()
+
+		require.NoError(t, err)
+		require.Equal(t, expected, sha)
+	})
+
+	t.Run("returns error outside a git repo", func(t *testing.T) {
+		client := &git.Client{Binary: "git", Dir: t.TempDir()}
+
+		sha, err := client.GetHeadCommit()
+
+		require.Equal(t, "", sha)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unable to resolve HEAD")
+	})
+
+	t.Run("returns error for an unborn branch", func(t *testing.T) {
+		repo, _ := repoFixture(t, "testdata/GetCommit-no-commits")
+
+		client := &git.Client{Binary: "git", Dir: repo}
+		sha, err := client.GetHeadCommit()
+
+		require.Equal(t, "", sha)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unable to resolve HEAD")
 	})
 }
 
@@ -320,6 +366,71 @@ func TestGeneratePatch(t *testing.T) {
 		require.NotNil(t, patch) // Now includes unstaged changes
 		require.Nil(t, lfs)
 	})
+}
+
+func TestGenerateDirtyPatches(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+	mustGit(t, repo, "config", "user.name", "Test")
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("base\n"), 0o644))
+	mustGit(t, repo, "add", "tracked.txt")
+	mustGit(t, repo, "commit", "-m", "base")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "staged.txt"), []byte("staged\n"), 0o644))
+	mustGit(t, repo, "add", "staged.txt")
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("base\nunstaged\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "untracked.txt"), []byte("untracked\n"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(repo, "dir with space"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "dir with space", "quote'file.txt"), []byte("quoted\n"), 0o644))
+
+	client := &git.Client{Binary: "git", Dir: repo}
+	patches, err := client.GenerateDirtyPatches()
+	require.NoError(t, err)
+
+	require.Contains(t, string(patches.Staged), "staged.txt")
+	require.NotContains(t, string(patches.Staged), "untracked.txt")
+	require.Contains(t, string(patches.Unstaged), "tracked.txt")
+	require.Contains(t, string(patches.Unstaged), "untracked.txt")
+	require.ElementsMatch(t, []string{"staged.txt", "tracked.txt", "untracked.txt", "dir with space/quote'file.txt"}, patches.Files)
+	require.ElementsMatch(t, []string{"staged.txt", "untracked.txt", "dir with space/quote'file.txt"}, patches.NewFiles)
+
+	cachedNames := mustGit(t, repo, "diff", "--cached", "--name-only")
+	require.Equal(t, "staged.txt", cachedNames)
+}
+
+func TestCreateBundleFile(t *testing.T) {
+	source := t.TempDir()
+	mustGit(t, source, "init")
+	mustGit(t, source, "config", "user.email", "test@example.com")
+	mustGit(t, source, "config", "user.name", "Test")
+	require.NoError(t, os.WriteFile(filepath.Join(source, "base.txt"), []byte("base\n"), 0o644))
+	mustGit(t, source, "add", "base.txt")
+	mustGit(t, source, "commit", "-m", "base")
+	base := mustGit(t, source, "rev-parse", "HEAD")
+
+	target := t.TempDir()
+	mustGit(t, target, "clone", source, ".")
+
+	require.NoError(t, os.WriteFile(filepath.Join(source, "feature.txt"), []byte("feature\n"), 0o644))
+	mustGit(t, source, "add", "feature.txt")
+	mustGit(t, source, "commit", "-m", "feature")
+	head := mustGit(t, source, "rev-parse", "HEAD")
+
+	client := &git.Client{Binary: "git", Dir: source}
+	bundle, err := client.CreateBundleFile(head, []string{base})
+	require.NoError(t, err)
+	defer os.Remove(bundle.Path)
+	require.NotZero(t, bundle.Size)
+	require.True(t, strings.HasPrefix(bundle.Ref, "refs/rwx/bundles/"))
+
+	mustGit(t, target, "fetch", bundle.Path, bundle.Ref+":"+bundle.Ref)
+	fetched := mustGit(t, target, "rev-parse", bundle.Ref)
+	require.Equal(t, head, fetched)
+
+	showRef := exec.Command("git", "show-ref", "--verify", bundle.Ref)
+	showRef.Dir = source
+	require.Error(t, showRef.Run(), "temporary bundle ref should be removed")
 }
 
 func TestGeneratePatchFile(t *testing.T) {

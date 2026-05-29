@@ -4,14 +4,27 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/sandbox-helpers.sh"
 
-start_sandbox
-trap stop_sandbox EXIT
+ORIGINAL_HEAD=$(git rev-parse HEAD)
 
-git commit --allow-empty -m "unpushed local commit"
+cleanup() {
+  set +e
+  stop_sandbox >/dev/null 2>&1
+  git reset --hard "$ORIGINAL_HEAD" >/dev/null 2>&1
+  rm -f uncommitted-test.txt unpushed-commit-test.txt
+}
+trap cleanup EXIT
+
+echo "unpushed commit content" > unpushed-commit-test.txt
+git add unpushed-commit-test.txt
+git commit -m "unpushed local commit"
 echo "uncommitted edit" > uncommitted-test.txt
 uncommitted_sha=$(sha1sum uncommitted-test.txt | awk '{print $1}')
 
-"${RWX_CLI}" sandbox exec -- echo "exercising sandbox with unpushed commits"
+"${RWX_CLI}" sandbox exec \
+  "${SCRIPT_DIR}/definitions/sandbox.yml" \
+  --init ref=main \
+  --init "cli=${COMMIT_SHA}" \
+  -- sh -c 'test "$(cat unpushed-commit-test.txt)" = "unpushed commit content" && test "$(cat uncommitted-test.txt)" = "uncommitted edit"'
 
 post_exec_sha=$(sha1sum uncommitted-test.txt | awk '{print $1}')
 if [ "$uncommitted_sha" != "$post_exec_sha" ]; then
