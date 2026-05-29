@@ -11,6 +11,9 @@ func TestLogsOutputDirFlags(t *testing.T) {
 	require.NotNil(t, outputDirFlag)
 	require.False(t, outputDirFlag.Hidden)
 
+	outputFileFlag := logsCmd.Flags().Lookup("output-file")
+	require.NotNil(t, outputFileFlag)
+	require.False(t, outputFileFlag.Hidden)
+
 	require.Nil(t, logsCmd.Flags().Lookup("output-directory"))
-	require.Nil(t, logsCmd.Flags().Lookup("output-file"))
 }

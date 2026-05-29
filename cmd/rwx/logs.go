@@ -12,6 +12,7 @@ import (
 
 var (
 	LogsOutputDir   string
+	LogsOutputFile  string
 	LogsAutoExtract bool
 	LogsZip         bool
 	LogsOpen        bool
@@ -41,22 +42,37 @@ var (
 			var err error
 
 			outputDirSet := cmd.Flags().Changed("output-dir")
-			outputDir := LogsOutputDir
-			if !outputDirSet {
-				outputDir, err = cli.FindDefaultDownloadsDir()
-				if err != nil {
-					return errors.Wrap(err, "unable to determine default logs directory")
-				}
+			outputFileSet := cmd.Flags().Changed("output-file")
+			if outputDirSet && outputFileSet {
+				return errors.New("output-dir and output-file cannot be used together")
 			}
-			absOutputDir, err := filepath.Abs(outputDir)
-			if err != nil {
-				return errors.Wrapf(err, "unable to resolve absolute path for %s", outputDir)
+
+			var absOutputDir string
+			var absOutputFile string
+			if outputFileSet {
+				absOutputFile, err = filepath.Abs(LogsOutputFile)
+				if err != nil {
+					return errors.Wrapf(err, "unable to resolve absolute path for %s", LogsOutputFile)
+				}
+			} else {
+				outputDir := LogsOutputDir
+				if !outputDirSet {
+					outputDir, err = cli.FindDefaultDownloadsDir()
+					if err != nil {
+						return errors.Wrap(err, "unable to determine default logs directory")
+					}
+				}
+				absOutputDir, err = filepath.Abs(outputDir)
+				if err != nil {
+					return errors.Wrapf(err, "unable to resolve absolute path for %s", outputDir)
+				}
 			}
 
 			useJson := useJsonOutput()
 
 			cfg := cli.DownloadLogsConfig{
 				OutputDir:              absOutputDir,
+				OutputFile:             absOutputFile,
 				OutputDirExplicitlySet: outputDirSet,
 				Json:                   useJson,
 				Zip:                    LogsZip,
@@ -94,6 +110,7 @@ var (
 
 func init() {
 	logsCmd.Flags().StringVar(&LogsOutputDir, "output-dir", "", "output directory for downloaded logs (defaults to .rwx/downloads folder)")
+	logsCmd.Flags().StringVar(&LogsOutputFile, "output-file", "", "output file path for the downloaded zip archive; only valid with --zip")
 	logsCmd.Flags().BoolVar(&LogsAutoExtract, "auto-extract", false, "automatically extract zip archives")
 	if err := logsCmd.Flags().MarkHidden("auto-extract"); err != nil {
 		panic(err)

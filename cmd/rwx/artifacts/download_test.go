@@ -14,6 +14,9 @@ func TestDownloadOutputDirFlags(t *testing.T) {
 	require.NotNil(t, outputDirFlag)
 	require.False(t, outputDirFlag.Hidden)
 
+	outputFileFlag := DownloadCmd.Flags().Lookup("output-file")
+	require.NotNil(t, outputFileFlag)
+	require.False(t, outputFileFlag.Hidden)
+
 	require.Nil(t, DownloadCmd.Flags().Lookup("output-directory"))
-	require.Nil(t, DownloadCmd.Flags().Lookup("output-file"))
 }

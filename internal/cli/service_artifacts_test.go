@@ -109,7 +109,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		require.Contains(t, err.Error(), "artifact key must be provided")
 	})
 
-	t.Run("when validation fails - missing output directory", func(t *testing.T) {
+	t.Run("when validation fails - missing output destination", func(t *testing.T) {
 		s := setupTest(t)
 
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
@@ -119,7 +119,22 @@ func TestService_DownloadArtifact(t *testing.T) {
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "validation failed")
-		require.Contains(t, err.Error(), "output directory must be provided")
+		require.Contains(t, err.Error(), "output directory or output file must be provided")
+	})
+
+	t.Run("when validation fails - both output dir and output file set", func(t *testing.T) {
+		s := setupTest(t)
+
+		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
+			TaskID:      "task-123",
+			ArtifactKey: "my-artifact",
+			OutputDir:   s.tmp,
+			OutputFile:  filepath.Join(s.tmp, "artifact.tar"),
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "validation failed")
+		require.Contains(t, err.Error(), "output-dir and output-file cannot be used together")
 	})
 
 	t.Run("when download succeeds with file artifact - always extracts", func(t *testing.T) {
@@ -208,6 +223,43 @@ func TestService_DownloadArtifact(t *testing.T) {
 		require.Contains(t, output, "task-456-my-dir.tar")
 	})
 
+	t.Run("when download succeeds with directory artifact and output-file - saves tar to file", func(t *testing.T) {
+		s := setupTest(t)
+
+		tarBytes := createTestTar(t, map[string][]byte{
+			"file1.txt": []byte("content 1"),
+		})
+		customPath := filepath.Join(s.tmp, "custom", "artifact.tar")
+
+		s.mockAPI.MockGetArtifactDownloadRequest = func(taskId, artifactKey string) (api.ArtifactDownloadRequestResult, error) {
+			return api.ArtifactDownloadRequestResult{
+				URL:      "https://example.com/artifact",
+				Filename: "task-456-my-dir.tar",
+				Kind:     "directory",
+				Key:      "my-dir",
+			}, nil
+		}
+
+		s.mockAPI.MockDownloadArtifact = func(request api.ArtifactDownloadRequestResult) ([]byte, error) {
+			return tarBytes, nil
+		}
+
+		result, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
+			TaskID:      "task-456",
+			ArtifactKey: "my-dir",
+			OutputFile:  customPath,
+			AutoExtract: false,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, []string{customPath}, result.OutputFiles)
+		require.FileExists(t, customPath)
+
+		actualContents, err := os.ReadFile(customPath)
+		require.NoError(t, err)
+		require.Equal(t, tarBytes, actualContents)
+	})
+
 	t.Run("when download succeeds with directory artifact and auto-extract true - extracts", func(t *testing.T) {
 		s := setupTest(t)
 
@@ -252,6 +304,53 @@ func TestService_DownloadArtifact(t *testing.T) {
 		require.Contains(t, output, "file1.txt")
 		require.Contains(t, output, "file2.txt")
 		require.Contains(t, output, "subdir/file3.txt")
+	})
+
+	t.Run("when file artifact has output-file, it fails because file artifacts extract", func(t *testing.T) {
+		s := setupTest(t)
+
+		s.mockAPI.MockGetArtifactDownloadRequest = func(taskId, artifactKey string) (api.ArtifactDownloadRequestResult, error) {
+			return api.ArtifactDownloadRequestResult{
+				URL:      "https://example.com/artifact",
+				Filename: "task-999-my-file.tar",
+				Kind:     "file",
+				Key:      "my-file",
+			}, nil
+		}
+
+		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
+			TaskID:      "task-999",
+			ArtifactKey: "my-file",
+			OutputFile:  filepath.Join(s.tmp, "custom", "artifact.txt"),
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "validation failed")
+		require.Contains(t, err.Error(), "output-file cannot be used when extracting artifacts; use output-dir")
+	})
+
+	t.Run("when auto-extracting directory artifact has output-file, it fails", func(t *testing.T) {
+		s := setupTest(t)
+
+		s.mockAPI.MockGetArtifactDownloadRequest = func(taskId, artifactKey string) (api.ArtifactDownloadRequestResult, error) {
+			return api.ArtifactDownloadRequestResult{
+				URL:      "https://example.com/artifact",
+				Filename: "task-333-my-dir.tar",
+				Kind:     "directory",
+				Key:      "my-dir",
+			}, nil
+		}
+
+		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
+			TaskID:      "task-333",
+			ArtifactKey: "my-dir",
+			OutputFile:  filepath.Join(s.tmp, "custom", "artifact.tar"),
+			AutoExtract: true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "validation failed")
+		require.Contains(t, err.Error(), "output-file cannot be used when extracting artifacts; use output-dir")
 	})
 
 	t.Run("when download succeeds with explicit output directory for file artifact", func(t *testing.T) {

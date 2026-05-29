@@ -13,6 +13,7 @@ import (
 
 var (
 	downloadOutputDir   string
+	downloadOutputFile  string
 	downloadAutoExtract bool
 	downloadOpen        bool
 	downloadAll         bool
@@ -63,14 +64,22 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 			svc := getService()
 
 			outputDirSet := cmd.Flags().Changed("output-dir")
+			outputFileSet := cmd.Flags().Changed("output-file")
+			if outputDirSet && outputFileSet {
+				return errors.New("output-dir and output-file cannot be used together")
+			}
 
 			if taskKeySet {
-				return runDownloadWithTaskKey(svc, args, outputDirSet, useJsonOutput())
+				return runDownloadWithTaskKey(svc, args, outputDirSet, outputFileSet, useJsonOutput())
 			}
 
 			taskID := args[0]
 
 			if downloadAll {
+				if outputFileSet {
+					return errors.New("--output-file cannot be used with --all")
+				}
+
 				absOutputDir, err := resolveDownloadOutputDir(outputDirSet)
 				if err != nil {
 					return err
@@ -90,7 +99,7 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 
 			artifactKey := args[1]
 
-			absOutputDir, err := resolveDownloadOutputDir(outputDirSet)
+			absOutputDir, absOutputFile, err := resolveDownloadOutputDestination(outputDirSet, outputFileSet)
 			if err != nil {
 				return err
 			}
@@ -100,6 +109,7 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 				TaskID:                 taskID,
 				ArtifactKey:            artifactKey,
 				OutputDir:              absOutputDir,
+				OutputFile:             absOutputFile,
 				OutputDirExplicitlySet: outputDirSet,
 				Json:                   useJson,
 				AutoExtract:            downloadAutoExtract,
@@ -112,18 +122,23 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 	}
 
 	DownloadCmd.Flags().StringVar(&downloadOutputDir, "output-dir", "", "output directory for downloaded artifacts (defaults to .rwx/downloads folder)")
+	DownloadCmd.Flags().StringVar(&downloadOutputFile, "output-file", "", "output file path for the downloaded tar archive; only valid when not extracting")
 	DownloadCmd.Flags().BoolVar(&downloadAutoExtract, "auto-extract", false, "automatically extract directory tar archives")
 	DownloadCmd.Flags().BoolVar(&downloadOpen, "open", false, "automatically open the downloaded file(s)")
 	DownloadCmd.Flags().BoolVar(&downloadAll, "all", false, "download all artifacts for the task")
 	DownloadCmd.Flags().StringVar(&downloadTaskKey, "task", "", "task key (e.g., ci.checks.lint); resolves the task by key instead of ID")
 }
 
-func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirSet bool, useJson bool) error {
+func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirSet, outputFileSet bool, useJson bool) error {
 	var runID string
 	var artifactKey string
 	var err error
 
 	if downloadAll {
+		if outputFileSet {
+			return errors.New("--output-file cannot be used with --all")
+		}
+
 		if len(args) > 0 {
 			runID = args[0]
 		} else {
@@ -165,7 +180,7 @@ func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirSet bool, u
 		}
 	}
 
-	absOutputDir, err := resolveDownloadOutputDir(outputDirSet)
+	absOutputDir, absOutputFile, err := resolveDownloadOutputDestination(outputDirSet, outputFileSet)
 	if err != nil {
 		return err
 	}
@@ -175,6 +190,7 @@ func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirSet bool, u
 		TaskKey:                downloadTaskKey,
 		ArtifactKey:            artifactKey,
 		OutputDir:              absOutputDir,
+		OutputFile:             absOutputFile,
 		OutputDirExplicitlySet: outputDirSet,
 		Json:                   useJson,
 		AutoExtract:            downloadAutoExtract,
@@ -184,6 +200,22 @@ func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirSet bool, u
 		return handleTaskKeyError(err)
 	}
 	return nil
+}
+
+func resolveDownloadOutputDestination(outputDirSet, outputFileSet bool) (string, string, error) {
+	if outputFileSet {
+		absOutputFile, err := filepath.Abs(downloadOutputFile)
+		if err != nil {
+			return "", "", errors.Wrapf(err, "unable to resolve absolute path for %s", downloadOutputFile)
+		}
+		return "", absOutputFile, nil
+	}
+
+	absOutputDir, err := resolveDownloadOutputDir(outputDirSet)
+	if err != nil {
+		return "", "", err
+	}
+	return absOutputDir, "", nil
 }
 
 func resolveDownloadOutputDir(explicitlySet bool) (string, error) {

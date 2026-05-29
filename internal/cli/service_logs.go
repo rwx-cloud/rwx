@@ -21,6 +21,7 @@ type DownloadLogsConfig struct {
 	RunID                  string
 	TaskKey                string
 	OutputDir              string
+	OutputFile             string
 	OutputDirExplicitlySet bool
 	Json                   bool
 	Zip                    bool
@@ -35,8 +36,14 @@ func (c DownloadLogsConfig) Validate() error {
 	} else if c.TaskID == "" {
 		return errors.New("task ID must be provided")
 	}
-	if c.OutputDir == "" {
-		return errors.New("output directory must be provided")
+	if c.OutputDir != "" && c.OutputFile != "" {
+		return errors.New("output-dir and output-file cannot be used together")
+	}
+	if !c.Zip && c.OutputFile != "" {
+		return errors.New("output-file can only be used with --zip")
+	}
+	if c.OutputDir == "" && c.OutputFile == "" {
+		return errors.New("output directory or output file must be provided")
 	}
 	return nil
 }
@@ -90,7 +97,10 @@ func (s Service) DownloadLogs(cfg DownloadLogsConfig) (_ *DownloadLogsResult, dl
 	var outputFiles []string
 
 	if cfg.Zip {
-		zipPath := filepath.Join(cfg.OutputDir, logDownloadRequest.Filename)
+		zipPath := cfg.OutputFile
+		if zipPath == "" {
+			zipPath = filepath.Join(cfg.OutputDir, logDownloadRequest.Filename)
+		}
 
 		if err := os.MkdirAll(filepath.Dir(zipPath), 0755); err != nil {
 			return nil, errors.Wrapf(err, "unable to create output directory %s", filepath.Dir(zipPath))

@@ -24,6 +24,7 @@ type DownloadArtifactConfig struct {
 	TaskKey                string
 	ArtifactKey            string
 	OutputDir              string
+	OutputFile             string
 	OutputDirExplicitlySet bool
 	Json                   bool
 	AutoExtract            bool
@@ -41,8 +42,11 @@ func (c DownloadArtifactConfig) Validate() error {
 	if c.ArtifactKey == "" {
 		return errors.New("artifact key must be provided")
 	}
-	if c.OutputDir == "" {
-		return errors.New("output directory must be provided")
+	if c.OutputDir != "" && c.OutputFile != "" {
+		return errors.New("output-dir and output-file cannot be used together")
+	}
+	if c.OutputDir == "" && c.OutputFile == "" {
+		return errors.New("output directory or output file must be provided")
 	}
 	return nil
 }
@@ -86,6 +90,13 @@ func (s Service) DownloadArtifact(cfg DownloadArtifactConfig) (_ *DownloadArtifa
 
 	totalBytes = artifactDownloadRequest.SizeInBytes
 
+	// For files, always extract the single file from the tar.
+	// For directories, extract if AutoExtract is true.
+	shouldExtract := artifactDownloadRequest.Kind == "file" || (artifactDownloadRequest.Kind == "directory" && cfg.AutoExtract)
+	if shouldExtract && cfg.OutputFile != "" {
+		return nil, errors.Wrap(errors.New("output-file cannot be used when extracting artifacts; use output-dir"), "validation failed")
+	}
+
 	stopSpinner := Spin(
 		"Downloading artifact...",
 		s.StderrIsTTY,
@@ -97,10 +108,6 @@ func (s Service) DownloadArtifact(cfg DownloadArtifactConfig) (_ *DownloadArtifa
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to download artifact")
 	}
-
-	// For files, always extract the single file from the tar
-	// For directories, extract if AutoExtract is true
-	shouldExtract := artifactDownloadRequest.Kind == "file" || (artifactDownloadRequest.Kind == "directory" && cfg.AutoExtract)
 
 	var outputFiles []string
 
@@ -131,7 +138,10 @@ func (s Service) DownloadArtifact(cfg DownloadArtifactConfig) (_ *DownloadArtifa
 			fmt.Fprintf(s.Stdout, "Extracted %d file(s) to %s\n", len(outputFiles), extractDir)
 		}
 	} else {
-		outputPath := filepath.Join(cfg.OutputDir, artifactDownloadRequest.Filename)
+		outputPath := cfg.OutputFile
+		if outputPath == "" {
+			outputPath = filepath.Join(cfg.OutputDir, artifactDownloadRequest.Filename)
+		}
 
 		outputDir := filepath.Dir(outputPath)
 		if err := os.MkdirAll(outputDir, 0755); err != nil {
