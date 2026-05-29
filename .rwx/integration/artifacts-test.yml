@@ -97,6 +97,31 @@ tasks:
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
       RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
 
+  - key: test-download-single-artifact-default-output
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      download_output=$(rwx --output json artifacts download "$RUN_ID" --task artifact-producer test-file)
+      downloaded_file=$(echo "$download_output" | jq -r '.OutputFiles[0]')
+      if [ -z "$downloaded_file" ] || [ "$downloaded_file" = "null" ] || [ ! -f "$downloaded_file" ]; then
+        echo "test-file artifact not downloaded with default output destination"
+        echo "$download_output"
+        exit 1
+      fi
+      if ! grep -q "integration-test-content" "$downloaded_file"; then
+        echo "Downloaded test-file does not contain expected content"
+        echo "$download_output"
+        cat "$downloaded_file" || true
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
   - key: test-download-all-artifacts
     use: rwx-cli
     run: |
@@ -108,6 +133,31 @@ tasks:
       if [ ! -d /tmp/artifacts-all ] || [ "$(ls /tmp/artifacts-all | wc -l)" -lt 2 ]; then
         echo "Expected at least 2 artifacts downloaded"
         ls -la /tmp/artifacts-all/ || true
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-directory-artifact-default-output
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      download_output=$(rwx --output json artifacts download "$RUN_ID" --task artifact-producer test-dir)
+      downloaded_tar=$(echo "$download_output" | jq -r '.OutputFiles[0]')
+      if [ -z "$downloaded_tar" ] || [ "$downloaded_tar" = "null" ] || [ ! -f "$downloaded_tar" ]; then
+        echo "test-dir raw artifact not downloaded with default output destination"
+        echo "$download_output"
+        exit 1
+      fi
+      if ! tar -tf "$downloaded_tar" | grep -q "nested-file.txt"; then
+        echo "Default raw artifact tar does not contain expected nested file"
+        echo "$download_output"
+        tar -tf "$downloaded_tar" || true
         exit 1
       fi
     env:

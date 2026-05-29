@@ -73,6 +73,30 @@ tasks:
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
       RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
 
+  - key: test-download-and-extract-logs-default-output
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      download_output=$(rwx --output json logs "$RUN_ID" --task log-producer)
+      first_file=$(echo "$download_output" | jq -r '.OutputFiles[0]')
+      if [ -z "$first_file" ] || [ "$first_file" = "null" ] || [ ! -f "$first_file" ]; then
+        echo "No log files extracted with default output destination"
+        echo "$download_output"
+        exit 1
+      fi
+      if ! echo "$download_output" | jq -r '.OutputFiles[]' | xargs grep -q "integration-test-log-marker"; then
+        echo "Log marker not found in default extracted logs"
+        echo "$download_output"
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
   - key: test-download-logs-as-zip
     use: rwx-cli
     run: |
