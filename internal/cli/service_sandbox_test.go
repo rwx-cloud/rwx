@@ -63,6 +63,34 @@ func TestService_ListSandboxes(t *testing.T) {
 	})
 }
 
+func requireCommandWrappedBySyncMarkers(t *testing.T, commands []string, commandIndex int) {
+	t.Helper()
+
+	startIndex := -1
+	for i := commandIndex - 1; i >= 0; i-- {
+		if commands[i] == "__rwx_sandbox_sync_start__" {
+			startIndex = i
+			break
+		}
+		if commands[i] == "__rwx_sandbox_sync_end__" {
+			break
+		}
+	}
+	require.NotEqual(t, -1, startIndex, "command %q should be preceded by a sync start marker", commands[commandIndex])
+
+	endIndex := -1
+	for i := commandIndex + 1; i < len(commands); i++ {
+		if commands[i] == "__rwx_sandbox_sync_end__" {
+			endIndex = i
+			break
+		}
+		if commands[i] == "__rwx_sandbox_sync_start__" {
+			break
+		}
+	}
+	require.NotEqual(t, -1, endIndex, "command %q should be followed by a sync end marker", commands[commandIndex])
+}
+
 func TestService_LockWaitOutput(t *testing.T) {
 	t.Run("no output when lock is uncontended", func(t *testing.T) {
 		setup := setupTest(t)
@@ -1494,6 +1522,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		}
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			commandOrder = append(commandOrder, cmd)
 			switch {
 			case strings.Contains(cmd, "for-each-ref"):
 				return 0, knownTip + "\ncccccccccccccccccccccccccccccccccccccccc\n", nil
@@ -1509,6 +1538,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		var stdinCommands []string
 		var stdinPayloads []string
 		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
+			commandOrder = append(commandOrder, command)
 			data, _ := io.ReadAll(stdin)
 			stdinCommands = append(stdinCommands, command)
 			stdinPayloads = append(stdinPayloads, string(data))
@@ -1531,6 +1561,46 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Contains(t, strings.Join(commandOrder, "\n"), "git checkout -f -B 'feature/sync' '"+localHead+"'")
 		require.Contains(t, strings.Join(commandOrder, "\n"), "git write-tree")
 		require.Contains(t, strings.Join(commandOrder, "\n"), "git clean -fd")
+		for i, cmd := range commandOrder {
+			if strings.Contains(cmd, "cat-file -e") || strings.Contains(cmd, "for-each-ref") {
+				requireCommandWrappedBySyncMarkers(t, commandOrder, i)
+			}
+		}
+		firstProbeIndex := slices.IndexFunc(commandOrder, func(cmd string) bool {
+			return strings.Contains(cmd, "cat-file -e")
+		})
+		knownTipsIndex := slices.IndexFunc(commandOrder, func(cmd string) bool {
+			return strings.Contains(cmd, "for-each-ref")
+		})
+		require.NotEqual(t, -1, firstProbeIndex)
+		require.NotEqual(t, -1, knownTipsIndex)
+		require.Less(t, firstProbeIndex, knownTipsIndex)
+		gitDirIndex := slices.IndexFunc(commandOrder, func(cmd string) bool {
+			return strings.Contains(cmd, "test -d .git")
+		})
+		require.NotEqual(t, -1, gitDirIndex)
+		require.Less(t, gitDirIndex, firstProbeIndex)
+		require.Equal(t, "__rwx_sandbox_sync_start__", commandOrder[gitDirIndex-1])
+		require.Equal(t, "__rwx_sandbox_sync_end__", commandOrder[knownTipsIndex+1])
+		require.NotContains(t, commandOrder[gitDirIndex+1:knownTipsIndex], "__rwx_sandbox_sync_start__")
+		require.NotContains(t, commandOrder[gitDirIndex+1:knownTipsIndex], "__rwx_sandbox_sync_end__")
+
+		bundleImportIndex := slices.IndexFunc(commandOrder, func(cmd string) bool {
+			return strings.Contains(cmd, "git bundle verify")
+		})
+		require.NotEqual(t, -1, bundleImportIndex)
+		finalProbeIndex := -1
+		for i := bundleImportIndex + 1; i < len(commandOrder); i++ {
+			if strings.Contains(commandOrder[i], "cat-file -e") {
+				finalProbeIndex = i
+				break
+			}
+		}
+		require.NotEqual(t, -1, finalProbeIndex)
+		require.Equal(t, "__rwx_sandbox_sync_start__", commandOrder[bundleImportIndex-1])
+		require.Equal(t, "__rwx_sandbox_sync_end__", commandOrder[finalProbeIndex+1])
+		require.NotContains(t, commandOrder[bundleImportIndex+1:finalProbeIndex], "__rwx_sandbox_sync_start__")
+		require.NotContains(t, commandOrder[bundleImportIndex+1:finalProbeIndex], "__rwx_sandbox_sync_end__")
 		require.Contains(t, stdinCommands[0], "git bundle verify")
 		require.Contains(t, stdinCommands[0], "refs/rwx/bundles/test:refs/rwx/bundles/test")
 		require.Equal(t, "bundle-data", stdinPayloads[0])
