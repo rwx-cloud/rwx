@@ -122,9 +122,14 @@ tasks:
 
       echo "$RUN_URL" > "$RWX_LINKS/Run URL"
 
-      rwx artifacts download "$RUN_ID" --task artifact-producer test-file --output-file /tmp/artifacts-single-file.txt
-      if [ ! -f /tmp/artifacts-single-file.txt ]; then
+      rwx artifacts download "$RUN_ID" --task artifact-producer test-dir --output-file /tmp/artifacts-raw-dir.tar
+      if [ ! -f /tmp/artifacts-raw-dir.tar ]; then
         echo "Artifact not downloaded to --output-file path"
+        exit 1
+      fi
+      if ! tar -tf /tmp/artifacts-raw-dir.tar | grep -q "nested-file.txt"; then
+        echo "Raw artifact tar does not contain expected nested file"
+        tar -tf /tmp/artifacts-raw-dir.tar || true
         exit 1
       fi
     env:
