@@ -7,16 +7,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDownloadOutputDirectoryFlags(t *testing.T) {
+func TestDownloadOutputDirFlags(t *testing.T) {
 	InitDownload(func() error { return nil }, func() cli.Service { return cli.Service{} }, func() bool { return false })
 
-	outputDirectoryFlag := DownloadCmd.Flags().Lookup("output-directory")
-	require.NotNil(t, outputDirectoryFlag)
-	require.False(t, outputDirectoryFlag.Hidden)
+	outputDirFlag := DownloadCmd.Flags().Lookup("output-dir")
+	require.NotNil(t, outputDirFlag)
+	require.False(t, outputDirFlag.Hidden)
 
-	outputDirAlias := DownloadCmd.Flags().Lookup("output-dir")
-	require.NotNil(t, outputDirAlias)
-	require.True(t, outputDirAlias.Hidden)
-
+	require.Nil(t, DownloadCmd.Flags().Lookup("output-directory"))
 	require.Nil(t, DownloadCmd.Flags().Lookup("output-file"))
 }

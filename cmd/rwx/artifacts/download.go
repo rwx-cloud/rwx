@@ -12,11 +12,11 @@ import (
 )
 
 var (
-	downloadOutputDirectory string
-	downloadAutoExtract     bool
-	downloadOpen            bool
-	downloadAll             bool
-	downloadTaskKey         string
+	downloadOutputDir   string
+	downloadAutoExtract bool
+	downloadOpen        bool
+	downloadAll         bool
+	downloadTaskKey     string
 
 	DownloadCmd *cobra.Command
 )
@@ -62,19 +62,16 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 			taskKeySet := cmd.Flags().Changed("task")
 			svc := getService()
 
-			outputDirectoryExplicitlySet, err := downloadOutputDirectoryExplicitlySet(cmd)
-			if err != nil {
-				return err
-			}
+			outputDirSet := cmd.Flags().Changed("output-dir")
 
 			if taskKeySet {
-				return runDownloadWithTaskKey(svc, args, outputDirectoryExplicitlySet, useJsonOutput())
+				return runDownloadWithTaskKey(svc, args, outputDirSet, useJsonOutput())
 			}
 
 			taskID := args[0]
 
 			if downloadAll {
-				absOutputDirectory, err := resolveDownloadOutputDirectory(outputDirectoryExplicitlySet)
+				absOutputDir, err := resolveDownloadOutputDir(outputDirSet)
 				if err != nil {
 					return err
 				}
@@ -82,8 +79,8 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 				useJson := useJsonOutput()
 				_, err = svc.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
 					TaskID:                 taskID,
-					OutputDir:              absOutputDirectory,
-					OutputDirExplicitlySet: outputDirectoryExplicitlySet,
+					OutputDir:              absOutputDir,
+					OutputDirExplicitlySet: outputDirSet,
 					Json:                   useJson,
 					AutoExtract:            downloadAutoExtract,
 					Open:                   downloadOpen,
@@ -93,7 +90,7 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 
 			artifactKey := args[1]
 
-			absOutputDirectory, err := resolveDownloadOutputDirectory(outputDirectoryExplicitlySet)
+			absOutputDir, err := resolveDownloadOutputDir(outputDirSet)
 			if err != nil {
 				return err
 			}
@@ -102,8 +99,8 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 			_, err = svc.DownloadArtifact(cli.DownloadArtifactConfig{
 				TaskID:                 taskID,
 				ArtifactKey:            artifactKey,
-				OutputDir:              absOutputDirectory,
-				OutputDirExplicitlySet: outputDirectoryExplicitlySet,
+				OutputDir:              absOutputDir,
+				OutputDirExplicitlySet: outputDirSet,
 				Json:                   useJson,
 				AutoExtract:            downloadAutoExtract,
 				Open:                   downloadOpen,
@@ -114,18 +111,14 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 		Use:   "download [task-id | run-id --task <key>] [artifact-key] [flags]",
 	}
 
-	DownloadCmd.Flags().StringVar(&downloadOutputDirectory, "output-directory", "", "output directory for downloaded artifacts (defaults to .rwx/downloads folder)")
-	DownloadCmd.Flags().StringVar(&downloadOutputDirectory, "output-dir", "", "output directory for downloaded artifacts (defaults to .rwx/downloads folder)")
-	if err := DownloadCmd.Flags().MarkHidden("output-dir"); err != nil {
-		panic(err)
-	}
+	DownloadCmd.Flags().StringVar(&downloadOutputDir, "output-dir", "", "output directory for downloaded artifacts (defaults to .rwx/downloads folder)")
 	DownloadCmd.Flags().BoolVar(&downloadAutoExtract, "auto-extract", false, "automatically extract directory tar archives")
 	DownloadCmd.Flags().BoolVar(&downloadOpen, "open", false, "automatically open the downloaded file(s)")
 	DownloadCmd.Flags().BoolVar(&downloadAll, "all", false, "download all artifacts for the task")
 	DownloadCmd.Flags().StringVar(&downloadTaskKey, "task", "", "task key (e.g., ci.checks.lint); resolves the task by key instead of ID")
 }
 
-func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirectoryExplicitlySet bool, useJson bool) error {
+func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirSet bool, useJson bool) error {
 	var runID string
 	var artifactKey string
 	var err error
@@ -140,7 +133,7 @@ func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirectoryExpli
 			}
 		}
 
-		absOutputDirectory, err := resolveDownloadOutputDirectory(outputDirectoryExplicitlySet)
+		absOutputDir, err := resolveDownloadOutputDir(outputDirSet)
 		if err != nil {
 			return err
 		}
@@ -148,8 +141,8 @@ func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirectoryExpli
 		_, err = svc.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
 			RunID:                  runID,
 			TaskKey:                downloadTaskKey,
-			OutputDir:              absOutputDirectory,
-			OutputDirExplicitlySet: outputDirectoryExplicitlySet,
+			OutputDir:              absOutputDir,
+			OutputDirExplicitlySet: outputDirSet,
 			Json:                   useJson,
 			AutoExtract:            downloadAutoExtract,
 			Open:                   downloadOpen,
@@ -172,7 +165,7 @@ func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirectoryExpli
 		}
 	}
 
-	absOutputDirectory, err := resolveDownloadOutputDirectory(outputDirectoryExplicitlySet)
+	absOutputDir, err := resolveDownloadOutputDir(outputDirSet)
 	if err != nil {
 		return err
 	}
@@ -181,8 +174,8 @@ func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirectoryExpli
 		RunID:                  runID,
 		TaskKey:                downloadTaskKey,
 		ArtifactKey:            artifactKey,
-		OutputDir:              absOutputDirectory,
-		OutputDirExplicitlySet: outputDirectoryExplicitlySet,
+		OutputDir:              absOutputDir,
+		OutputDirExplicitlySet: outputDirSet,
 		Json:                   useJson,
 		AutoExtract:            downloadAutoExtract,
 		Open:                   downloadOpen,
@@ -193,30 +186,21 @@ func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirectoryExpli
 	return nil
 }
 
-func downloadOutputDirectoryExplicitlySet(cmd *cobra.Command) (bool, error) {
-	outputDirectorySet := cmd.Flags().Changed("output-directory")
-	outputDirAliasSet := cmd.Flags().Changed("output-dir")
-	if outputDirectorySet && outputDirAliasSet {
-		return false, errors.New("output-directory and output-dir cannot be used together")
-	}
-	return outputDirectorySet || outputDirAliasSet, nil
-}
-
-func resolveDownloadOutputDirectory(explicitlySet bool) (string, error) {
-	outputDirectory := downloadOutputDirectory
+func resolveDownloadOutputDir(explicitlySet bool) (string, error) {
+	outputDir := downloadOutputDir
 	if !explicitlySet {
 		var err error
-		outputDirectory, err = cli.FindDefaultDownloadsDir()
+		outputDir, err = cli.FindDefaultDownloadsDir()
 		if err != nil {
 			return "", errors.Wrap(err, "unable to determine default downloads directory")
 		}
 	}
 
-	absOutputDirectory, err := filepath.Abs(outputDirectory)
+	absOutputDir, err := filepath.Abs(outputDir)
 	if err != nil {
-		return "", errors.Wrapf(err, "unable to resolve absolute path for %s", outputDirectory)
+		return "", errors.Wrapf(err, "unable to resolve absolute path for %s", outputDir)
 	}
-	return absOutputDirectory, nil
+	return absOutputDir, nil
 }
 
 // handleTaskKeyError formats task-key-specific errors for user display.
