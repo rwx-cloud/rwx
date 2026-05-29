@@ -767,7 +767,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	var syncPushPatchBytes int
 	if cfg.Sync {
 		syncPushStart := time.Now()
-		patchBytes, err := s.prepareSandboxForExec(cwd, cfg.Json, isNewSandbox, localHeadForSync)
+		patchBytes, err := s.prepareSandboxForExec(cfg.Json, isNewSandbox, localHeadForSync)
 		syncPushMs = time.Since(syncPushStart).Milliseconds()
 		syncPushPatchBytes = patchBytes
 		if err != nil {
@@ -1428,7 +1428,7 @@ func (s Service) revertSandboxToGitState(localHead string) error {
 	return nil
 }
 
-func (s Service) prepareSandboxForExec(cwd string, jsonMode bool, isNewSandbox bool, localHead string) (int, error) {
+func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHead string) (int, error) {
 	if localHead == "" {
 		return 0, fmt.Errorf("sandbox sync requires a git repository with a valid HEAD")
 	}
@@ -1449,11 +1449,6 @@ func (s Service) prepareSandboxForExec(cwd string, jsonMode bool, isNewSandbox b
 	}()
 
 	if err := s.ensureSandboxGitDir(); err != nil {
-		syncPushErr = err
-		return patchBytes, syncPushErr
-	}
-
-	if err := s.pullPendingSandboxChanges(cwd); err != nil {
 		syncPushErr = err
 		return patchBytes, syncPushErr
 	}
@@ -1542,21 +1537,6 @@ func (s Service) ensureSandboxGitDir() error {
 	}
 	if exitCode != 0 {
 		return errors.ErrSandboxNoGitDir
-	}
-	return nil
-}
-
-func (s Service) pullPendingSandboxChanges(cwd string) error {
-	exitCode, err := s.SSHClient.ExecuteCommand("/usr/bin/git rev-parse --verify -q refs/rwx-sync >/dev/null 2>&1")
-	if err != nil || exitCode != 0 {
-		return nil
-	}
-
-	// Use the full pull path for preflight recovery because it stages
-	// untracked files with intent-to-add before diffing refs/rwx-sync.
-	_, _, pullErr := s.pullChangesFromSandbox(cwd, true)
-	if pullErr != nil {
-		return errors.Wrap(pullErr, "failed to recover pending sandbox changes")
 	}
 	return nil
 }
