@@ -1448,11 +1448,6 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 		})
 	}()
 
-	if err := s.ensureSandboxGitDir(); err != nil {
-		syncPushErr = err
-		return patchBytes, syncPushErr
-	}
-
 	if err := s.ensureSandboxHasCommit(localHead, jsonMode); err != nil {
 		syncPushErr = err
 		return patchBytes, syncPushErr
@@ -1528,33 +1523,34 @@ func (s Service) warnUnresolvedRejectFiles() {
 	fmt.Fprintln(s.Stderr, "These will be synced to the sandbox and may cause issues. Resolve and delete them when possible.")
 }
 
-func (s Service) ensureSandboxGitDir() error {
+func (s Service) ensureSandboxHasCommit(localHead string, jsonMode bool) error {
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	exitCode, err := s.SSHClient.ExecuteCommand("test -d .git || test -f .git")
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
-	if err != nil {
-		return errors.Wrap(err, "failed to check sandbox git directory")
+	gitDirExitCode, gitDirErr := s.SSHClient.ExecuteCommand("test -d .git || test -f .git")
+	if gitDirErr != nil {
+		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+		return errors.Wrap(gitDirErr, "failed to check sandbox git directory")
 	}
-	if exitCode != 0 {
+	if gitDirExitCode != 0 {
+		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 		return errors.ErrSandboxNoGitDir
 	}
-	return nil
-}
 
-func (s Service) ensureSandboxHasCommit(localHead string, jsonMode bool) error {
-	if s.sandboxHasCommit(localHead) {
-		return nil
+	hasCommit := s.sandboxHasCommit(localHead)
+	if !hasCommit {
+		_, _ = s.SSHClient.ExecuteCommand("/usr/bin/git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1")
+		hasCommit = s.sandboxHasCommit(localHead)
 	}
 
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	_, _ = s.SSHClient.ExecuteCommand("/usr/bin/git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1")
+	var knownTips []string
+	if !hasCommit {
+		knownTips = s.remoteKnownTips()
+	}
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 
-	if s.sandboxHasCommit(localHead) {
+	if hasCommit {
 		return nil
 	}
 
-	knownTips := s.remoteKnownTips()
 	excludes := make([]string, 0, len(knownTips))
 	seen := make(map[string]bool, len(knownTips))
 	for _, tip := range knownTips {
@@ -1601,6 +1597,7 @@ func (s Service) ensureSandboxHasCommit(localHead string, jsonMode bool) error {
 		fetchBundleCmd,
 		fd,
 	)
+	hasCommit = streamErr == nil && exitCode == 0 && s.sandboxHasCommit(localHead)
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if streamErr != nil {
 		return errors.Wrap(streamErr, "failed to stream git bundle to sandbox")
@@ -1612,7 +1609,7 @@ func (s Service) ensureSandboxHasCommit(localHead string, jsonMode bool) error {
 		return fmt.Errorf("failed to import git bundle in sandbox (exit code %d)", exitCode)
 	}
 
-	if !s.sandboxHasCommit(localHead) {
+	if !hasCommit {
 		return fmt.Errorf("sandbox still does not contain local commit %s after bundle import", localHead)
 	}
 
