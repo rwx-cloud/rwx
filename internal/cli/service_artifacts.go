@@ -24,7 +24,6 @@ type DownloadArtifactConfig struct {
 	TaskKey                string
 	ArtifactKey            string
 	OutputDir              string
-	OutputFile             string
 	OutputDirExplicitlySet bool
 	Json                   bool
 	AutoExtract            bool
@@ -42,8 +41,8 @@ func (c DownloadArtifactConfig) Validate() error {
 	if c.ArtifactKey == "" {
 		return errors.New("artifact key must be provided")
 	}
-	if c.OutputDir != "" && c.OutputFile != "" {
-		return errors.New("output-dir and output-file cannot be used together")
+	if c.OutputDir == "" {
+		return errors.New("output directory must be provided")
 	}
 	return nil
 }
@@ -106,13 +105,8 @@ func (s Service) DownloadArtifact(cfg DownloadArtifactConfig) (_ *DownloadArtifa
 	var outputFiles []string
 
 	if shouldExtract {
-		// Extract tar to output directory
 		var extractDir string
-		if cfg.OutputFile != "" {
-			// If output file is specified, use its directory as extraction dir
-			extractDir = filepath.Dir(cfg.OutputFile)
-		} else if cfg.OutputDirExplicitlySet {
-			// If output-dir was explicitly set by user, extract directly into it
+		if cfg.OutputDirExplicitlySet {
 			extractDir = cfg.OutputDir
 		} else {
 			// For default Downloads folder, create a subdirectory named after the tar file
@@ -131,28 +125,13 @@ func (s Service) DownloadArtifact(cfg DownloadArtifactConfig) (_ *DownloadArtifa
 			return nil, errors.Wrapf(err, "unable to extract tar archive")
 		}
 
-		// For single file artifacts, if OutputFile is specified, rename the extracted file
-		if artifactDownloadRequest.Kind == "file" && cfg.OutputFile != "" && len(extractedFiles) == 1 {
-			newPath := cfg.OutputFile
-			if err := os.Rename(extractedFiles[0], newPath); err != nil {
-				return nil, errors.Wrapf(err, "unable to rename extracted file to %s", newPath)
-			}
-			outputFiles = []string{newPath}
-		} else {
-			outputFiles = extractedFiles
-		}
+		outputFiles = extractedFiles
 
 		if !cfg.Json && artifactDownloadRequest.Kind == "directory" {
 			fmt.Fprintf(s.Stdout, "Extracted %d file(s) to %s\n", len(outputFiles), extractDir)
 		}
 	} else {
-		// Save the raw tar file
-		var outputPath string
-		if cfg.OutputFile != "" {
-			outputPath = cfg.OutputFile
-		} else {
-			outputPath = filepath.Join(cfg.OutputDir, artifactDownloadRequest.Filename)
-		}
+		outputPath := filepath.Join(cfg.OutputDir, artifactDownloadRequest.Filename)
 
 		outputDir := filepath.Dir(outputPath)
 		if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -332,6 +311,9 @@ func (c DownloadAllArtifactsConfig) Validate() error {
 		}
 	} else if c.TaskID == "" {
 		return errors.New("task ID must be provided")
+	}
+	if c.OutputDir == "" {
+		return errors.New("output directory must be provided")
 	}
 	return nil
 }

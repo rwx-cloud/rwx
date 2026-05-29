@@ -109,19 +109,17 @@ func TestService_DownloadArtifact(t *testing.T) {
 		require.Contains(t, err.Error(), "artifact key must be provided")
 	})
 
-	t.Run("when validation fails - both output-dir and output-file set", func(t *testing.T) {
+	t.Run("when validation fails - missing output directory", func(t *testing.T) {
 		s := setupTest(t)
 
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-123",
 			ArtifactKey: "my-artifact",
-			OutputDir:   s.tmp,
-			OutputFile:  filepath.Join(s.tmp, "custom.txt"),
 		})
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "validation failed")
-		require.Contains(t, err.Error(), "output-dir and output-file cannot be used together")
+		require.Contains(t, err.Error(), "output directory must be provided")
 	})
 
 	t.Run("when download succeeds with file artifact - always extracts", func(t *testing.T) {
@@ -256,7 +254,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		require.Contains(t, output, "subdir/file3.txt")
 	})
 
-	t.Run("when download succeeds with OutputFile specified for file artifact", func(t *testing.T) {
+	t.Run("when download succeeds with explicit output directory for file artifact", func(t *testing.T) {
 		s := setupTest(t)
 
 		fileContent := []byte("custom file content")
@@ -264,7 +262,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 			"original.txt": fileContent,
 		})
 
-		customOutputFile := filepath.Join(s.tmp, "custom", "renamed.txt")
+		customOutputDir := filepath.Join(s.tmp, "custom")
 		s.mockAPI.MockGetArtifactDownloadRequest = func(taskId, artifactKey string) (api.ArtifactDownloadRequestResult, error) {
 			return api.ArtifactDownloadRequestResult{
 				URL:      "https://example.com/artifact",
@@ -279,21 +277,65 @@ func TestService_DownloadArtifact(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
-			TaskID:      "task-999",
-			ArtifactKey: "my-file",
-			OutputFile:  customOutputFile,
+			TaskID:                 "task-999",
+			ArtifactKey:            "my-file",
+			OutputDir:              customOutputDir,
+			OutputDirExplicitlySet: true,
 		})
 
 		require.NoError(t, err)
-		require.FileExists(t, customOutputFile)
+		expectedPath := filepath.Join(customOutputDir, "original.txt")
+		require.FileExists(t, expectedPath)
+		require.NoDirExists(t, filepath.Join(customOutputDir, "task-999-my-file"))
 
-		actualContents, err := os.ReadFile(customOutputFile)
+		actualContents, err := os.ReadFile(expectedPath)
 		require.NoError(t, err)
 		require.Equal(t, fileContent, actualContents)
 
 		output := s.mockStdout.String()
 		require.Contains(t, output, "Artifact downloaded to")
-		require.Contains(t, output, "renamed.txt")
+		require.Contains(t, output, "original.txt")
+	})
+
+	t.Run("when auto-extracting directory artifact with explicit output directory, extracts directly into it", func(t *testing.T) {
+		s := setupTest(t)
+
+		tarBytes := createTestTar(t, map[string][]byte{
+			"file1.txt":        []byte("content 1"),
+			"subdir/file2.txt": []byte("content 2"),
+		})
+
+		s.mockAPI.MockGetArtifactDownloadRequest = func(taskId, artifactKey string) (api.ArtifactDownloadRequestResult, error) {
+			return api.ArtifactDownloadRequestResult{
+				URL:      "https://example.com/artifact",
+				Filename: "task-333-my-dir.tar",
+				Kind:     "directory",
+				Key:      "my-dir",
+			}, nil
+		}
+
+		s.mockAPI.MockDownloadArtifact = func(request api.ArtifactDownloadRequestResult) ([]byte, error) {
+			return tarBytes, nil
+		}
+
+		outputDir := filepath.Join(s.tmp, "requested-output")
+		result, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
+			TaskID:                 "task-333",
+			ArtifactKey:            "my-dir",
+			OutputDir:              outputDir,
+			OutputDirExplicitlySet: true,
+			AutoExtract:            true,
+		})
+
+		require.NoError(t, err)
+		require.Len(t, result.OutputFiles, 2)
+		require.FileExists(t, filepath.Join(outputDir, "file1.txt"))
+		require.FileExists(t, filepath.Join(outputDir, "subdir", "file2.txt"))
+		require.NoDirExists(t, filepath.Join(outputDir, "task-333-my-dir"))
+
+		output := s.mockStdout.String()
+		require.Contains(t, output, "Extracted 2 file(s)")
+		require.Contains(t, output, outputDir)
 	})
 
 	t.Run("when download succeeds with JSON output - single file", func(t *testing.T) {

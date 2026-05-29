@@ -151,6 +151,44 @@ func TestService_DownloadLogs(t *testing.T) {
 		require.Contains(t, result.OutputFiles[0], "ci.rspec.rspec-0.log")
 	})
 
+	t.Run("when explicit output directory is set, extracts directly into it", func(t *testing.T) {
+		s := setupTest(t)
+
+		zipBytes := createTestZip(t, map[string][]byte{
+			"test.log": []byte("log content"),
+		})
+
+		s.mockAPI.MockGetLogDownloadRequest = func(taskId string) (api.LogDownloadRequestResult, error) {
+			return api.LogDownloadRequestResult{
+				URL:      "https://example.com/logs",
+				Token:    "jwt-token",
+				Filename: "task-123-logs.zip",
+				RunID:    "run-explicit",
+			}, nil
+		}
+
+		s.mockAPI.MockDownloadLogs = func(request api.LogDownloadRequestResult) ([]byte, error) {
+			return zipBytes, nil
+		}
+
+		outputDir := filepath.Join(s.tmp, "requested-output")
+		result, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
+			TaskID:                 "task-123",
+			OutputDir:              outputDir,
+			OutputDirExplicitlySet: true,
+		})
+
+		require.NoError(t, err)
+		expectedPath := filepath.Join(outputDir, "test.log")
+		require.FileExists(t, expectedPath)
+		require.NoFileExists(t, filepath.Join(outputDir, "run-explicit", "test.log"))
+		require.Equal(t, []string{expectedPath}, result.OutputFiles)
+
+		output := s.mockStdout.String()
+		require.Contains(t, output, "Logs downloaded to")
+		require.Contains(t, output, outputDir+string(os.PathSeparator))
+	})
+
 	t.Run("when download succeeds with multiple log files", func(t *testing.T) {
 		s := setupTest(t)
 
@@ -242,18 +280,16 @@ func TestService_DownloadLogs(t *testing.T) {
 		require.Contains(t, err.Error(), "task ID must be provided")
 	})
 
-	t.Run("when validation fails - both output-dir and output-file set", func(t *testing.T) {
+	t.Run("when validation fails - missing output directory", func(t *testing.T) {
 		s := setupTest(t)
 
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:     "task-123",
-			OutputDir:  s.tmp,
-			OutputFile: filepath.Join(s.tmp, "custom.zip"),
+			TaskID: "task-123",
 		})
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "validation failed")
-		require.Contains(t, err.Error(), "output-dir and output-file cannot be used together")
+		require.Contains(t, err.Error(), "output directory must be provided")
 	})
 
 	t.Run("when --zip flag saves raw zip without extraction", func(t *testing.T) {
@@ -301,13 +337,13 @@ func TestService_DownloadLogs(t *testing.T) {
 		require.Equal(t, []string{zipPath}, result.OutputFiles)
 	})
 
-	t.Run("when --zip flag with output-file", func(t *testing.T) {
+	t.Run("when --zip flag with explicit output directory", func(t *testing.T) {
 		s := setupTest(t)
 
 		zipBytes := createTestZip(t, map[string][]byte{
 			"task.log": []byte("log content"),
 		})
-		customPath := filepath.Join(s.tmp, "custom", "archive.zip")
+		customDir := filepath.Join(s.tmp, "custom")
 
 		s.mockAPI.MockGetLogDownloadRequest = func(taskId string) (api.LogDownloadRequestResult, error) {
 			return api.LogDownloadRequestResult{
@@ -323,13 +359,14 @@ func TestService_DownloadLogs(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:     "task-123",
-			OutputFile: customPath,
-			Zip:        true,
+			TaskID:                 "task-123",
+			OutputDir:              customDir,
+			OutputDirExplicitlySet: true,
+			Zip:                    true,
 		})
 
 		require.NoError(t, err)
-		require.FileExists(t, customPath)
+		require.FileExists(t, filepath.Join(customDir, "task-123-logs.zip"))
 	})
 
 	t.Run("when --zip flag with JSON output", func(t *testing.T) {

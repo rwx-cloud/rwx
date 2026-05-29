@@ -11,12 +11,11 @@ import (
 )
 
 var (
-	LogsOutputDir   string
-	LogsOutputFile  string
-	LogsAutoExtract bool
-	LogsZip         bool
-	LogsOpen        bool
-	LogsTaskKey     string
+	LogsOutputDirectory string
+	LogsAutoExtract     bool
+	LogsZip             bool
+	LogsOpen            bool
+	LogsTaskKey         string
 
 	logsCmd = &cobra.Command{
 		GroupID: "outputs",
@@ -39,43 +38,35 @@ var (
 				}
 			}
 
-			outputDirSet := cmd.Flags().Changed("output-dir")
-			outputFileSet := cmd.Flags().Changed("output-file")
-			if outputDirSet && outputFileSet {
-				return errors.New("output-dir and output-file cannot be used together")
+			outputDirectorySet := cmd.Flags().Changed("output-directory")
+			outputDirAliasSet := cmd.Flags().Changed("output-dir")
+			if outputDirectorySet && outputDirAliasSet {
+				return errors.New("output-directory and output-dir cannot be used together")
 			}
 
-			var absOutputDir string
-			var absOutputFile string
 			var err error
 
-			if LogsOutputFile != "" {
-				absOutputFile, err = filepath.Abs(LogsOutputFile)
+			outputDirectoryExplicitlySet := outputDirectorySet || outputDirAliasSet
+			outputDirectory := LogsOutputDirectory
+			if !outputDirectoryExplicitlySet {
+				outputDirectory, err = cli.FindDefaultDownloadsDir()
 				if err != nil {
-					return errors.Wrapf(err, "unable to resolve absolute path for %s", LogsOutputFile)
+					return errors.Wrap(err, "unable to determine default logs directory")
 				}
-			} else {
-				outputDir := LogsOutputDir
-				if !outputDirSet {
-					outputDir, err = cli.FindDefaultDownloadsDir()
-					if err != nil {
-						return errors.Wrap(err, "unable to determine default logs directory")
-					}
-				}
-				absOutputDir, err = filepath.Abs(outputDir)
-				if err != nil {
-					return errors.Wrapf(err, "unable to resolve absolute path for %s", outputDir)
-				}
+			}
+			absOutputDirectory, err := filepath.Abs(outputDirectory)
+			if err != nil {
+				return errors.Wrapf(err, "unable to resolve absolute path for %s", outputDirectory)
 			}
 
 			useJson := useJsonOutput()
 
 			cfg := cli.DownloadLogsConfig{
-				OutputDir:  absOutputDir,
-				OutputFile: absOutputFile,
-				Json:       useJson,
-				Zip:        LogsZip,
-				Open:       LogsOpen,
+				OutputDir:              absOutputDirectory,
+				OutputDirExplicitlySet: outputDirectoryExplicitlySet,
+				Json:                   useJson,
+				Zip:                    LogsZip,
+				Open:                   LogsOpen,
 			}
 
 			if taskKeySet {
@@ -108,9 +99,11 @@ var (
 )
 
 func init() {
-	logsCmd.Flags().StringVar(&LogsOutputDir, "output-dir", "", "output directory for the downloaded log file (defaults to .rwx/downloads folder)")
-	logsCmd.Flags().StringVar(&LogsOutputFile, "output-file", "", "output file path for the downloaded log file")
-	logsCmd.MarkFlagsMutuallyExclusive("output-dir", "output-file")
+	logsCmd.Flags().StringVar(&LogsOutputDirectory, "output-directory", "", "output directory for downloaded logs (defaults to .rwx/downloads folder)")
+	logsCmd.Flags().StringVar(&LogsOutputDirectory, "output-dir", "", "output directory for downloaded logs (defaults to .rwx/downloads folder)")
+	if err := logsCmd.Flags().MarkHidden("output-dir"); err != nil {
+		panic(err)
+	}
 	logsCmd.Flags().BoolVar(&LogsAutoExtract, "auto-extract", false, "automatically extract zip archives")
 	if err := logsCmd.Flags().MarkHidden("auto-extract"); err != nil {
 		panic(err)
