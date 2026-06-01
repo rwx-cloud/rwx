@@ -23,7 +23,7 @@ var (
 	TargetedTasks  []string
 	NoCache        bool
 	Open           bool
-	Debug          bool
+	RunDebug       bool
 	Wait           bool
 	FailFast       bool
 	Title          string
@@ -121,7 +121,7 @@ var (
 				}
 			}
 
-			if Wait && !Debug {
+			if Wait && !RunDebug {
 				waitResult, err := service.GetRunStatus(cli.GetRunStatusConfig{
 					RunID:    runResult.RunID,
 					Wait:     true,
@@ -157,7 +157,7 @@ var (
 				}
 			}
 
-			if Debug {
+			if RunDebug {
 				fmt.Println()
 				stopSpinner := cli.Spin("Waiting for run to hit a breakpoint...", service.StdoutIsTTY, service.Stdout)
 
@@ -197,7 +197,7 @@ func init() {
 	_ = runCmd.Flags().MarkHidden("file")
 	addRwxDirFlag(runCmd)
 	runCmd.Flags().BoolVar(&Open, "open", false, "open the run in a browser")
-	runCmd.Flags().BoolVar(&Debug, "debug", false, "start a remote debugging session once a breakpoint is hit")
+	runCmd.Flags().BoolVar(&RunDebug, "debug", false, "start a remote debugging session once a breakpoint is hit")
 	runCmd.Flags().BoolVar(&Wait, "wait", false, "poll for the run to complete and report the result status")
 	runCmd.Flags().BoolVar(&FailFast, "fail-fast", false, "stop waiting when failures are available (only has an effect when used with --wait)")
 	runCmd.Flags().StringVar(&Title, "title", "", "the title the UI will display for the run")
