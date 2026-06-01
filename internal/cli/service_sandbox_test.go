@@ -91,6 +91,10 @@ func requireCommandWrappedBySyncMarkers(t *testing.T, commands []string, command
 	require.NotEqual(t, -1, endIndex, "command %q should be followed by a sync end marker", commands[commandIndex])
 }
 
+func isSandboxPullDiffCommand(cmd string) bool {
+	return strings.Contains(cmd, "git diff") && strings.Contains(cmd, "refs/rwx-sync")
+}
+
 func TestService_LockWaitOutput(t *testing.T) {
 	t.Run("no output when lock is uncontended", func(t *testing.T) {
 		setup := setupTest(t)
@@ -1528,7 +1532,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 				return 0, knownTip + "\ncccccccccccccccccccccccccccccccccccccccc\n", nil
 			case strings.Contains(cmd, "git ls-files --others"):
 				return 0, "", nil
-			case strings.Contains(cmd, "git diff refs/rwx-sync"):
+			case isSandboxPullDiffCommand(cmd):
 				return 0, "", nil
 			default:
 				return 0, "", nil
@@ -2064,7 +2068,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		sandboxPatch := "diff --git a/file.txt b/file.txt\nindex abc..def 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
-			if strings.Contains(cmd, "git diff refs/rwx-sync") {
+			if isSandboxPullDiffCommand(cmd) {
 				return 0, sandboxPatch, nil
 			}
 			return 0, "", nil
@@ -2115,7 +2119,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		sandboxPatch := "diff --git a/file.txt b/file.txt\nindex abc..def 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
-			if strings.Contains(cmd, "git diff refs/rwx-sync") {
+			if isSandboxPullDiffCommand(cmd) {
 				return 0, sandboxPatch, nil
 			}
 			return 0, "", nil
@@ -2162,6 +2166,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		runID := "run-pull-stdout-only"
 		address := "192.168.1.1:22"
 		var stdoutOnlyCommands []string
+		var pullDiffCommand string
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
@@ -2184,7 +2189,8 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			if strings.Contains(cmd, "git ls-files --others") {
 				return 0, "untracked.txt\n", nil
 			}
-			if strings.Contains(cmd, "git diff refs/rwx-sync") {
+			if isSandboxPullDiffCommand(cmd) {
+				pullDiffCommand = cmd
 				return 0, sandboxPatch, nil
 			}
 			return 0, "", nil
@@ -2224,7 +2230,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			if strings.Contains(cmd, "git add -N") {
 				foundAddN = true
 			}
-			if strings.Contains(cmd, "git diff refs/rwx-sync") {
+			if isSandboxPullDiffCommand(cmd) {
 				foundDiffRef = true
 			}
 			if strings.Contains(cmd, "git reset HEAD") {
@@ -2234,6 +2240,8 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		require.True(t, foundLsFiles, "git ls-files should use stdout-only output")
 		require.True(t, foundAddN, "git add -N should use stdout-only output")
 		require.True(t, foundDiffRef, "git diff refs/rwx-sync should use stdout-only output")
+		require.Contains(t, pullDiffCommand, "--binary")
+		require.Contains(t, pullDiffCommand, "--full-index")
 		require.True(t, foundReset, "git reset HEAD should use stdout-only output")
 	})
 
@@ -2263,7 +2271,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		sandboxPatch := "diff --git a/file-a.txt b/file-a.txt\nindex abc..def 100644\n--- a/file-a.txt\n+++ b/file-a.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
-			if strings.Contains(cmd, "git diff refs/rwx-sync") {
+			if isSandboxPullDiffCommand(cmd) {
 				return 0, sandboxPatch, nil
 			}
 			return 0, "", nil
@@ -2362,7 +2370,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		sandboxPatch := "diff --git a/file.txt b/file.txt\nindex abc..def 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
-			if strings.Contains(cmd, "git diff refs/rwx-sync") {
+			if isSandboxPullDiffCommand(cmd) {
 				gitDiffCalled = true
 				return 0, sandboxPatch, nil
 			}
@@ -2416,7 +2424,7 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 		sandboxPatch := "diff --git a/file.txt b/file.txt\nindex abc..def 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
-			if strings.Contains(cmd, "git diff refs/rwx-sync") {
+			if isSandboxPullDiffCommand(cmd) {
 				return 0, sandboxPatch, nil
 			}
 			return 0, "", nil
@@ -2482,7 +2490,7 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 		sandboxPatch := "diff --git a/file.txt b/file.txt\nindex abc..def 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
-			if strings.Contains(cmd, "git diff refs/rwx-sync") {
+			if isSandboxPullDiffCommand(cmd) {
 				return 0, sandboxPatch, nil
 			}
 			return 0, "", nil
@@ -2549,7 +2557,7 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 		sandboxPatch := "diff --git a/file.txt b/file.txt\nindex abc..def 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
-			if strings.Contains(cmd, "git diff refs/rwx-sync") {
+			if isSandboxPullDiffCommand(cmd) {
 				return 0, sandboxPatch, nil
 			}
 			return 0, "", nil
