@@ -104,9 +104,47 @@ tasks:
       echo "$RUN_URL" > "$RWX_LINKS/Run URL"
 
       rwx artifacts download "$RUN_ID" --task artifact-producer --all --output /tmp/artifacts-all
-      if [ ! -d /tmp/artifacts-all ] || [ "$(ls /tmp/artifacts-all | wc -l)" -lt 2 ]; then
-        echo "Expected at least 2 artifacts downloaded"
-        ls -la /tmp/artifacts-all/ || true
+      if [ ! -f /tmp/artifacts-all/test-file/test-file.txt ]; then
+        echo "Expected file artifact to be extracted under its artifact directory"
+        ls -laR /tmp/artifacts-all/ || true
+        exit 1
+      fi
+      if ! find /tmp/artifacts-all/test-dir -maxdepth 1 -name "*.tar" | grep -q .; then
+        echo "Expected directory artifact to be saved as a tar under its artifact directory"
+        ls -laR /tmp/artifacts-all/ || true
+        exit 1
+      fi
+      if [ -e /tmp/artifacts-all/test-file.txt ] || [ -e /tmp/artifacts-all/nested-file.txt ]; then
+        echo "Expected --all output to keep each artifact in its own directory"
+        ls -laR /tmp/artifacts-all/ || true
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-all-artifacts-with-auto-extract
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      rwx artifacts download "$RUN_ID" --task artifact-producer --all --auto-extract --output /tmp/artifacts-all-extracted
+      if ! grep -q "integration-test-content" /tmp/artifacts-all-extracted/test-file/test-file.txt; then
+        echo "File artifact was not extracted under its artifact directory"
+        ls -laR /tmp/artifacts-all-extracted/ || true
+        exit 1
+      fi
+      if ! grep -q "nested-file-content" /tmp/artifacts-all-extracted/test-dir/nested-file.txt; then
+        echo "Directory artifact was not extracted under its artifact directory"
+        ls -laR /tmp/artifacts-all-extracted/ || true
+        exit 1
+      fi
+      if [ -e /tmp/artifacts-all-extracted/test-file.txt ] || [ -e /tmp/artifacts-all-extracted/nested-file.txt ]; then
+        echo "Expected --all --auto-extract output not to flatten artifact files"
+        ls -laR /tmp/artifacts-all-extracted/ || true
         exit 1
       fi
     env:
@@ -143,9 +181,103 @@ tasks:
         echo "Directory artifact not extracted to --output"
         exit 1
       fi
-      if ! find /tmp/artifacts-extracted -name "nested-file.txt" | grep -q .; then
+      if ! grep -q "nested-file-content" /tmp/artifacts-extracted/nested-file.txt; then
         echo "nested-file.txt not found in extracted directory artifact"
         ls -laR /tmp/artifacts-extracted/ || true
+        exit 1
+      fi
+      if [ -d /tmp/artifacts-extracted/test-dir ]; then
+        echo "Directory artifact should extract directly into explicit --output"
+        ls -laR /tmp/artifacts-extracted/ || true
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-directory-artifact-as-tar
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      rwx artifacts download "$RUN_ID" --task artifact-producer test-dir --output /tmp/artifacts-dir.tar
+      if [ ! -f /tmp/artifacts-dir.tar ]; then
+        echo "Directory artifact tar not downloaded to explicit --output"
+        exit 1
+      fi
+      if ! tar -tf /tmp/artifacts-dir.tar | grep -q "nested-file.txt"; then
+        echo "Directory artifact tar does not include nested-file.txt"
+        tar -tf /tmp/artifacts-dir.tar || true
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-artifact-json-output
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      json=$(rwx artifacts download "$RUN_ID" --task artifact-producer test-file --json --output /tmp/artifacts-json.txt)
+      if ! echo "$json" | jq -e --arg path "/tmp/artifacts-json.txt" '.OutputFiles == [$path]' > /dev/null; then
+        echo "JSON output did not report the explicit output file"
+        echo "$json"
+        exit 1
+      fi
+      if ! grep -q "integration-test-content" /tmp/artifacts-json.txt; then
+        echo "Artifact JSON download did not write the expected file content"
+        cat /tmp/artifacts-json.txt || true
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-file-artifact-output-directory-fails
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      mkdir -p /tmp/artifacts-output-dir
+      if rwx artifacts download "$RUN_ID" --task artifact-producer test-file --output /tmp/artifacts-output-dir > /tmp/artifacts-output-dir.err 2>&1; then
+        echo "Expected file artifact download to fail when --output is an existing directory"
+        exit 1
+      fi
+      if ! grep -q "is a directory, expected a file" /tmp/artifacts-output-dir.err; then
+        echo "Unexpected error for file artifact output directory"
+        cat /tmp/artifacts-output-dir.err
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-directory-artifact-output-file-fails
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      echo "existing file" > /tmp/artifacts-output-file
+      if rwx artifacts download "$RUN_ID" --task artifact-producer test-dir --auto-extract --output /tmp/artifacts-output-file > /tmp/artifacts-output-file.err 2>&1; then
+        echo "Expected directory artifact extraction to fail when --output is an existing file"
+        exit 1
+      fi
+      if ! grep -q "is a file, expected a directory" /tmp/artifacts-output-file.err; then
+        echo "Unexpected error for directory artifact output file"
+        cat /tmp/artifacts-output-file.err
         exit 1
       fi
     env:

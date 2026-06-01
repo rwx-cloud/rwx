@@ -68,6 +68,11 @@ tasks:
         ls -laR /tmp/logs-test/
         exit 1
       fi
+      if [ -d "/tmp/logs-test/$RUN_ID" ]; then
+        echo "Logs should extract directly into explicit --output, not a nested run directory"
+        ls -laR /tmp/logs-test/
+        exit 1
+      fi
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
@@ -83,6 +88,109 @@ tasks:
       rwx logs "$RUN_ID" --task log-producer --zip --output /tmp/logs-test.zip
       if [ ! -f /tmp/logs-test.zip ]; then
         echo "Zip file not created at /tmp/logs-test.zip"
+        exit 1
+      fi
+      if [ -d /tmp/logs-test.zip ]; then
+        echo "--zip output should be a file, not a directory"
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-logs-json-extract-output
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      json=$(rwx logs "$RUN_ID" --task log-producer --json --output /tmp/logs-json-extract)
+      if ! echo "$json" | jq -e '.OutputFiles | length > 0' > /dev/null; then
+        echo "JSON output did not include extracted log files"
+        echo "$json"
+        exit 1
+      fi
+      if ! echo "$json" | jq -e '.OutputFiles | all(startswith("/tmp/logs-json-extract/"))' > /dev/null; then
+        echo "JSON output files were not under the explicit output directory"
+        echo "$json"
+        exit 1
+      fi
+      if [ -d "/tmp/logs-json-extract/$RUN_ID" ]; then
+        echo "JSON extract mode should not nest explicit --output under the run ID"
+        ls -laR /tmp/logs-json-extract/
+        exit 1
+      fi
+      if ! grep -r "integration-test-log-marker" /tmp/logs-json-extract/; then
+        echo "Log marker not found in JSON extraction output"
+        ls -laR /tmp/logs-json-extract/
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-logs-json-zip-output
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      json=$(rwx logs "$RUN_ID" --task log-producer --zip --json --output /tmp/logs-json.zip)
+      if ! echo "$json" | jq -e --arg path "/tmp/logs-json.zip" '.OutputFiles == [$path]' > /dev/null; then
+        echo "JSON output did not report the explicit zip output file"
+        echo "$json"
+        exit 1
+      fi
+      if [ ! -f /tmp/logs-json.zip ]; then
+        echo "JSON zip output file was not created"
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-logs-zip-output-directory-fails
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      mkdir -p /tmp/logs-output-dir
+      if rwx logs "$RUN_ID" --task log-producer --zip --output /tmp/logs-output-dir > /tmp/logs-output-dir.err 2>&1; then
+        echo "Expected logs --zip to fail when --output is an existing directory"
+        exit 1
+      fi
+      if ! grep -q "is a directory, expected a file" /tmp/logs-output-dir.err; then
+        echo "Unexpected error for logs zip output directory"
+        cat /tmp/logs-output-dir.err
+        exit 1
+      fi
+    env:
+      RUN_ID: ${{ tasks.rwx-run.values.run-id }}
+      RUN_URL: ${{ tasks.rwx-run.values.run-url }}
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  - key: test-download-logs-extract-output-file-fails
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      echo "$RUN_URL" > "$RWX_LINKS/Run URL"
+
+      echo "existing file" > /tmp/logs-output-file
+      if rwx logs "$RUN_ID" --task log-producer --output /tmp/logs-output-file > /tmp/logs-output-file.err 2>&1; then
+        echo "Expected logs extraction to fail when --output is an existing file"
+        exit 1
+      fi
+      if ! grep -q "is a file, expected a directory" /tmp/logs-output-file.err; then
+        echo "Unexpected error for logs extract output file"
+        cat /tmp/logs-output-file.err
         exit 1
       fi
     env:
