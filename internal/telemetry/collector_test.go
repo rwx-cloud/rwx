@@ -20,6 +20,29 @@ func TestCollector_Record_WhenEnabled(t *testing.T) {
 	require.NotEmpty(t, events[0].Arch)
 }
 
+func TestCollector_Record_StampsAgent(t *testing.T) {
+	clearAgentEnv(t)
+	t.Setenv("CLAUDECODE", "1")
+
+	c := NewCollector()
+	c.Record("test_event", nil)
+
+	events := c.Drain()
+	require.Len(t, events, 1)
+	require.Equal(t, "claude_code", events[0].Agent)
+}
+
+func TestCollector_Record_OmitsAgentWhenNoneDetected(t *testing.T) {
+	clearAgentEnv(t)
+
+	c := NewCollector()
+	c.Record("test_event", nil)
+
+	events := c.Drain()
+	require.Len(t, events, 1)
+	require.Empty(t, events[0].Agent)
+}
+
 func TestCollector_Drain_ClearsQueue(t *testing.T) {
 	c := NewCollector()
 	c.Record("e1", nil)

@@ -12,6 +12,7 @@ type Event struct {
 	Timestamp string         `json:"ts"`
 	OS        string         `json:"os"`
 	Arch      string         `json:"arch"`
+	Agent     string         `json:"agent,omitempty"`
 	Props     map[string]any `json:"props,omitempty"`
 }
 
@@ -19,11 +20,14 @@ type Event struct {
 type Collector struct {
 	mu     sync.Mutex
 	events []Event
+	// agent is the coding agent detected from the environment at construction,
+	// stamped onto every event's envelope. Empty when no agent is detected.
+	agent string
 }
 
 // NewCollector creates a Collector.
 func NewCollector() *Collector {
-	return &Collector{}
+	return &Collector{agent: detectAgent()}
 }
 
 // Record enqueues a telemetry event.
@@ -33,6 +37,7 @@ func (c *Collector) Record(event string, props map[string]any) {
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
+		Agent:     c.agent,
 		Props:     props,
 	}
 
