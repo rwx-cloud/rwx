@@ -85,11 +85,10 @@ tasks:
 
       echo "$RUN_URL" > "$RWX_LINKS/Run URL"
 
-      rwx artifacts download "$RUN_ID" --task artifact-producer test-file --output-dir /tmp/artifacts-test
-      if ! grep -q "integration-test-content" /tmp/artifacts-test/*; then
+      rwx artifacts download "$RUN_ID" --task artifact-producer test-file --output /tmp/artifacts-test.txt
+      if ! grep -q "integration-test-content" /tmp/artifacts-test.txt; then
         echo "Downloaded test-file does not contain expected content"
-        ls -la /tmp/artifacts-test/
-        cat /tmp/artifacts-test/* || true
+        cat /tmp/artifacts-test.txt || true
         exit 1
       fi
     env:
@@ -104,7 +103,7 @@ tasks:
 
       echo "$RUN_URL" > "$RWX_LINKS/Run URL"
 
-      rwx artifacts download "$RUN_ID" --task artifact-producer --all --output-dir /tmp/artifacts-all
+      rwx artifacts download "$RUN_ID" --task artifact-producer --all --output /tmp/artifacts-all
       if [ ! -d /tmp/artifacts-all ] || [ "$(ls /tmp/artifacts-all | wc -l)" -lt 2 ]; then
         echo "Expected at least 2 artifacts downloaded"
         ls -la /tmp/artifacts-all/ || true
@@ -115,16 +114,16 @@ tasks:
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
       RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
 
-  - key: test-download-single-artifact-with-output-file
+  - key: test-download-single-artifact-with-output
     use: rwx-cli
     run: |
       set -euo pipefail
 
       echo "$RUN_URL" > "$RWX_LINKS/Run URL"
 
-      rwx artifacts download "$RUN_ID" --task artifact-producer test-file --output-file /tmp/artifacts-single-file.txt
+      rwx artifacts download "$RUN_ID" --task artifact-producer test-file --output /tmp/artifacts-single-file.txt
       if [ ! -f /tmp/artifacts-single-file.txt ]; then
-        echo "Artifact not downloaded to --output-file path"
+        echo "Artifact not downloaded to --output path"
         exit 1
       fi
     env:
@@ -139,9 +138,9 @@ tasks:
 
       echo "$RUN_URL" > "$RWX_LINKS/Run URL"
 
-      rwx artifacts download "$RUN_ID" --task artifact-producer test-dir --auto-extract --output-dir /tmp/artifacts-extracted
+      rwx artifacts download "$RUN_ID" --task artifact-producer test-dir --auto-extract --output /tmp/artifacts-extracted
       if [ ! -d /tmp/artifacts-extracted ]; then
-        echo "Directory artifact not extracted to --output-dir"
+        echo "Directory artifact not extracted to --output"
         exit 1
       fi
       if ! find /tmp/artifacts-extracted -name "nested-file.txt" | grep -q .; then

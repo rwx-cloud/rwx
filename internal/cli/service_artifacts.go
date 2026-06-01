@@ -597,7 +597,7 @@ func extractSingleFileTar(data []byte, outputPath string, artifactKey string) ([
 		}
 
 		switch header.Typeflag {
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			fileCount++
 			if fileCount > 1 {
 				return nil, fmt.Errorf("expected file artifact %s to contain exactly one file, found %d", artifactKey, fileCount)

@@ -58,7 +58,7 @@ tasks:
 
       echo "$RUN_URL" > "$RWX_LINKS/Run URL"
 
-      rwx logs "$RUN_ID" --task log-producer --output-dir /tmp/logs-test
+      rwx logs "$RUN_ID" --task log-producer --output /tmp/logs-test
       if [ ! "$(ls -A /tmp/logs-test)" ]; then
         echo "No log files extracted to /tmp/logs-test"
         exit 1
@@ -80,7 +80,7 @@ tasks:
 
       echo "$RUN_URL" > "$RWX_LINKS/Run URL"
 
-      rwx logs "$RUN_ID" --task log-producer --zip --output-file /tmp/logs-test.zip
+      rwx logs "$RUN_ID" --task log-producer --zip --output /tmp/logs-test.zip
       if [ ! -f /tmp/logs-test.zip ]; then
         echo "Zip file not created at /tmp/logs-test.zip"
         exit 1

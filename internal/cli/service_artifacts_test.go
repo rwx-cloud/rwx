@@ -3,6 +3,7 @@ package cli_test
 import (
 	"archive/tar"
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -397,8 +398,9 @@ func TestService_DownloadArtifact(t *testing.T) {
 
 		require.NoError(t, err)
 		output := s.mockStdout.String()
-		require.Contains(t, output, `"OutputFiles"`)
-		require.Contains(t, output, "result.json")
+		require.Equal(t, []string{
+			filepath.Join(s.tmp, "task-111-result", "result.json"),
+		}, requireJSONOutputFiles(t, output))
 		require.NotContains(t, output, "Artifact downloaded to")
 	})
 
@@ -433,9 +435,10 @@ func TestService_DownloadArtifact(t *testing.T) {
 
 		require.NoError(t, err)
 		output := s.mockStdout.String()
-		require.Contains(t, output, `"OutputFiles"`)
-		require.Contains(t, output, "file1.txt")
-		require.Contains(t, output, "file2.txt")
+		require.ElementsMatch(t, []string{
+			filepath.Join(s.tmp, "task-222-my-dir", "file1.txt"),
+			filepath.Join(s.tmp, "task-222-my-dir", "file2.txt"),
+		}, requireJSONOutputFiles(t, output))
 		require.NotContains(t, output, "Extracted")
 		require.NotContains(t, output, "Artifact downloaded")
 	})
@@ -908,8 +911,9 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 
 		require.NoError(t, err)
 		output := s.mockStdout.String()
-		require.Contains(t, output, `"OutputFiles"`)
-		require.Contains(t, output, "file-a.txt")
+		require.Equal(t, []string{
+			filepath.Join(s.tmp, "task-123-artifacts", "artifact-a", "file-a.txt"),
+		}, requireJSONOutputFiles(t, output))
 		require.NotContains(t, output, "Downloaded")
 	})
 
@@ -977,4 +981,15 @@ func createTestTar(t *testing.T, files map[string][]byte) []byte {
 	require.NoError(t, err)
 
 	return buf.Bytes()
+}
+
+func requireJSONOutputFiles(t *testing.T, output string) []string {
+	t.Helper()
+
+	var result struct {
+		OutputFiles []string
+	}
+	require.NoError(t, json.Unmarshal([]byte(output), &result))
+
+	return result.OutputFiles
 }
