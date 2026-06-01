@@ -38,12 +38,7 @@ func main() {
 	}
 
 	if !errors.Is(err, HandledError) {
-		if Debug {
-			// Enabling debug output will print stacktraces
-			fmt.Fprintf(os.Stderr, "Error: %+v\n", err)
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 	}
 
 	os.Exit(1)
