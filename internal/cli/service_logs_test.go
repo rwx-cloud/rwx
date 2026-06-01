@@ -23,8 +23,8 @@ func TestService_DownloadLogs(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
+			TaskID: "task-123",
+			Output: s.tmp,
 		})
 
 		require.Error(t, err)
@@ -39,8 +39,8 @@ func TestService_DownloadLogs(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
+			TaskID: "task-123",
+			Output: s.tmp,
 		})
 
 		require.Error(t, err)
@@ -65,8 +65,8 @@ func TestService_DownloadLogs(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
+			TaskID: "task-123",
+			Output: s.tmp,
 		})
 
 		require.Error(t, err)
@@ -97,8 +97,8 @@ func TestService_DownloadLogs(t *testing.T) {
 
 		nestedDir := filepath.Join(s.tmp, "nonexistent", "subdir")
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "task-123",
-			OutputDir: nestedDir,
+			TaskID: "task-123",
+			Output: nestedDir,
 		})
 
 		require.NoError(t, err)
@@ -132,8 +132,8 @@ func TestService_DownloadLogs(t *testing.T) {
 		}
 
 		result, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
+			TaskID: "task-123",
+			Output: s.tmp,
 		})
 
 		require.NoError(t, err)
@@ -173,8 +173,8 @@ func TestService_DownloadLogs(t *testing.T) {
 		}
 
 		result, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "task-456",
-			OutputDir: s.tmp,
+			TaskID: "task-456",
+			Output: s.tmp,
 		})
 
 		require.NoError(t, err)
@@ -218,8 +218,8 @@ func TestService_DownloadLogs(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
+			TaskID: "task-123",
+			Output: s.tmp,
 		})
 
 		require.NoError(t, err)
@@ -233,8 +233,8 @@ func TestService_DownloadLogs(t *testing.T) {
 		s := setupTest(t)
 
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "",
-			OutputDir: s.tmp,
+			TaskID: "",
+			Output: s.tmp,
 		})
 
 		require.Error(t, err)
@@ -242,18 +242,16 @@ func TestService_DownloadLogs(t *testing.T) {
 		require.Contains(t, err.Error(), "task ID must be provided")
 	})
 
-	t.Run("when validation fails - both output-dir and output-file set", func(t *testing.T) {
+	t.Run("when validation fails - missing output", func(t *testing.T) {
 		s := setupTest(t)
 
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:     "task-123",
-			OutputDir:  s.tmp,
-			OutputFile: filepath.Join(s.tmp, "custom.zip"),
+			TaskID: "task-123",
 		})
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "validation failed")
-		require.Contains(t, err.Error(), "output-dir and output-file cannot be used together")
+		require.Contains(t, err.Error(), "output must be provided")
 	})
 
 	t.Run("when --zip flag saves raw zip without extraction", func(t *testing.T) {
@@ -277,9 +275,9 @@ func TestService_DownloadLogs(t *testing.T) {
 		}
 
 		result, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
-			Zip:       true,
+			TaskID: "task-123",
+			Output: s.tmp,
+			Zip:    true,
 		})
 
 		require.NoError(t, err)
@@ -301,7 +299,7 @@ func TestService_DownloadLogs(t *testing.T) {
 		require.Equal(t, []string{zipPath}, result.OutputFiles)
 	})
 
-	t.Run("when --zip flag with output-file", func(t *testing.T) {
+	t.Run("when --zip flag with explicit output", func(t *testing.T) {
 		s := setupTest(t)
 
 		zipBytes := createTestZip(t, map[string][]byte{
@@ -323,13 +321,47 @@ func TestService_DownloadLogs(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:     "task-123",
-			OutputFile: customPath,
-			Zip:        true,
+			TaskID:              "task-123",
+			Output:              customPath,
+			OutputExplicitlySet: true,
+			Zip:                 true,
 		})
 
 		require.NoError(t, err)
 		require.FileExists(t, customPath)
+	})
+
+	t.Run("when explicit output is used in extract mode, extracts directly into it", func(t *testing.T) {
+		s := setupTest(t)
+
+		zipBytes := createTestZip(t, map[string][]byte{
+			"task.log": []byte("log content"),
+		})
+		customDir := filepath.Join(s.tmp, "custom", "logs")
+
+		s.mockAPI.MockGetLogDownloadRequest = func(taskId string) (api.LogDownloadRequestResult, error) {
+			return api.LogDownloadRequestResult{
+				URL:      "https://example.com/logs",
+				Token:    "jwt-token",
+				Filename: "task-123-logs.zip",
+				RunID:    "d3adb33f",
+			}, nil
+		}
+
+		s.mockAPI.MockDownloadLogs = func(request api.LogDownloadRequestResult) ([]byte, error) {
+			return zipBytes, nil
+		}
+
+		result, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
+			TaskID:              "task-123",
+			Output:              customDir,
+			OutputExplicitlySet: true,
+		})
+
+		require.NoError(t, err)
+		require.FileExists(t, filepath.Join(customDir, "task.log"))
+		require.NoDirExists(t, filepath.Join(customDir, "d3adb33f"))
+		require.Equal(t, []string{filepath.Join(customDir, "task.log")}, result.OutputFiles)
 	})
 
 	t.Run("when --zip flag with JSON output", func(t *testing.T) {
@@ -353,10 +385,10 @@ func TestService_DownloadLogs(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
-			Zip:       true,
-			Json:      true,
+			TaskID: "task-123",
+			Output: s.tmp,
+			Zip:    true,
+			Json:   true,
 		})
 
 		require.NoError(t, err)
@@ -389,9 +421,9 @@ func TestService_DownloadLogs(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "task-456",
-			OutputDir: s.tmp,
-			Json:      true,
+			TaskID: "task-456",
+			Output: s.tmp,
+			Json:   true,
 		})
 
 		require.NoError(t, err)
@@ -430,9 +462,9 @@ func TestService_DownloadLogs(t *testing.T) {
 		// AutoExtract is gone from DownloadLogsConfig; --auto-extract is a no-op at the CLI layer.
 		// The service always extracts by default (Zip=false).
 		_, err := s.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
-			Zip:       false,
+			TaskID: "task-123",
+			Output: s.tmp,
+			Zip:    false,
 		})
 
 		require.NoError(t, err)

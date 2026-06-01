@@ -251,7 +251,7 @@ func TestTelemetry_ArtifactDownload(t *testing.T) {
 		_, err := setup.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-1",
 			ArtifactKey: "test-artifact",
-			OutputDir:   outputDir,
+			Output:      outputDir,
 			Json:        true,
 		})
 
@@ -284,9 +284,9 @@ func TestTelemetry_ArtifactDownload(t *testing.T) {
 		require.NoError(t, os.MkdirAll(outputDir, 0o755))
 
 		_, err := setup.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
-			TaskID:    "task-2",
-			OutputDir: outputDir,
-			Json:      true,
+			TaskID: "task-2",
+			Output: outputDir,
+			Json:   true,
 		})
 
 		require.NoError(t, err)
@@ -321,10 +321,10 @@ func TestTelemetry_LogsDownload(t *testing.T) {
 		require.NoError(t, os.MkdirAll(outputDir, 0o755))
 
 		_, err := setup.service.DownloadLogs(cli.DownloadLogsConfig{
-			TaskID:    "task-logs-1",
-			OutputDir: outputDir,
-			Json:      true,
-			Zip:       true,
+			TaskID: "task-logs-1",
+			Output: outputDir,
+			Json:   true,
+			Zip:    true,
 		})
 
 		require.NoError(t, err)

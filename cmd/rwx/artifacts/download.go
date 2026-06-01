@@ -2,7 +2,6 @@ package artifacts
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
@@ -12,8 +11,7 @@ import (
 )
 
 var (
-	downloadOutputDir   string
-	downloadOutputFile  string
+	downloadOutput      string
 	downloadAutoExtract bool
 	downloadOpen        bool
 	downloadAll         bool
@@ -63,86 +61,43 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 			taskKeySet := cmd.Flags().Changed("task")
 			svc := getService()
 
-			outputDirSet := cmd.Flags().Changed("output-dir")
-			outputFileSet := cmd.Flags().Changed("output-file")
+			outputSet := cmd.Flags().Changed("output")
 
 			if taskKeySet {
-				return runDownloadWithTaskKey(svc, args, outputDirSet, outputFileSet, useJsonOutput())
+				return runDownloadWithTaskKey(svc, args, outputSet, useJsonOutput())
 			}
 
 			taskID := args[0]
 
+			absOutput, err := cli.ResolveDownloadOutput(downloadOutput, outputSet)
+			if err != nil {
+				return errors.Wrap(err, "unable to determine artifact output")
+			}
+
 			if downloadAll {
-				if outputFileSet {
-					return errors.New("--output-file cannot be used with --all")
-				}
-
-				var absOutputDir string
-				var err error
-
-				outputDir := downloadOutputDir
-				if !outputDirSet {
-					outputDir, err = cli.FindDefaultDownloadsDir()
-					if err != nil {
-						return errors.Wrap(err, "unable to determine default downloads directory")
-					}
-				}
-				absOutputDir, err = filepath.Abs(outputDir)
-				if err != nil {
-					return errors.Wrapf(err, "unable to resolve absolute path for %s", outputDir)
-				}
-
 				useJson := useJsonOutput()
 				_, err = svc.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
-					TaskID:                 taskID,
-					OutputDir:              absOutputDir,
-					OutputDirExplicitlySet: outputDirSet,
-					Json:                   useJson,
-					AutoExtract:            downloadAutoExtract,
-					Open:                   downloadOpen,
+					TaskID:              taskID,
+					Output:              absOutput,
+					OutputExplicitlySet: outputSet,
+					Json:                useJson,
+					AutoExtract:         downloadAutoExtract,
+					Open:                downloadOpen,
 				})
 				return err
 			}
 
 			artifactKey := args[1]
 
-			if outputDirSet && outputFileSet {
-				return errors.New("output-dir and output-file cannot be used together")
-			}
-
-			var absOutputDir string
-			var absOutputFile string
-			var err error
-
-			if downloadOutputFile != "" {
-				absOutputFile, err = filepath.Abs(downloadOutputFile)
-				if err != nil {
-					return errors.Wrapf(err, "unable to resolve absolute path for %s", downloadOutputFile)
-				}
-			} else {
-				outputDir := downloadOutputDir
-				if !outputDirSet {
-					outputDir, err = cli.FindDefaultDownloadsDir()
-					if err != nil {
-						return errors.Wrap(err, "unable to determine default downloads directory")
-					}
-				}
-				absOutputDir, err = filepath.Abs(outputDir)
-				if err != nil {
-					return errors.Wrapf(err, "unable to resolve absolute path for %s", outputDir)
-				}
-			}
-
 			useJson := useJsonOutput()
 			_, err = svc.DownloadArtifact(cli.DownloadArtifactConfig{
-				TaskID:                 taskID,
-				ArtifactKey:            artifactKey,
-				OutputDir:              absOutputDir,
-				OutputFile:             absOutputFile,
-				OutputDirExplicitlySet: outputDirSet,
-				Json:                   useJson,
-				AutoExtract:            downloadAutoExtract,
-				Open:                   downloadOpen,
+				TaskID:              taskID,
+				ArtifactKey:         artifactKey,
+				Output:              absOutput,
+				OutputExplicitlySet: outputSet,
+				Json:                useJson,
+				AutoExtract:         downloadAutoExtract,
+				Open:                downloadOpen,
 			})
 			return err
 		},
@@ -150,25 +105,19 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 		Use:   "download [task-id | run-id --task <key>] [artifact-key] [flags]",
 	}
 
-	DownloadCmd.Flags().StringVar(&downloadOutputDir, "output-dir", "", "output directory for the downloaded artifact (defaults to .rwx/downloads folder)")
-	DownloadCmd.Flags().StringVar(&downloadOutputFile, "output-file", "", "output file path for the downloaded artifact")
-	DownloadCmd.MarkFlagsMutuallyExclusive("output-dir", "output-file")
+	DownloadCmd.Flags().StringVar(&downloadOutput, "output", "", "output path for the downloaded artifact")
 	DownloadCmd.Flags().BoolVar(&downloadAutoExtract, "auto-extract", false, "automatically extract directory tar archives")
 	DownloadCmd.Flags().BoolVar(&downloadOpen, "open", false, "automatically open the downloaded file(s)")
 	DownloadCmd.Flags().BoolVar(&downloadAll, "all", false, "download all artifacts for the task")
 	DownloadCmd.Flags().StringVar(&downloadTaskKey, "task", "", "task key (e.g., ci.checks.lint); resolves the task by key instead of ID")
 }
 
-func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirSet, outputFileSet bool, useJson bool) error {
+func runDownloadWithTaskKey(svc cli.Service, args []string, outputSet bool, useJson bool) error {
 	var runID string
 	var artifactKey string
 	var err error
 
 	if downloadAll {
-		if outputFileSet {
-			return errors.New("--output-file cannot be used with --all")
-		}
-
 		if len(args) > 0 {
 			runID = args[0]
 		} else {
@@ -178,27 +127,19 @@ func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirSet, output
 			}
 		}
 
-		var absOutputDir string
-		outputDir := downloadOutputDir
-		if !outputDirSet {
-			outputDir, err = cli.FindDefaultDownloadsDir()
-			if err != nil {
-				return errors.Wrap(err, "unable to determine default downloads directory")
-			}
-		}
-		absOutputDir, err = filepath.Abs(outputDir)
+		absOutput, err := cli.ResolveDownloadOutput(downloadOutput, outputSet)
 		if err != nil {
-			return errors.Wrapf(err, "unable to resolve absolute path for %s", outputDir)
+			return errors.Wrap(err, "unable to determine artifact output")
 		}
 
 		_, err = svc.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
-			RunID:                  runID,
-			TaskKey:                downloadTaskKey,
-			OutputDir:              absOutputDir,
-			OutputDirExplicitlySet: outputDirSet,
-			Json:                   useJson,
-			AutoExtract:            downloadAutoExtract,
-			Open:                   downloadOpen,
+			RunID:               runID,
+			TaskKey:             downloadTaskKey,
+			Output:              absOutput,
+			OutputExplicitlySet: outputSet,
+			Json:                useJson,
+			AutoExtract:         downloadAutoExtract,
+			Open:                downloadOpen,
 		})
 		if err != nil {
 			return handleTaskKeyError(err)
@@ -218,42 +159,20 @@ func runDownloadWithTaskKey(svc cli.Service, args []string, outputDirSet, output
 		}
 	}
 
-	if outputDirSet && outputFileSet {
-		return errors.New("output-dir and output-file cannot be used together")
-	}
-
-	var absOutputDir string
-	var absOutputFile string
-
-	if downloadOutputFile != "" {
-		absOutputFile, err = filepath.Abs(downloadOutputFile)
-		if err != nil {
-			return errors.Wrapf(err, "unable to resolve absolute path for %s", downloadOutputFile)
-		}
-	} else {
-		outputDir := downloadOutputDir
-		if !outputDirSet {
-			outputDir, err = cli.FindDefaultDownloadsDir()
-			if err != nil {
-				return errors.Wrap(err, "unable to determine default downloads directory")
-			}
-		}
-		absOutputDir, err = filepath.Abs(outputDir)
-		if err != nil {
-			return errors.Wrapf(err, "unable to resolve absolute path for %s", outputDir)
-		}
+	absOutput, err := cli.ResolveDownloadOutput(downloadOutput, outputSet)
+	if err != nil {
+		return errors.Wrap(err, "unable to determine artifact output")
 	}
 
 	_, err = svc.DownloadArtifact(cli.DownloadArtifactConfig{
-		RunID:                  runID,
-		TaskKey:                downloadTaskKey,
-		ArtifactKey:            artifactKey,
-		OutputDir:              absOutputDir,
-		OutputFile:             absOutputFile,
-		OutputDirExplicitlySet: outputDirSet,
-		Json:                   useJson,
-		AutoExtract:            downloadAutoExtract,
-		Open:                   downloadOpen,
+		RunID:               runID,
+		TaskKey:             downloadTaskKey,
+		ArtifactKey:         artifactKey,
+		Output:              absOutput,
+		OutputExplicitlySet: outputSet,
+		Json:                useJson,
+		AutoExtract:         downloadAutoExtract,
+		Open:                downloadOpen,
 	})
 	if err != nil {
 		return handleTaskKeyError(err)

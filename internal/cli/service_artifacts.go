@@ -19,16 +19,15 @@ import (
 )
 
 type DownloadArtifactConfig struct {
-	TaskID                 string
-	RunID                  string
-	TaskKey                string
-	ArtifactKey            string
-	OutputDir              string
-	OutputFile             string
-	OutputDirExplicitlySet bool
-	Json                   bool
-	AutoExtract            bool
-	Open                   bool
+	TaskID              string
+	RunID               string
+	TaskKey             string
+	ArtifactKey         string
+	Output              string
+	OutputExplicitlySet bool
+	Json                bool
+	AutoExtract         bool
+	Open                bool
 }
 
 func (c DownloadArtifactConfig) Validate() error {
@@ -42,8 +41,8 @@ func (c DownloadArtifactConfig) Validate() error {
 	if c.ArtifactKey == "" {
 		return errors.New("artifact key must be provided")
 	}
-	if c.OutputDir != "" && c.OutputFile != "" {
-		return errors.New("output-dir and output-file cannot be used together")
+	if c.Output == "" {
+		return errors.New("output must be provided")
 	}
 	return nil
 }
@@ -106,57 +105,45 @@ func (s Service) DownloadArtifact(cfg DownloadArtifactConfig) (_ *DownloadArtifa
 	var outputFiles []string
 
 	if shouldExtract {
-		// Extract tar to output directory
-		var extractDir string
-		if cfg.OutputFile != "" {
-			// If output file is specified, use its directory as extraction dir
-			extractDir = filepath.Dir(cfg.OutputFile)
-		} else if cfg.OutputDirExplicitlySet {
-			// If output-dir was explicitly set by user, extract directly into it
-			extractDir = cfg.OutputDir
-		} else {
-			// For default Downloads folder, create a subdirectory named after the tar file
-			// Strip .tar extension from filename and sanitize to prevent path traversal
-			dirName := strings.TrimSuffix(artifactDownloadRequest.Filename, ".tar")
-			dirName = filepath.Base(dirName) // Remove any path components for security
-			extractDir = filepath.Join(cfg.OutputDir, dirName)
-		}
-
-		if err := os.MkdirAll(extractDir, 0755); err != nil {
-			return nil, errors.Wrapf(err, "unable to create extraction directory %s", extractDir)
-		}
-
-		extractedFiles, err := extractTar(artifactBytes, extractDir)
-		if err != nil {
-			return nil, errors.Wrapf(err, "unable to extract tar archive")
-		}
-
-		// For single file artifacts, if OutputFile is specified, rename the extracted file
-		if artifactDownloadRequest.Kind == "file" && cfg.OutputFile != "" && len(extractedFiles) == 1 {
-			newPath := cfg.OutputFile
-			if err := os.Rename(extractedFiles[0], newPath); err != nil {
-				return nil, errors.Wrapf(err, "unable to rename extracted file to %s", newPath)
+		if artifactDownloadRequest.Kind == "file" && cfg.OutputExplicitlySet {
+			outputFiles, err = extractSingleFileTar(artifactBytes, cfg.Output, artifactDownloadRequest.Key)
+			if err != nil {
+				return nil, err
 			}
-			outputFiles = []string{newPath}
 		} else {
-			outputFiles = extractedFiles
-		}
+			var extractDir string
+			if cfg.OutputExplicitlySet {
+				extractDir = cfg.Output
+			} else {
+				extractDir = filepath.Join(cfg.Output, artifactStem(artifactDownloadRequest.Filename))
+			}
 
-		if !cfg.Json && artifactDownloadRequest.Kind == "directory" {
-			fmt.Fprintf(s.Stdout, "Extracted %d file(s) to %s\n", len(outputFiles), extractDir)
+			if err := prepareDirectoryOutput(extractDir); err != nil {
+				return nil, errors.Wrapf(err, "unable to create extraction directory %s", extractDir)
+			}
+
+			extractedFiles, err := extractTar(artifactBytes, extractDir)
+			if err != nil {
+				return nil, errors.Wrapf(err, "unable to extract tar archive")
+			}
+
+			outputFiles = extractedFiles
+
+			if !cfg.Json && artifactDownloadRequest.Kind == "directory" {
+				fmt.Fprintf(s.Stdout, "Extracted %d file(s) to %s\n", len(outputFiles), extractDir)
+			}
 		}
 	} else {
 		// Save the raw tar file
 		var outputPath string
-		if cfg.OutputFile != "" {
-			outputPath = cfg.OutputFile
+		if cfg.OutputExplicitlySet {
+			outputPath = cfg.Output
 		} else {
-			outputPath = filepath.Join(cfg.OutputDir, artifactDownloadRequest.Filename)
+			outputPath = filepath.Join(cfg.Output, downloadFilename(artifactDownloadRequest.Filename))
 		}
 
-		outputDir := filepath.Dir(outputPath)
-		if err := os.MkdirAll(outputDir, 0755); err != nil {
-			return nil, errors.Wrapf(err, "unable to create output directory %s", outputDir)
+		if err := prepareFileOutput(outputPath); err != nil {
+			return nil, err
 		}
 
 		if _, err := os.Stat(outputPath); err == nil {
@@ -314,15 +301,25 @@ func formatBytes(b int64) string {
 	}
 }
 
+func downloadAllArtifactsDirName(cfg DownloadAllArtifactsConfig) string {
+	if cfg.TaskID != "" {
+		return safePathComponent(cfg.TaskID+"-artifacts", "artifacts")
+	}
+	if cfg.RunID != "" && cfg.TaskKey != "" {
+		return safePathComponent(cfg.RunID+"-"+cfg.TaskKey+"-artifacts", "artifacts")
+	}
+	return "artifacts"
+}
+
 type DownloadAllArtifactsConfig struct {
-	TaskID                 string
-	RunID                  string
-	TaskKey                string
-	OutputDir              string
-	OutputDirExplicitlySet bool
-	Json                   bool
-	AutoExtract            bool
-	Open                   bool
+	TaskID              string
+	RunID               string
+	TaskKey             string
+	Output              string
+	OutputExplicitlySet bool
+	Json                bool
+	AutoExtract         bool
+	Open                bool
 }
 
 func (c DownloadAllArtifactsConfig) Validate() error {
@@ -332,6 +329,9 @@ func (c DownloadAllArtifactsConfig) Validate() error {
 		}
 	} else if c.TaskID == "" {
 		return errors.New("task ID must be provided")
+	}
+	if c.Output == "" {
+		return errors.New("output must be provided")
 	}
 	return nil
 }
@@ -392,6 +392,19 @@ func (s Service) DownloadAllArtifacts(cfg DownloadAllArtifactsConfig) (_ *Downlo
 		return result, nil
 	}
 
+	collectionDir := cfg.Output
+	if !cfg.OutputExplicitlySet {
+		collectionDir = filepath.Join(cfg.Output, downloadAllArtifactsDirName(cfg))
+	}
+	if err := prepareDirectoryOutput(collectionDir); err != nil {
+		return nil, errors.Wrapf(err, "unable to create output directory %s", collectionDir)
+	}
+
+	artifactDirs, err := artifactOutputDirs(collectionDir, artifactDownloadRequests)
+	if err != nil {
+		return nil, err
+	}
+
 	stopSpinner := Spin(
 		fmt.Sprintf("Downloading %d artifact(s)...", len(artifactDownloadRequests)),
 		s.StderrIsTTY,
@@ -427,36 +440,23 @@ func (s Service) DownloadAllArtifacts(cfg DownloadAllArtifactsConfig) (_ *Downlo
 	for i, req := range artifactDownloadRequests {
 		artifactBytes := results[i].bytes
 		shouldExtract := req.Kind == "file" || (req.Kind == "directory" && cfg.AutoExtract)
+		artifactDir := artifactDirs[i]
 
 		if shouldExtract {
-			var extractDir string
-			if cfg.OutputDirExplicitlySet {
-				extractDir = cfg.OutputDir
-			} else {
-				dirName := strings.TrimSuffix(req.Filename, ".tar")
-				dirName = filepath.Base(dirName)
-				extractDir = filepath.Join(cfg.OutputDir, dirName)
-			}
-
-			if err := os.MkdirAll(extractDir, 0755); err != nil {
-				return nil, errors.Wrapf(err, "unable to create extraction directory %s", extractDir)
-			}
-
-			extractedFiles, err := extractTar(artifactBytes, extractDir)
+			extractedFiles, err := extractTar(artifactBytes, artifactDir)
 			if err != nil {
 				return nil, errors.Wrapf(err, "unable to extract tar archive for artifact %s", req.Key)
 			}
 
 			if !cfg.Json && req.Kind == "directory" {
-				fmt.Fprintf(s.Stdout, "Extracted %d file(s) to %s\n", len(extractedFiles), extractDir)
+				fmt.Fprintf(s.Stdout, "Extracted %d file(s) to %s\n", len(extractedFiles), artifactDir)
 			}
 
 			allOutputFiles = append(allOutputFiles, extractedFiles...)
 		} else {
-			outputPath := filepath.Join(cfg.OutputDir, req.Filename)
-			outputDir := filepath.Dir(outputPath)
-			if err := os.MkdirAll(outputDir, 0755); err != nil {
-				return nil, errors.Wrapf(err, "unable to create output directory %s", outputDir)
+			outputPath := filepath.Join(artifactDir, downloadFilename(req.Filename))
+			if err := prepareFileOutput(outputPath); err != nil {
+				return nil, err
 			}
 
 			if _, err := os.Stat(outputPath); err == nil {
@@ -501,6 +501,29 @@ func (s Service) DownloadAllArtifacts(cfg DownloadAllArtifactsConfig) (_ *Downlo
 	}
 
 	return result, nil
+}
+
+func artifactOutputDirs(collectionDir string, requests []api.ArtifactDownloadRequestResult) ([]string, error) {
+	dirs := make([]string, len(requests))
+	usedNames := map[string]int{}
+
+	for i, req := range requests {
+		baseName := safePathComponent(req.Key, fmt.Sprintf("artifact-%d", i+1))
+		usedNames[baseName]++
+
+		name := baseName
+		if usedNames[baseName] > 1 {
+			name = fmt.Sprintf("%s-%d", baseName, usedNames[baseName])
+		}
+
+		dir := filepath.Join(collectionDir, name)
+		if err := prepareDirectoryOutput(dir); err != nil {
+			return nil, errors.Wrapf(err, "unable to create output directory %s", dir)
+		}
+		dirs[i] = dir
+	}
+
+	return dirs, nil
 }
 
 func extractTar(data []byte, destDir string) ([]string, error) {
@@ -555,4 +578,49 @@ func extractTar(data []byte, destDir string) ([]string, error) {
 	}
 
 	return extractedFiles, nil
+}
+
+func extractSingleFileTar(data []byte, outputPath string, artifactKey string) ([]string, error) {
+	tarReader := tar.NewReader(bytes.NewReader(data))
+
+	var fileBytes bytes.Buffer
+	var fileMode int64 = 0644
+	fileCount := 0
+
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to read tar header")
+		}
+
+		switch header.Typeflag {
+		case tar.TypeReg, tar.TypeRegA:
+			fileCount++
+			if fileCount > 1 {
+				return nil, fmt.Errorf("expected file artifact %s to contain exactly one file, found %d", artifactKey, fileCount)
+			}
+
+			fileMode = header.Mode
+			if _, err := io.Copy(&fileBytes, tarReader); err != nil {
+				return nil, errors.Wrapf(err, "unable to extract file %s", header.Name)
+			}
+		}
+	}
+
+	if fileCount != 1 {
+		return nil, fmt.Errorf("expected file artifact %s to contain exactly one file, found %d", artifactKey, fileCount)
+	}
+
+	if err := prepareFileOutput(outputPath); err != nil {
+		return nil, err
+	}
+
+	if err := os.WriteFile(outputPath, fileBytes.Bytes(), os.FileMode(fileMode)); err != nil {
+		return nil, errors.Wrapf(err, "unable to write artifact file to %s", outputPath)
+	}
+
+	return []string{outputPath}, nil
 }

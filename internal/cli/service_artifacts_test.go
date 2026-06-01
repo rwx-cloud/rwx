@@ -26,7 +26,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-123",
 			ArtifactKey: "my-artifact",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 		})
 
 		require.Error(t, err)
@@ -43,7 +43,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-123",
 			ArtifactKey: "my-artifact",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 		})
 
 		require.Error(t, err)
@@ -72,7 +72,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-123",
 			ArtifactKey: "my-artifact",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 		})
 
 		require.Error(t, err)
@@ -87,7 +87,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "",
 			ArtifactKey: "my-artifact",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 		})
 
 		require.Error(t, err)
@@ -101,7 +101,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-123",
 			ArtifactKey: "",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 		})
 
 		require.Error(t, err)
@@ -109,19 +109,17 @@ func TestService_DownloadArtifact(t *testing.T) {
 		require.Contains(t, err.Error(), "artifact key must be provided")
 	})
 
-	t.Run("when validation fails - both output-dir and output-file set", func(t *testing.T) {
+	t.Run("when validation fails - missing output", func(t *testing.T) {
 		s := setupTest(t)
 
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-123",
 			ArtifactKey: "my-artifact",
-			OutputDir:   s.tmp,
-			OutputFile:  filepath.Join(s.tmp, "custom.txt"),
 		})
 
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "validation failed")
-		require.Contains(t, err.Error(), "output-dir and output-file cannot be used together")
+		require.Contains(t, err.Error(), "output must be provided")
 	})
 
 	t.Run("when download succeeds with file artifact - always extracts", func(t *testing.T) {
@@ -150,7 +148,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-123",
 			ArtifactKey: "my-file",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 			AutoExtract: false, // Should extract anyway for files
 		})
 
@@ -193,7 +191,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-456",
 			ArtifactKey: "my-dir",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 			AutoExtract: false,
 		})
 
@@ -235,7 +233,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-789",
 			ArtifactKey: "my-dir",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 			AutoExtract: true,
 		})
 
@@ -256,7 +254,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		require.Contains(t, output, "subdir/file3.txt")
 	})
 
-	t.Run("when download succeeds with OutputFile specified for file artifact", func(t *testing.T) {
+	t.Run("when download succeeds with explicit output for file artifact", func(t *testing.T) {
 		s := setupTest(t)
 
 		fileContent := []byte("custom file content")
@@ -279,9 +277,10 @@ func TestService_DownloadArtifact(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
-			TaskID:      "task-999",
-			ArtifactKey: "my-file",
-			OutputFile:  customOutputFile,
+			TaskID:              "task-999",
+			ArtifactKey:         "my-file",
+			Output:              customOutputFile,
+			OutputExplicitlySet: true,
 		})
 
 		require.NoError(t, err)
@@ -294,6 +293,79 @@ func TestService_DownloadArtifact(t *testing.T) {
 		output := s.mockStdout.String()
 		require.Contains(t, output, "Artifact downloaded to")
 		require.Contains(t, output, "renamed.txt")
+	})
+
+	t.Run("when explicit output is used for directory artifact with auto-extract, extracts directly into it", func(t *testing.T) {
+		s := setupTest(t)
+
+		tarBytes := createTestTar(t, map[string][]byte{
+			"file1.txt":        []byte("content 1"),
+			"subdir/file2.txt": []byte("content 2"),
+		})
+
+		customDir := filepath.Join(s.tmp, "custom", "artifact-dir")
+		s.mockAPI.MockGetArtifactDownloadRequest = func(taskId, artifactKey string) (api.ArtifactDownloadRequestResult, error) {
+			return api.ArtifactDownloadRequestResult{
+				URL:      "https://example.com/artifact",
+				Filename: "task-999-my-dir.tar",
+				Kind:     "directory",
+				Key:      "my-dir",
+			}, nil
+		}
+
+		s.mockAPI.MockDownloadArtifact = func(request api.ArtifactDownloadRequestResult) ([]byte, error) {
+			return tarBytes, nil
+		}
+
+		result, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
+			TaskID:              "task-999",
+			ArtifactKey:         "my-dir",
+			Output:              customDir,
+			OutputExplicitlySet: true,
+			AutoExtract:         true,
+		})
+
+		require.NoError(t, err)
+		require.FileExists(t, filepath.Join(customDir, "file1.txt"))
+		require.FileExists(t, filepath.Join(customDir, "subdir", "file2.txt"))
+		require.NoDirExists(t, filepath.Join(customDir, "task-999-my-dir"))
+		require.ElementsMatch(t, []string{
+			filepath.Join(customDir, "file1.txt"),
+			filepath.Join(customDir, "subdir", "file2.txt"),
+		}, result.OutputFiles)
+	})
+
+	t.Run("when explicit output is used for file artifact with multiple regular files, fails", func(t *testing.T) {
+		s := setupTest(t)
+
+		tarBytes := createTestTar(t, map[string][]byte{
+			"one.txt": []byte("one"),
+			"two.txt": []byte("two"),
+		})
+
+		s.mockAPI.MockGetArtifactDownloadRequest = func(taskId, artifactKey string) (api.ArtifactDownloadRequestResult, error) {
+			return api.ArtifactDownloadRequestResult{
+				URL:      "https://example.com/artifact",
+				Filename: "task-999-my-file.tar",
+				Kind:     "file",
+				Key:      "my-file",
+			}, nil
+		}
+
+		s.mockAPI.MockDownloadArtifact = func(request api.ArtifactDownloadRequestResult) ([]byte, error) {
+			return tarBytes, nil
+		}
+
+		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
+			TaskID:              "task-999",
+			ArtifactKey:         "my-file",
+			Output:              filepath.Join(s.tmp, "renamed.txt"),
+			OutputExplicitlySet: true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "expected file artifact my-file to contain exactly one file")
+		require.NoFileExists(t, filepath.Join(s.tmp, "renamed.txt"))
 	})
 
 	t.Run("when download succeeds with JSON output - single file", func(t *testing.T) {
@@ -319,7 +391,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-111",
 			ArtifactKey: "result",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 			Json:        true,
 		})
 
@@ -354,7 +426,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-222",
 			ArtifactKey: "my-dir",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 			AutoExtract: true,
 			Json:        true,
 		})
@@ -414,7 +486,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		_, err = s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-444",
 			ArtifactKey: "dotslash",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 			AutoExtract: true,
 		})
 
@@ -450,7 +522,7 @@ func TestService_DownloadArtifact(t *testing.T) {
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
 			TaskID:      "task-999",
 			ArtifactKey: "evil",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 		})
 
 		require.NoError(t, err)
@@ -613,8 +685,8 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 		}
 
 		result, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
+			TaskID: "task-123",
+			Output: s.tmp,
 		})
 
 		require.NoError(t, err)
@@ -630,8 +702,8 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
-			TaskID:    "task-999",
-			OutputDir: s.tmp,
+			TaskID: "task-999",
+			Output: s.tmp,
 		})
 
 		require.Error(t, err)
@@ -646,8 +718,8 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
+			TaskID: "task-123",
+			Output: s.tmp,
 		})
 
 		require.Error(t, err)
@@ -659,8 +731,8 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 		s := setupTest(t)
 
 		_, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
-			TaskID:    "",
-			OutputDir: s.tmp,
+			TaskID: "",
+			Output: s.tmp,
 		})
 
 		require.Error(t, err)
@@ -693,18 +765,19 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 		}
 
 		result, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
+			TaskID: "task-123",
+			Output: s.tmp,
 		})
 
 		require.NoError(t, err)
 		require.Len(t, result.OutputFiles, 2)
 
-		contentA, err := os.ReadFile(filepath.Join(s.tmp, "task-123~artifact-a", "file-a.txt"))
+		collectionDir := filepath.Join(s.tmp, "task-123-artifacts")
+		contentA, err := os.ReadFile(filepath.Join(collectionDir, "artifact-a", "file-a.txt"))
 		require.NoError(t, err)
 		require.Equal(t, []byte("content a"), contentA)
 
-		contentB, err := os.ReadFile(filepath.Join(s.tmp, "task-123~artifact-b", "file-b.txt"))
+		contentB, err := os.ReadFile(filepath.Join(collectionDir, "artifact-b", "file-b.txt"))
 		require.NoError(t, err)
 		require.Equal(t, []byte("content b"), contentB)
 
@@ -731,13 +804,13 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 
 		result, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
 			TaskID:      "task-123",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 			AutoExtract: false,
 		})
 
 		require.NoError(t, err)
 		require.Len(t, result.OutputFiles, 1)
-		expectedPath := filepath.Join(s.tmp, "task-123~my-dir.tar")
+		expectedPath := filepath.Join(s.tmp, "task-123-artifacts", "my-dir", "task-123~my-dir.tar")
 		require.FileExists(t, expectedPath)
 
 		actualContents, err := os.ReadFile(expectedPath)
@@ -765,14 +838,14 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 
 		result, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
 			TaskID:      "task-123",
-			OutputDir:   s.tmp,
+			Output:      s.tmp,
 			AutoExtract: true,
 		})
 
 		require.NoError(t, err)
 		require.Len(t, result.OutputFiles, 2)
 
-		extractDir := filepath.Join(s.tmp, "task-123~my-dir")
+		extractDir := filepath.Join(s.tmp, "task-123-artifacts", "my-dir")
 		require.FileExists(t, filepath.Join(extractDir, "file1.txt"))
 		require.FileExists(t, filepath.Join(extractDir, "file2.txt"))
 
@@ -802,8 +875,8 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
+			TaskID: "task-123",
+			Output: s.tmp,
 		})
 
 		require.Error(t, err)
@@ -828,9 +901,9 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 		}
 
 		_, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
-			TaskID:    "task-123",
-			OutputDir: s.tmp,
-			Json:      true,
+			TaskID: "task-123",
+			Output: s.tmp,
+			Json:   true,
 		})
 
 		require.NoError(t, err)
@@ -840,7 +913,7 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 		require.NotContains(t, output, "Downloaded")
 	})
 
-	t.Run("with explicit output dir extracts directly into it", func(t *testing.T) {
+	t.Run("with explicit output uses that directory as the collection root", func(t *testing.T) {
 		s := setupTest(t)
 
 		tar1 := createTestTar(t, map[string][]byte{
@@ -861,14 +934,14 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 		require.NoError(t, os.MkdirAll(customDir, 0755))
 
 		result, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
-			TaskID:                 "task-123",
-			OutputDir:              customDir,
-			OutputDirExplicitlySet: true,
+			TaskID:              "task-123",
+			Output:              customDir,
+			OutputExplicitlySet: true,
 		})
 
 		require.NoError(t, err)
 		require.Len(t, result.OutputFiles, 1)
-		require.FileExists(t, filepath.Join(customDir, "file-a.txt"))
+		require.FileExists(t, filepath.Join(customDir, "artifact-a", "file-a.txt"))
 	})
 }
 

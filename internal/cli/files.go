@@ -86,6 +86,27 @@ func FindDefaultDownloadsDir() (string, error) {
 	return filepath.Join(homeDir, "Downloads"), nil
 }
 
+func ResolveDownloadOutput(output string, outputSet bool) (string, error) {
+	if outputSet && output == "" {
+		return "", errors.New("output cannot be empty")
+	}
+
+	if !outputSet {
+		defaultOutput, err := FindDefaultDownloadsDir()
+		if err != nil {
+			return "", err
+		}
+		output = defaultOutput
+	}
+
+	absOutput, err := filepath.Abs(output)
+	if err != nil {
+		return "", errors.Wrapf(err, "unable to resolve absolute path for %s", output)
+	}
+
+	return absOutput, nil
+}
+
 func FindRunDefinitionFile(filePath string, rwxDirectoryPath string) (string, error) {
 	// If path is absolute, use it as-is
 	if filepath.IsAbs(filePath) {
