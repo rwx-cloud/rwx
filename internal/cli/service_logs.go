@@ -17,14 +17,14 @@ import (
 )
 
 type DownloadLogsConfig struct {
-	TaskID     string
-	RunID      string
-	TaskKey    string
-	OutputDir  string
-	OutputFile string
-	Json       bool
-	Zip        bool
-	Open       bool
+	TaskID              string
+	RunID               string
+	TaskKey             string
+	Output              string
+	OutputExplicitlySet bool
+	Json                bool
+	Zip                 bool
+	Open                bool
 }
 
 func (c DownloadLogsConfig) Validate() error {
@@ -35,8 +35,8 @@ func (c DownloadLogsConfig) Validate() error {
 	} else if c.TaskID == "" {
 		return errors.New("task ID must be provided")
 	}
-	if c.OutputDir != "" && c.OutputFile != "" {
-		return errors.New("output-dir and output-file cannot be used together")
+	if c.Output == "" {
+		return errors.New("output must be provided")
 	}
 	return nil
 }
@@ -87,24 +87,18 @@ func (s Service) DownloadLogs(cfg DownloadLogsConfig) (_ *DownloadLogsResult, dl
 		return nil, errors.Wrap(err, "unable to download logs")
 	}
 
-	// When OutputFile is set but we're in default extract mode, use its directory as the base.
-	outputDir := cfg.OutputDir
-	if outputDir == "" && cfg.OutputFile != "" {
-		outputDir = filepath.Dir(cfg.OutputFile)
-	}
-
 	var outputFiles []string
 
 	if cfg.Zip {
 		var zipPath string
-		if cfg.OutputFile != "" {
-			zipPath = cfg.OutputFile
+		if cfg.OutputExplicitlySet {
+			zipPath = cfg.Output
 		} else {
-			zipPath = filepath.Join(outputDir, logDownloadRequest.Filename)
+			zipPath = filepath.Join(cfg.Output, filepath.Base(logDownloadRequest.Filename))
 		}
 
-		if err := os.MkdirAll(filepath.Dir(zipPath), 0755); err != nil {
-			return nil, errors.Wrapf(err, "unable to create output directory %s", filepath.Dir(zipPath))
+		if err := prepareFileOutput(zipPath); err != nil {
+			return nil, err
 		}
 
 		if err := os.WriteFile(zipPath, logBytes, 0644); err != nil {
@@ -117,8 +111,11 @@ func (s Service) DownloadLogs(cfg DownloadLogsConfig) (_ *DownloadLogsResult, dl
 			fmt.Fprintf(s.Stdout, "Logs downloaded to %s\n", zipPath)
 		}
 	} else {
-		extractDir := filepath.Join(outputDir, logDownloadRequest.RunID)
-		if err := os.MkdirAll(extractDir, 0755); err != nil {
+		extractDir := cfg.Output
+		if !cfg.OutputExplicitlySet {
+			extractDir = filepath.Join(cfg.Output, safePathComponent(logDownloadRequest.RunID, "logs"))
+		}
+		if err := prepareDirectoryOutput(extractDir); err != nil {
 			return nil, errors.Wrapf(err, "unable to create extraction directory %s", extractDir)
 		}
 
