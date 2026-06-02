@@ -43,6 +43,7 @@ var ciEnvVars = []struct {
 	{"azure_pipelines", []string{"TF_BUILD"}},
 	{"bitbucket_pipelines", []string{"BITBUCKET_BUILD_NUMBER"}},
 	{"teamcity", []string{"TEAMCITY_VERSION"}},
+	{"rwx", []string{"RWX"}},
 	{"ci", []string{"CI"}},
 }
 
