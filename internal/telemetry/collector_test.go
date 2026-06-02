@@ -22,6 +22,7 @@ func TestCollector_Record_WhenEnabled(t *testing.T) {
 
 func TestCollector_Record_StampsAgent(t *testing.T) {
 	clearAgentEnv(t)
+	clearCIEnv(t)
 	t.Setenv("CLAUDECODE", "1")
 
 	c := NewCollector()
@@ -34,6 +35,7 @@ func TestCollector_Record_StampsAgent(t *testing.T) {
 
 func TestCollector_Record_OmitsAgentWhenNoneDetected(t *testing.T) {
 	clearAgentEnv(t)
+	clearCIEnv(t)
 
 	c := NewCollector()
 	c.Record("test_event", nil)
@@ -41,6 +43,31 @@ func TestCollector_Record_OmitsAgentWhenNoneDetected(t *testing.T) {
 	events := c.Drain()
 	require.Len(t, events, 1)
 	require.Empty(t, events[0].Agent)
+}
+
+func TestCollector_Record_StampsCI(t *testing.T) {
+	clearAgentEnv(t)
+	clearCIEnv(t)
+	t.Setenv("GITHUB_ACTIONS", "true")
+
+	c := NewCollector()
+	c.Record("test_event", nil)
+
+	events := c.Drain()
+	require.Len(t, events, 1)
+	require.Equal(t, "github_actions", events[0].CI)
+}
+
+func TestCollector_Record_OmitsCIWhenNoneDetected(t *testing.T) {
+	clearAgentEnv(t)
+	clearCIEnv(t)
+
+	c := NewCollector()
+	c.Record("test_event", nil)
+
+	events := c.Drain()
+	require.Len(t, events, 1)
+	require.Empty(t, events[0].CI)
 }
 
 func TestCollector_Drain_ClearsQueue(t *testing.T) {

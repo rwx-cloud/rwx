@@ -27,6 +27,25 @@ var agentEnvVars = []struct {
 	{"agent", []string{"AI_AGENT"}},
 }
 
+// ciEnvVars maps CI systems to environment variables whose presence signals
+// them. Order matters: provider-specific signals win over the generic CI=true
+// convention.
+var ciEnvVars = []struct {
+	ci      string
+	envVars []string
+}{
+	{"github_actions", []string{"GITHUB_ACTIONS"}},
+	{"gitlab_ci", []string{"GITLAB_CI"}},
+	{"circleci", []string{"CIRCLECI"}},
+	{"buildkite", []string{"BUILDKITE"}},
+	{"jenkins", []string{"JENKINS_URL", "JENKINS_HOME"}},
+	{"travis_ci", []string{"TRAVIS"}},
+	{"azure_pipelines", []string{"TF_BUILD"}},
+	{"bitbucket_pipelines", []string{"BITBUCKET_BUILD_NUMBER"}},
+	{"teamcity", []string{"TEAMCITY_VERSION"}},
+	{"ci", []string{"CI"}},
+}
+
 // detectAgent returns the name of the coding agent the CLI appears to be
 // running inside, or "" when none is detected.
 func detectAgent() string {
@@ -34,6 +53,19 @@ func detectAgent() string {
 		for _, v := range e.envVars {
 			if envSet(v) {
 				return e.agent
+			}
+		}
+	}
+	return ""
+}
+
+// detectCI returns the name of the CI environment the CLI appears to be
+// running inside, or "" when none is detected.
+func detectCI() string {
+	for _, e := range ciEnvVars {
+		for _, v := range e.envVars {
+			if envSet(v) {
+				return e.ci
 			}
 		}
 	}
