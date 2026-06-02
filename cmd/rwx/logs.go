@@ -36,8 +36,10 @@ var (
 				}
 			}
 
-			outputSet := cmd.Flags().Changed("output")
-			var err error
+			outputSet, err := logsOutputFlagSet(cmd)
+			if err != nil {
+				return err
+			}
 
 			absOutput, err := cli.ResolveDownloadOutput(LogsOutput, outputSet)
 			if err != nil {
@@ -85,13 +87,43 @@ var (
 
 func init() {
 	logsCmd.Flags().StringVar(&LogsOutput, "output", "", "output path for the downloaded logs")
+	logsCmd.Flags().StringVar(&LogsOutput, "output-dir", "", "output path for the downloaded logs")
+	if err := logsCmd.Flags().MarkDeprecated("output-dir", "use --output instead"); err != nil {
+		panic(err)
+	}
+	logsCmd.Flags().StringVar(&LogsOutput, "output-file", "", "output path for the downloaded logs")
+	if err := logsCmd.Flags().MarkDeprecated("output-file", "use --output instead"); err != nil {
+		panic(err)
+	}
 	logsCmd.Flags().BoolVar(&LogsAutoExtract, "auto-extract", false, "automatically extract zip archives")
-	if err := logsCmd.Flags().MarkHidden("auto-extract"); err != nil {
+	if err := logsCmd.Flags().MarkDeprecated("auto-extract", "logs are extracted by default; use --zip to save the raw archive"); err != nil {
 		panic(err)
 	}
 	logsCmd.Flags().BoolVar(&LogsZip, "zip", false, "skip extraction and save raw zip archive")
 	logsCmd.Flags().BoolVar(&LogsOpen, "open", false, "automatically open the downloaded file(s)")
 	logsCmd.Flags().StringVar(&LogsTaskKey, "task", "", "task key (e.g., ci.checks.lint); resolves the task by key instead of ID")
+}
+
+func logsOutputFlagSet(cmd *cobra.Command) (bool, error) {
+	outputSet := cmd.Flags().Changed("output")
+	outputDirSet := cmd.Flags().Changed("output-dir")
+	outputFileSet := cmd.Flags().Changed("output-file")
+
+	if boolCount(outputSet, outputDirSet, outputFileSet) > 1 {
+		return false, errors.New("--output, --output-dir, and --output-file cannot be used together")
+	}
+
+	return outputSet || outputDirSet || outputFileSet, nil
+}
+
+func boolCount(values ...bool) int {
+	count := 0
+	for _, value := range values {
+		if value {
+			count++
+		}
+	}
+	return count
 }
 
 // handleTaskKeyError formats task-key-specific errors for user display.

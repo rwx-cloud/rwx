@@ -1,14 +1,16 @@
-package main
+package artifacts
 
 import (
 	"testing"
 
+	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
-func TestLogsOutputFlagSurface(t *testing.T) {
-	flags := logsCmd.Flags()
+func TestDownloadOutputFlagSurface(t *testing.T) {
+	InitDownload(func() error { return nil }, func() cli.Service { return cli.Service{} }, func() bool { return false })
+	flags := DownloadCmd.Flags()
 
 	require.NotNil(t, flags.Lookup("output"))
 
@@ -21,46 +23,43 @@ func TestLogsOutputFlagSurface(t *testing.T) {
 	require.NotNil(t, outputFileFlag)
 	require.True(t, outputFileFlag.Hidden)
 	require.NotEmpty(t, outputFileFlag.Deprecated)
-
-	autoExtractFlag := flags.Lookup("auto-extract")
-	require.NotNil(t, autoExtractFlag)
-	require.True(t, autoExtractFlag.Hidden)
-	require.NotEmpty(t, autoExtractFlag.Deprecated)
 }
 
-func TestLogsOutputFlagSet(t *testing.T) {
+func TestDownloadOutputFlagSet(t *testing.T) {
 	t.Run("output is explicit when output-dir is set", func(t *testing.T) {
-		cmd := newLogsOutputFlagTestCommand(t)
+		cmd := newDownloadOutputFlagTestCommand(t)
 
-		require.NoError(t, cmd.Flags().Set("output-dir", "logs"))
+		require.NoError(t, cmd.Flags().Set("output-dir", "artifacts"))
 
-		outputSet, err := logsOutputFlagSet(cmd)
+		outputSet, outputFileSet, err := downloadOutputFlagSet(cmd)
 		require.NoError(t, err)
 		require.True(t, outputSet)
+		require.False(t, outputFileSet)
 	})
 
 	t.Run("output is explicit when output-file is set", func(t *testing.T) {
-		cmd := newLogsOutputFlagTestCommand(t)
+		cmd := newDownloadOutputFlagTestCommand(t)
 
-		require.NoError(t, cmd.Flags().Set("output-file", "logs.zip"))
+		require.NoError(t, cmd.Flags().Set("output-file", "artifact.tar"))
 
-		outputSet, err := logsOutputFlagSet(cmd)
+		outputSet, outputFileSet, err := downloadOutputFlagSet(cmd)
 		require.NoError(t, err)
 		require.True(t, outputSet)
+		require.True(t, outputFileSet)
 	})
 
 	t.Run("output flags are mutually exclusive", func(t *testing.T) {
-		cmd := newLogsOutputFlagTestCommand(t)
+		cmd := newDownloadOutputFlagTestCommand(t)
 
-		require.NoError(t, cmd.Flags().Set("output", "logs"))
-		require.NoError(t, cmd.Flags().Set("output-dir", "legacy-logs"))
+		require.NoError(t, cmd.Flags().Set("output", "artifacts"))
+		require.NoError(t, cmd.Flags().Set("output-file", "artifact.tar"))
 
-		_, err := logsOutputFlagSet(cmd)
+		_, _, err := downloadOutputFlagSet(cmd)
 		require.EqualError(t, err, "--output, --output-dir, and --output-file cannot be used together")
 	})
 }
 
-func newLogsOutputFlagTestCommand(t *testing.T) *cobra.Command {
+func newDownloadOutputFlagTestCommand(t *testing.T) *cobra.Command {
 	t.Helper()
 
 	cmd := &cobra.Command{}

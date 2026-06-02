@@ -13,6 +13,7 @@ type Event struct {
 	OS        string         `json:"os"`
 	Arch      string         `json:"arch"`
 	Agent     string         `json:"agent,omitempty"`
+	CI        string         `json:"ci,omitempty"`
 	Props     map[string]any `json:"props,omitempty"`
 }
 
@@ -23,11 +24,14 @@ type Collector struct {
 	// agent is the coding agent detected from the environment at construction,
 	// stamped onto every event's envelope. Empty when no agent is detected.
 	agent string
+	// ci is the CI environment detected from the environment at construction,
+	// stamped onto every event's envelope. Empty when no CI is detected.
+	ci string
 }
 
 // NewCollector creates a Collector.
 func NewCollector() *Collector {
-	return &Collector{agent: detectAgent()}
+	return &Collector{agent: detectAgent(), ci: detectCI()}
 }
 
 // Record enqueues a telemetry event.
@@ -38,6 +42,7 @@ func (c *Collector) Record(event string, props map[string]any) {
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
 		Agent:     c.agent,
+		CI:        c.ci,
 		Props:     props,
 	}
 

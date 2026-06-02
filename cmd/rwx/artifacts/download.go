@@ -61,13 +61,20 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 			taskKeySet := cmd.Flags().Changed("task")
 			svc := getService()
 
-			outputSet := cmd.Flags().Changed("output")
+			outputSet, outputFileSet, err := downloadOutputFlagSet(cmd)
+			if err != nil {
+				return err
+			}
 
 			if taskKeySet {
-				return runDownloadWithTaskKey(svc, args, outputSet, useJsonOutput())
+				return runDownloadWithTaskKey(svc, args, outputSet, outputFileSet, useJsonOutput())
 			}
 
 			taskID := args[0]
+
+			if downloadAll && outputFileSet {
+				return errors.New("--output-file cannot be used with --all")
+			}
 
 			absOutput, err := cli.ResolveDownloadOutput(downloadOutput, outputSet)
 			if err != nil {
@@ -106,18 +113,52 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 	}
 
 	DownloadCmd.Flags().StringVar(&downloadOutput, "output", "", "output path for the downloaded artifact")
+	DownloadCmd.Flags().StringVar(&downloadOutput, "output-dir", "", "output path for the downloaded artifact")
+	if err := DownloadCmd.Flags().MarkDeprecated("output-dir", "use --output instead"); err != nil {
+		panic(err)
+	}
+	DownloadCmd.Flags().StringVar(&downloadOutput, "output-file", "", "output path for the downloaded artifact")
+	if err := DownloadCmd.Flags().MarkDeprecated("output-file", "use --output instead"); err != nil {
+		panic(err)
+	}
 	DownloadCmd.Flags().BoolVar(&downloadAutoExtract, "auto-extract", false, "automatically extract directory tar archives")
 	DownloadCmd.Flags().BoolVar(&downloadOpen, "open", false, "automatically open the downloaded file(s)")
 	DownloadCmd.Flags().BoolVar(&downloadAll, "all", false, "download all artifacts for the task")
 	DownloadCmd.Flags().StringVar(&downloadTaskKey, "task", "", "task key (e.g., ci.checks.lint); resolves the task by key instead of ID")
 }
 
-func runDownloadWithTaskKey(svc cli.Service, args []string, outputSet bool, useJson bool) error {
+func downloadOutputFlagSet(cmd *cobra.Command) (outputSet bool, outputFileSet bool, err error) {
+	outputSet = cmd.Flags().Changed("output")
+	outputDirSet := cmd.Flags().Changed("output-dir")
+	outputFileSet = cmd.Flags().Changed("output-file")
+
+	if boolCount(outputSet, outputDirSet, outputFileSet) > 1 {
+		return false, false, errors.New("--output, --output-dir, and --output-file cannot be used together")
+	}
+
+	return outputSet || outputDirSet || outputFileSet, outputFileSet, nil
+}
+
+func boolCount(values ...bool) int {
+	count := 0
+	for _, value := range values {
+		if value {
+			count++
+		}
+	}
+	return count
+}
+
+func runDownloadWithTaskKey(svc cli.Service, args []string, outputSet bool, outputFileSet bool, useJson bool) error {
 	var runID string
 	var artifactKey string
 	var err error
 
 	if downloadAll {
+		if outputFileSet {
+			return errors.New("--output-file cannot be used with --all")
+		}
+
 		if len(args) > 0 {
 			runID = args[0]
 		} else {
