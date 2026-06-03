@@ -112,77 +112,164 @@ func (c InitiateRunConfig) Validate() error {
 	return nil
 }
 
-// InitiateRun will connect to the Cloud API and start a new run in Mint.
-func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, error) {
-	err := cfg.Validate()
-	if err != nil {
-		return nil, errors.Wrap(err, "validation failed")
+type runGitMetadata struct {
+	installed    bool
+	directory    bool
+	available    bool
+	errorMessage string
+	sha          string
+	branch       string
+	originURL    string
+}
+
+func (s Service) runGitMetadata() runGitMetadata {
+	metadata := runGitMetadata{
+		installed: s.GitClient.IsInstalled(),
+		directory: s.GitClient.IsInsideWorkTree(),
+	}
+	metadata.available = metadata.installed && metadata.directory
+
+	if metadata.available {
+		sha, err := s.GitClient.GetCommit()
+		if err != nil {
+			metadata.errorMessage = err.Error()
+			metadata.available = false
+		} else {
+			metadata.sha = sha
+			metadata.branch = s.GitClient.GetBranch()
+			metadata.originURL = s.GitClient.GetOriginUrl()
+		}
+	} else if !metadata.installed {
+		metadata.errorMessage = "Git is not installed"
+	} else if !metadata.directory {
+		metadata.errorMessage = "You are not in a git repository"
 	}
 
-	var rwxDirectory []RwxDirectoryEntry
+	return metadata
+}
 
-	rwxDirectoryPath, err := findAndValidateRwxDirectoryPath(cfg.RwxDirectory)
+func (m runGitMetadata) apiGitMetadata() api.GitMetadata {
+	return api.GitMetadata{
+		Branch:    m.branch,
+		Sha:       m.sha,
+		OriginUrl: m.originURL,
+	}
+}
+
+func (m runGitMetadata) apiPatchMetadata(patchFile git.PatchFile) api.PatchMetadata {
+	return api.PatchMetadata{
+		Sent:           patchFile.Written,
+		UntrackedFiles: patchFile.UntrackedFiles.Files,
+		UntrackedCount: patchFile.UntrackedFiles.Count,
+		LFSFiles:       patchFile.LFSChangedFiles.Files,
+		LFSCount:       patchFile.LFSChangedFiles.Count,
+		ErrorMessage:   m.errorMessage,
+		GitDirectory:   m.directory,
+		GitInstalled:   m.installed,
+	}
+}
+
+type runDefinitionPaths struct {
+	rwxDirectoryPath          string
+	runDefinitionPath         string
+	relativeRunDefinitionPath string
+	tempRwxDir                string
+}
+
+func resolveRunDefinitionPaths(rwxDirectory, mintFilePath string) (runDefinitionPaths, func(), error) {
+	rwxDirectoryPath, err := findAndValidateRwxDirectoryPath(rwxDirectory)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to find .rwx directory")
+		return runDefinitionPaths{}, func() {}, errors.Wrap(err, "unable to find .rwx directory")
 	}
 
-	runDefinitionPath, err := FindRunDefinitionFile(cfg.MintFilePath, rwxDirectoryPath)
+	runDefinitionPath, err := FindRunDefinitionFile(mintFilePath, rwxDirectoryPath)
 	if err != nil {
+		return runDefinitionPaths{}, func() {}, err
+	}
+
+	paths := runDefinitionPaths{
+		rwxDirectoryPath:          rwxDirectoryPath,
+		runDefinitionPath:         runDefinitionPath,
+		relativeRunDefinitionPath: relativePathFromWd(runDefinitionPath),
+	}
+
+	if paths.rwxDirectoryPath == "" {
+		tempRwxDir, err := os.MkdirTemp("", ".rwx-*")
+		if err != nil {
+			return runDefinitionPaths{}, func() {}, errors.Wrap(err, "unable to create temporary .rwx directory")
+		}
+		paths.rwxDirectoryPath = tempRwxDir
+		paths.tempRwxDir = tempRwxDir
+		return paths, func() { os.RemoveAll(tempRwxDir) }, nil
+	}
+
+	return paths, func() {}, nil
+}
+
+type runDefinitionUpload struct {
+	paths         runDefinitionPaths
+	rwxDirectory  []RwxDirectoryEntry
+	runDefinition []RwxDirectoryEntry
+}
+
+func loadRunDefinitionUpload(paths runDefinitionPaths, requestedRwxDirectory string) (*runDefinitionUpload, error) {
+	upload := &runDefinitionUpload{paths: paths}
+	if err := upload.load(requestedRwxDirectory); err != nil {
 		return nil, err
 	}
+	return upload, nil
+}
 
-	gitInstalled := s.GitClient.IsInstalled()
-	gitDirectory := s.GitClient.IsInsideWorkTree()
-	var errorMessage string
-	var sha, branch, originUrl string
-
-	// Track whether we can generate patches (requires working git)
-	gitAvailable := gitInstalled && gitDirectory
-
-	if gitAvailable {
-		var err error
-		sha, err = s.GitClient.GetCommit()
-		if err != nil {
-			errorMessage = err.Error()
-			gitAvailable = false
-		} else {
-			branch = s.GitClient.GetBranch()
-			originUrl = s.GitClient.GetOriginUrl()
+func (u *runDefinitionUpload) load(requestedRwxDirectory string) error {
+	entries, err := rwxDirectoryEntries(u.paths.rwxDirectoryPath)
+	if err != nil {
+		if errors.Is(err, errors.ErrFileNotExists) && u.paths.tempRwxDir == "" {
+			return fmt.Errorf("You specified --dir %q, but %q could not be found", requestedRwxDirectory, requestedRwxDirectory)
 		}
-	} else if !gitInstalled {
-		errorMessage = "Git is not installed"
-	} else if !gitDirectory {
-		errorMessage = "You are not in a git repository"
+
+		return errors.Wrapf(err, "unable to load directory %q", u.paths.rwxDirectoryPath)
 	}
+	u.rwxDirectory = entries
 
-	patchFile := git.PatchFile{}
-
-	// When there's no .rwx directory, create a temporary one for patches and to set run.dir
-	var tempRwxDir string
-	if rwxDirectoryPath == "" {
-		tempRwxDir, err = os.MkdirTemp("", ".rwx-*")
-		if err != nil {
-			return nil, errors.Wrap(err, "unable to create temporary .rwx directory")
-		}
-		defer os.RemoveAll(tempRwxDir)
-		rwxDirectoryPath = tempRwxDir
+	runDefinition, err := rwxDirectoryEntriesFromPaths([]string{u.paths.relativeRunDefinitionPath})
+	if err != nil {
+		return errors.Wrap(err, "unable to read provided files")
 	}
-
-	patchDir := filepath.Join(rwxDirectoryPath, ".patches")
-	defer os.RemoveAll(patchDir)
-
-	// Generate patches if enabled and git is available
-	patchable := cfg.Patchable && gitAvailable
-	if _, ok := os.LookupEnv("RWX_DISABLE_GIT_PATCH"); ok {
-		patchable = false
+	runDefinition = filterFiles(runDefinition)
+	if len(runDefinition) != 1 {
+		return fmt.Errorf("expected exactly 1 run definition, got %d", len(runDefinition))
 	}
+	u.runDefinition = runDefinition
 
-	// Convert to relative path for display purposes (e.g., run title)
-	relativeRunDefinitionPath := relativePathFromWd(runDefinitionPath)
+	return nil
+}
 
+func (u *runDefinitionUpload) reload() error {
+	runDefinition, err := rwxDirectoryEntriesFromPaths([]string{u.paths.relativeRunDefinitionPath})
+	if err != nil {
+		return errors.Wrapf(err, "unable to reload %q", u.paths.relativeRunDefinitionPath)
+	}
+	u.runDefinition = filterFiles(runDefinition)
+
+	rwxDirectory, err := rwxDirectoryEntries(u.paths.rwxDirectoryPath)
+	if err != nil && !errors.Is(err, errors.ErrFileNotExists) {
+		return errors.Wrapf(err, "unable to reload rwx directory %q", u.paths.rwxDirectoryPath)
+	}
+	u.rwxDirectory = rwxDirectory
+
+	return nil
+}
+
+func (u *runDefinitionUpload) appendRunDefinitionOutsideRwxDir() {
+	if outside, err := runDefinitionOutsideRwxDir(u.paths.runDefinitionPath, u.paths.rwxDirectoryPath); err == nil && outside {
+		u.rwxDirectory = appendWorkflowUploadEntry(u.rwxDirectory, u.runDefinition[0])
+	}
+}
+
+func (s Service) cliInitParamsOverrideGitParams(relativeRunDefinitionPath string, initParams map[string]string) (bool, error) {
 	resolveResult, err := ResolveCliParamsForFile(relativeRunDefinitionPath)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to resolve CLI init params")
+		return false, errors.Wrap(err, "unable to resolve CLI init params")
 	}
 
 	if resolveResult.Rewritten {
@@ -190,56 +277,126 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 	}
 
 	for _, gitParam := range resolveResult.GitParams {
-		if _, exists := cfg.InitParameters[gitParam]; exists {
-			patchable = false
-			break
+		if _, exists := initParams[gitParam]; exists {
+			return true, nil
 		}
+	}
+
+	return false, nil
+}
+
+func (s Service) configureRunDefinitionUpload(upload *runDefinitionUpload) error {
+	addBaseIfNeeded, err := s.insertDefaultBaseIfMissing(upload.runDefinition)
+	if err != nil {
+		return errors.Wrap(err, "unable to resolve base")
+	}
+
+	if len(addBaseIfNeeded.UpdatedRunFiles) > 0 {
+		update := addBaseIfNeeded.UpdatedRunFiles[0]
+		fmt.Fprintf(s.Stderr, "Configured %q to run on %s\n\n", update.OriginalPath, update.ResolvedBase.Image)
+
+		if err = upload.reload(); err != nil {
+			return err
+		}
+	}
+
+	if len(addBaseIfNeeded.ErroredRunFiles) > 0 {
+		for _, erroredFile := range addBaseIfNeeded.ErroredRunFiles {
+			fmt.Fprintf(s.Stderr, "Failed to configure base for %q: %v\n", erroredFile.OriginalPath, erroredFile.Error)
+		}
+	}
+
+	mintFiles := filterYAMLFilesForModification(upload.runDefinition, func(doc *YAMLDoc) bool {
+		return true
+	})
+	resolvedPackages, err := s.resolveOrUpdatePackagesForFiles(mintFiles, false, PickLatestMajorVersion)
+	if err != nil {
+		return err
+	}
+	if len(resolvedPackages) > 0 {
+		for rwxPackage, version := range resolvedPackages {
+			fmt.Fprintf(s.Stderr, "Configured package %s to use version %s\n", rwxPackage, version)
+		}
+		fmt.Fprintln(s.Stderr, "")
+
+		if err = upload.reload(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func initializationParametersFromMap(params map[string]string) []api.InitializationParameter {
+	initializationParameters := make([]api.InitializationParameter, 0, len(params))
+	for key, value := range params {
+		initializationParameters = append(initializationParameters, api.InitializationParameter{
+			Key:   key,
+			Value: value,
+		})
+	}
+	return initializationParameters
+}
+
+func (s Service) callInitiateRun(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+	initiateStart := time.Now()
+	runResult, err := s.APIClient.InitiateRun(cfg)
+
+	s.recordTelemetry("run.initiate", map[string]any{
+		"has_targets":     len(cfg.TargetedTaskKeys) > 0,
+		"has_init_params": len(cfg.InitializationParameters) > 0,
+		"duration_ms":     time.Since(initiateStart).Milliseconds(),
+		"success":         err == nil,
+	})
+
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to initiate run")
+	}
+
+	return runResult, nil
+}
+
+// InitiateRun will connect to the Cloud API and start a new run in Mint.
+func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, errors.Wrap(err, "validation failed")
+	}
+
+	paths, cleanupPaths, err := resolveRunDefinitionPaths(cfg.RwxDirectory, cfg.MintFilePath)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanupPaths()
+
+	gitMetadata := s.runGitMetadata()
+	patchFile := git.PatchFile{}
+	patchDir := filepath.Join(paths.rwxDirectoryPath, ".patches")
+	defer os.RemoveAll(patchDir)
+
+	patchable := cfg.Patchable && gitMetadata.available
+	if _, ok := os.LookupEnv("RWX_DISABLE_GIT_PATCH"); ok {
+		patchable = false
+	}
+
+	if overridesGitParams, err := s.cliInitParamsOverrideGitParams(paths.relativeRunDefinitionPath, cfg.InitParameters); err != nil {
+		return nil, err
+	} else if overridesGitParams {
+		patchable = false
 	}
 
 	if patchable {
-		var patchErr error
-		patchFile, patchErr = s.GitClient.GeneratePatchFile(patchDir, []string{".", ":!" + relativeRunDefinitionPath})
-		if patchErr != nil {
-			errorMessage = patchErr.Error()
-			fmt.Fprintf(s.Stderr, "Warning: failed to generate patch: %s\n\n", errorMessage)
+		patchPathspec := []string{".", ":!" + paths.relativeRunDefinitionPath}
+		if generatedPatch, patchErr := s.GitClient.GeneratePatchFile(patchDir, patchPathspec); patchErr != nil {
+			gitMetadata.errorMessage = patchErr.Error()
+			fmt.Fprintf(s.Stderr, "Warning: failed to generate patch: %s\n\n", gitMetadata.errorMessage)
+		} else {
+			patchFile = generatedPatch
 		}
 	}
 
-	// Load directory entries
-	entries, err := rwxDirectoryEntries(rwxDirectoryPath)
+	upload, err := loadRunDefinitionUpload(paths, cfg.RwxDirectory)
 	if err != nil {
-		if errors.Is(err, errors.ErrFileNotExists) && tempRwxDir == "" {
-			// User explicitly specified a directory that doesn't exist
-			return nil, fmt.Errorf("You specified --dir %q, but %q could not be found", cfg.RwxDirectory, cfg.RwxDirectory)
-		}
-
-		return nil, errors.Wrapf(err, "unable to load directory %q", rwxDirectoryPath)
-	}
-
-	rwxDirectory = entries
-
-	runDefinition, err := rwxDirectoryEntriesFromPaths([]string{relativeRunDefinitionPath})
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to read provided files")
-	}
-	runDefinition = filterFiles(runDefinition)
-	if len(runDefinition) != 1 {
-		return nil, fmt.Errorf("expected exactly 1 run definition, got %d", len(runDefinition))
-	}
-
-	// reloadRunDefinitions reloads run definitions after modifying the file.
-	reloadRunDefinitions := func() error {
-		runDefinition, err = rwxDirectoryEntriesFromPaths([]string{relativeRunDefinitionPath})
-		if err != nil {
-			return errors.Wrapf(err, "unable to reload %q", relativeRunDefinitionPath)
-		}
-		rwxDirectoryEntries, err := rwxDirectoryEntries(rwxDirectoryPath)
-		if err != nil && !errors.Is(err, errors.ErrFileNotExists) {
-			return errors.Wrapf(err, "unable to reload rwx directory %q", rwxDirectoryPath)
-		}
-
-		rwxDirectory = rwxDirectoryEntries
-		return nil
+		return nil, err
 	}
 
 	if patchFile.Written {
@@ -265,94 +422,21 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		fmt.Fprintln(s.Stderr, "")
 	}
 
-	addBaseIfNeeded, err := s.insertDefaultBaseIfMissing(runDefinition)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to resolve base")
-	}
-
-	if len(addBaseIfNeeded.UpdatedRunFiles) > 0 {
-		update := addBaseIfNeeded.UpdatedRunFiles[0]
-		fmt.Fprintf(s.Stderr, "Configured %q to run on %s\n\n", update.OriginalPath, update.ResolvedBase.Image)
-
-		if err = reloadRunDefinitions(); err != nil {
-			return nil, err
-		}
-	}
-
-	if len(addBaseIfNeeded.ErroredRunFiles) > 0 {
-		for _, erroredFile := range addBaseIfNeeded.ErroredRunFiles {
-			fmt.Fprintf(s.Stderr, "Failed to configure base for %q: %v\n", erroredFile.OriginalPath, erroredFile.Error)
-		}
-	}
-
-	mintFiles := filterYAMLFilesForModification(runDefinition, func(doc *YAMLDoc) bool {
-		return true
-	})
-	resolvedPackages, err := s.resolveOrUpdatePackagesForFiles(mintFiles, false, PickLatestMajorVersion)
-	if err != nil {
+	if err := s.configureRunDefinitionUpload(upload); err != nil {
 		return nil, err
 	}
-	if len(resolvedPackages) > 0 {
-		for rwxPackage, version := range resolvedPackages {
-			fmt.Fprintf(s.Stderr, "Configured package %s to use version %s\n", rwxPackage, version)
-		}
-		fmt.Fprintln(s.Stderr, "")
 
-		if err = reloadRunDefinitions(); err != nil {
-			return nil, err
-		}
-	}
+	upload.appendRunDefinitionOutsideRwxDir()
 
-	if outside, err := runDefinitionOutsideRwxDir(runDefinitionPath, rwxDirectoryPath); err == nil && outside {
-		rwxDirectory = appendWorkflowUploadEntry(rwxDirectory, runDefinition[0])
-	}
-
-	i := 0
-	initializationParameters := make([]api.InitializationParameter, len(cfg.InitParameters))
-	for key, value := range cfg.InitParameters {
-		initializationParameters[i] = api.InitializationParameter{
-			Key:   key,
-			Value: value,
-		}
-		i++
-	}
-
-	initiateStart := time.Now()
-	runResult, err := s.APIClient.InitiateRun(api.InitiateRunConfig{
-		InitializationParameters: initializationParameters,
-		TaskDefinitions:          runDefinition,
-		RwxDirectory:             rwxDirectory,
+	return s.callInitiateRun(api.InitiateRunConfig{
+		InitializationParameters: initializationParametersFromMap(cfg.InitParameters),
+		TaskDefinitions:          upload.runDefinition,
+		RwxDirectory:             upload.rwxDirectory,
 		TargetedTaskKeys:         cfg.TargetedTasks,
 		Title:                    cfg.Title,
 		UseCache:                 !cfg.NoCache,
 		CliState:                 cfg.CliState,
-		Git: api.GitMetadata{
-			Branch:    branch,
-			Sha:       sha,
-			OriginUrl: originUrl,
-		},
-		Patch: api.PatchMetadata{
-			Sent:           patchFile.Written,
-			UntrackedFiles: patchFile.UntrackedFiles.Files,
-			UntrackedCount: patchFile.UntrackedFiles.Count,
-			LFSFiles:       patchFile.LFSChangedFiles.Files,
-			LFSCount:       patchFile.LFSChangedFiles.Count,
-			ErrorMessage:   errorMessage,
-			GitDirectory:   gitDirectory,
-			GitInstalled:   gitInstalled,
-		},
+		Git:                      gitMetadata.apiGitMetadata(),
+		Patch:                    gitMetadata.apiPatchMetadata(patchFile),
 	})
-
-	s.recordTelemetry("run.initiate", map[string]any{
-		"has_targets":     len(cfg.TargetedTasks) > 0,
-		"has_init_params": len(cfg.InitParameters) > 0,
-		"duration_ms":     time.Since(initiateStart).Milliseconds(),
-		"success":         err == nil,
-	})
-
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to initiate run")
-	}
-
-	return runResult, nil
 }

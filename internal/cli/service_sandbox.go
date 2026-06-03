@@ -201,6 +201,72 @@ func (s Service) CheckExistingSandbox(configFile string) (*CheckExistingSandboxR
 	}, nil
 }
 
+func (s Service) initiateSandboxRun(cfg InitiateRunConfig) (*api.InitiateRunResult, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, errors.Wrap(err, "validation failed")
+	}
+
+	paths, cleanupPaths, err := resolveRunDefinitionPaths(cfg.RwxDirectory, cfg.MintFilePath)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanupPaths()
+
+	gitMetadata := s.runGitMetadata()
+	patchFile := git.PatchFile{}
+	patchDir := filepath.Join(paths.rwxDirectoryPath, ".patches")
+	defer os.RemoveAll(patchDir)
+
+	patchable := cfg.Patchable && gitMetadata.available
+	if _, ok := os.LookupEnv("RWX_DISABLE_GIT_PATCH"); ok {
+		patchable = false
+	}
+
+	if overridesGitParams, err := s.cliInitParamsOverrideGitParams(paths.relativeRunDefinitionPath, cfg.InitParameters); err != nil {
+		return nil, err
+	} else if overridesGitParams {
+		patchable = false
+	}
+
+	if patchable {
+		patchPathspec := []string{".", ":!" + paths.relativeRunDefinitionPath}
+		if generatedPatch, patchErr := s.GitClient.GeneratePatchFileIncludingUntracked(patchDir, patchPathspec); patchErr != nil {
+			gitMetadata.errorMessage = patchErr.Error()
+			fmt.Fprintf(s.Stderr, "Warning: failed to generate patch: %s\n\n", gitMetadata.errorMessage)
+		} else {
+			patchFile = generatedPatch
+			patchFile.UntrackedFiles = git.UntrackedFilesMetadata{}
+		}
+	}
+
+	upload, err := loadRunDefinitionUpload(paths, cfg.RwxDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	if patchFile.Written {
+		fmt.Fprintf(s.Stderr, "Included a git patch for uncommitted changes\n\n")
+	}
+
+	if err := s.configureRunDefinitionUpload(upload); err != nil {
+		return nil, err
+	}
+
+	upload.appendRunDefinitionOutsideRwxDir()
+
+	return s.callInitiateRun(api.InitiateRunConfig{
+		InitializationParameters: initializationParametersFromMap(cfg.InitParameters),
+		TaskDefinitions:          upload.runDefinition,
+		RwxDirectory:             upload.rwxDirectory,
+		TargetedTaskKeys:         cfg.TargetedTasks,
+		Title:                    cfg.Title,
+		UseCache:                 !cfg.NoCache,
+		CliState:                 cfg.CliState,
+		Git:                      gitMetadata.apiGitMetadata(),
+		Patch:                    gitMetadata.apiPatchMetadata(patchFile),
+	})
+}
+
 func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -306,7 +372,7 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 	// Construct a descriptive title for the sandbox run
 	title := SandboxTitle(cwd, branch, cfg.ConfigFile)
 
-	runResult, err := s.InitiateRun(InitiateRunConfig{
+	runResult, err := s.initiateSandboxRun(InitiateRunConfig{
 		MintFilePath:   cfg.ConfigFile,
 		RwxDirectory:   cfg.RwxDirectory,
 		Json:           cfg.Json,

@@ -372,9 +372,13 @@ func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (PatchFile
 
 // AddUntrackedFilesForPatch temporarily adds untracked files with intent-to-add
 // so they appear in git diff. Returns a cleanup function to undo the add.
-func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
-	// Get untracked files
-	cmd := exec.Command(c.Binary, "ls-files", "--others", "--exclude-standard")
+func (c *Client) AddUntrackedFilesForPatch(pathspec []string) (cleanup func(), err error) {
+	args := []string{"ls-files", "--others", "--exclude-standard"}
+	if len(pathspec) > 0 {
+		args = append(args, "--")
+		args = append(args, pathspec...)
+	}
+	cmd := exec.Command(c.Binary, args...)
 	cmd.Dir = c.Dir
 	output, err := cmd.Output()
 	if err != nil {
@@ -395,7 +399,7 @@ func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
 	}
 
 	// Add with intent-to-add
-	args := append([]string{"add", "-N", "--"}, files...)
+	args = append([]string{"add", "-N", "--"}, files...)
 	cmd = exec.Command(c.Binary, args...)
 	cmd.Dir = c.Dir
 	if err := cmd.Run(); err != nil {
@@ -413,11 +417,29 @@ func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
 	return cleanup, nil
 }
 
+// GeneratePatchFileIncludingUntracked writes a patch file for committed and
+// working-tree changes, including untracked files matched by pathspec.
+func (c *Client) GeneratePatchFileIncludingUntracked(destDir string, pathspec []string) (PatchFile, error) {
+	cleanup, err := c.AddUntrackedFilesForPatch(pathspec)
+	if err != nil {
+		return PatchFile{}, fmt.Errorf("unable to include untracked files in patch: %w", err)
+	}
+	defer cleanup()
+
+	patchFile, err := c.GeneratePatchFile(destDir, pathspec)
+	if err != nil {
+		return PatchFile{}, err
+	}
+
+	patchFile.UntrackedFiles = UntrackedFilesMetadata{}
+	return patchFile, nil
+}
+
 // GeneratePatch returns patch bytes for working tree changes relative to the base commit on origin.
 // Returns (nil, nil, nil) if no changes or unable to generate patch.
 func (c *Client) GeneratePatch(pathspec []string) ([]byte, *LFSChangedFilesMetadata, error) {
 	// Add untracked files temporarily so they appear in the diff
-	cleanup, err := c.AddUntrackedFilesForPatch()
+	cleanup, err := c.AddUntrackedFilesForPatch(pathspec)
 	if err != nil {
 		// Non-fatal: proceed without untracked files
 		cleanup = func() {}
@@ -441,7 +463,7 @@ func (c *Client) GeneratePatch(pathspec []string) ([]byte, *LFSChangedFilesMetad
 }
 
 func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
-	cleanup, err := c.AddUntrackedFilesForPatch()
+	cleanup, err := c.AddUntrackedFilesForPatch(nil)
 	if err != nil {
 		cleanup = func() {}
 	}

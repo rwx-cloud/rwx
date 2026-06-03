@@ -2650,7 +2650,7 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 }
 
 func TestService_StartSandbox(t *testing.T) {
-	t.Run("sends a git patch", func(t *testing.T) {
+	t.Run("sends a git patch that includes untracked files", func(t *testing.T) {
 		setup := setupTest(t)
 
 		// Create .rwx directory and sandbox config file
@@ -2665,7 +2665,8 @@ func TestService_StartSandbox(t *testing.T) {
 		setup.mockGit.MockGetBranch = "main"
 		setup.mockGit.MockGetCommit = "abc123"
 		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{
+		setup.mockGit.MockGeneratePatchFileError = errors.New("generic patch generator should not be used")
+		setup.mockGit.MockGeneratePatchFileIncludingUntracked = git.PatchFile{
 			Written:        true,
 			UntrackedFiles: git.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
 		}
@@ -2704,9 +2705,12 @@ func TestService_StartSandbox(t *testing.T) {
 
 		require.NoError(t, err)
 		require.True(t, receivedPatch.Sent, "sandbox start should send a git patch")
+		require.Empty(t, receivedPatch.UntrackedFiles, "sandbox start patch already includes untracked files")
+		require.Equal(t, 0, receivedPatch.UntrackedCount)
+		require.NotContains(t, setup.mockStderr.String(), "The patch did not include")
 	})
 
-	t.Run("passes init params to InitiateRun", func(t *testing.T) {
+	t.Run("passes init params to sandbox run", func(t *testing.T) {
 		setup := setupTest(t)
 
 		// Create .rwx directory and sandbox config file

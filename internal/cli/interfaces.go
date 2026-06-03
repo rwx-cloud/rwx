@@ -75,6 +75,7 @@ type GitClient interface {
 	GetCommit() (string, error)
 	GetOriginUrl() string
 	GeneratePatchFile(destDir string, pathspec []string) (git.PatchFile, error)
+	GeneratePatchFileIncludingUntracked(destDir string, pathspec []string) (git.PatchFile, error)
 	GeneratePatch(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error)
 	GenerateDirtyPatches() (git.DirtyPatches, error)
 	HasCommit(sha string) bool

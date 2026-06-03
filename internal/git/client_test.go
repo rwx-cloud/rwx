@@ -577,6 +577,62 @@ func TestGeneratePatchFile(t *testing.T) {
 	})
 }
 
+func TestGeneratePatchFileIncludingUntracked(t *testing.T) {
+	t.Run("writes a patch file with untracked files", func(t *testing.T) {
+		tempDir, sha := repoFixture(t, "testdata/GeneratePatchFile-diff-untracked")
+
+		client := &git.Client{Binary: "git", Dir: filepath.Join(tempDir, "repo")}
+		patchFile, err := client.GeneratePatchFileIncludingUntracked(client.Dir, nil)
+		require.NoError(t, err)
+
+		require.True(t, patchFile.Written)
+		require.Equal(t, filepath.Join(client.Dir, sha), patchFile.Path)
+		require.Empty(t, patchFile.UntrackedFiles.Files)
+		require.Equal(t, 0, patchFile.UntrackedFiles.Count)
+
+		patch, err := os.ReadFile(patchFile.Path)
+		require.NoError(t, err)
+		require.Contains(t, string(patch), "foo.txt")
+		require.Contains(t, string(patch), "bar.txt")
+	})
+
+	t.Run("writes a patch file when there are only untracked files", func(t *testing.T) {
+		tempDir, sha := repoFixture(t, "testdata/GeneratePatchFile-diff-untracked-only")
+
+		client := &git.Client{Binary: "git", Dir: filepath.Join(tempDir, "repo")}
+		patchFile, err := client.GeneratePatchFileIncludingUntracked(client.Dir, nil)
+		require.NoError(t, err)
+
+		require.True(t, patchFile.Written)
+		require.Equal(t, filepath.Join(client.Dir, sha), patchFile.Path)
+		require.Empty(t, patchFile.UntrackedFiles.Files)
+		require.Equal(t, 0, patchFile.UntrackedFiles.Count)
+
+		patch, err := os.ReadFile(patchFile.Path)
+		require.NoError(t, err)
+		require.Contains(t, string(patch), "untracked.txt")
+		require.Contains(t, string(patch), "new file mode 100644")
+	})
+
+	t.Run("respects pathspec exclusions for untracked files", func(t *testing.T) {
+		tempDir, sha := repoFixture(t, "testdata/GeneratePatchFile-diff-exclude")
+
+		client := &git.Client{Binary: "git", Dir: filepath.Join(tempDir, "repo")}
+		patchFile, err := client.GeneratePatchFileIncludingUntracked(client.Dir, []string{".", ":!.rwx"})
+		require.NoError(t, err)
+
+		require.True(t, patchFile.Written)
+		require.Equal(t, filepath.Join(client.Dir, sha), patchFile.Path)
+
+		patch, err := os.ReadFile(patchFile.Path)
+		require.NoError(t, err)
+		require.Contains(t, string(patch), "included.txt")
+		require.Contains(t, string(patch), "untracked.txt")
+		require.NotContains(t, string(patch), "excluded.txt")
+		require.NotContains(t, string(patch), "untracked-excluded.txt")
+	})
+}
+
 func TestIsAncestor(t *testing.T) {
 	t.Run("returns true when candidate is ancestor of HEAD", func(t *testing.T) {
 		repo, firstSHA := repoFixture(t, "testdata/IsAncestor-linear")
