@@ -342,6 +342,19 @@ func TestSandboxStorage_LoadAndSave(t *testing.T) {
 		require.Equal(t, "*\n", string(contents))
 	})
 
+	t.Run("creates .gitignore before locking storage", func(t *testing.T) {
+		tmpDir := setupTestStorageDir(t)
+
+		lock, err := cli.LockSandboxStorage()
+		require.NoError(t, err)
+		defer cli.UnlockSandboxStorage(lock)
+
+		gitignorePath := filepath.Join(tmpDir, ".rwx", "sandboxes", ".gitignore")
+		contents, err := os.ReadFile(gitignorePath)
+		require.NoError(t, err)
+		require.Equal(t, "*\n", string(contents))
+	})
+
 	t.Run("creates directory structure if it does not exist", func(t *testing.T) {
 		tmpDir := setupTestStorageDir(t)
 

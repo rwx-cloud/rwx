@@ -125,6 +125,7 @@ func LockSandboxStorage() (*SandboxStorageLock, error) {
 	if err := os.MkdirAll(filepath.Dir(lockPath), os.ModePerm); err != nil {
 		return nil, err
 	}
+	ensureSandboxesDirGitignore(filepath.Dir(lockPath))
 
 	lock := &SandboxStorageLock{flock: flock.New(lockPath)}
 	if err := lock.flock.Lock(); err != nil {
@@ -146,6 +147,7 @@ func TryLockSandboxStorage() (*SandboxStorageLock, error) {
 	if err := os.MkdirAll(filepath.Dir(lockPath), os.ModePerm); err != nil {
 		return nil, err
 	}
+	ensureSandboxesDirGitignore(filepath.Dir(lockPath))
 
 	lock := &SandboxStorageLock{flock: flock.New(lockPath)}
 	locked, err := lock.flock.TryLock()

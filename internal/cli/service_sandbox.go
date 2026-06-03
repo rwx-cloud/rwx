@@ -22,6 +22,7 @@ const (
 	sandboxDirectiveLockReleased  = "__rwx_sandbox_lock_released__"
 	maxSandboxGitBundleBytes      = 100 * 1024 * 1024
 	warnSandboxGitBundleBytes     = 25 * 1024 * 1024
+	sandboxStoragePathspec        = "-- . ':(exclude).rwx/sandboxes' ':(exclude).mint/sandboxes'"
 )
 
 // Config types
@@ -229,7 +230,7 @@ func (s Service) initiateSandboxRun(cfg InitiateRunConfig) (*api.InitiateRunResu
 	}
 
 	if patchable {
-		patchPathspec := []string{".", ":!" + paths.relativeRunDefinitionPath}
+		patchPathspec := []string{".", ":!" + paths.relativeRunDefinitionPath, ":!.rwx/sandboxes", ":!.mint/sandboxes"}
 		if generatedPatch, patchErr := s.GitClient.GeneratePatchFileIncludingUntracked(patchDir, patchPathspec); patchErr != nil {
 			gitMetadata.errorMessage = patchErr.Error()
 			fmt.Fprintf(s.Stderr, "Warning: failed to generate patch: %s\n\n", gitMetadata.errorMessage)
@@ -1334,7 +1335,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 
 	// Include untracked files in the diff by adding them with intent-to-add
 	// Get untracked files, add with -N, get diff, then reset
-	lsExitCode, untrackedOutput, lsErr := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git ls-files --others --exclude-standard")
+	lsExitCode, untrackedOutput, lsErr := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git ls-files --others --exclude-standard " + sandboxStoragePathspec)
 	if lsErr != nil {
 		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 		return nil, 0, errors.Wrap(lsErr, "failed to list untracked files in sandbox")
@@ -1346,7 +1347,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 
 	untrackedFiles := []string{}
 	for _, f := range strings.Split(strings.TrimSpace(untrackedOutput), "\n") {
-		if f != "" {
+		if f != "" && !isSandboxStoragePath(f) {
 			untrackedFiles = append(untrackedFiles, f)
 		}
 	}
@@ -1371,7 +1372,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 
 	// Get patch from sandbox (stdout only to avoid output capture issues after sync markers).
 	// Binary diffs need full indexes so local git apply can recreate new binary files.
-	exitCode, patch, err := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git diff --binary --full-index refs/rwx-sync")
+	exitCode, patch, err := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git diff --binary --full-index refs/rwx-sync " + sandboxStoragePathspec)
 	patchBytes := len(patch)
 
 	// Reset the intent-to-add for untracked files
@@ -1824,6 +1825,10 @@ func newFilePathsForDirtyPatches(patches git.DirtyPatches) []string {
 
 func quoteShellArg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func isSandboxStoragePath(path string) bool {
+	return strings.HasPrefix(path, ".rwx/sandboxes/") || strings.HasPrefix(path, ".mint/sandboxes/")
 }
 
 // parsePatchFiles extracts file paths from a git patch

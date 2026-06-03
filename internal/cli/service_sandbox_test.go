@@ -2167,6 +2167,8 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		address := "192.168.1.1:22"
 		var stdoutOnlyCommands []string
 		var pullDiffCommand string
+		var addNCommand string
+		var resetCommand string
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
@@ -2187,11 +2189,17 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
 			stdoutOnlyCommands = append(stdoutOnlyCommands, cmd)
 			if strings.Contains(cmd, "git ls-files --others") {
-				return 0, "untracked.txt\n", nil
+				return 0, "untracked.txt\n.rwx/sandboxes/sandboxes.json.lock\n", nil
+			}
+			if strings.Contains(cmd, "git add -N") {
+				addNCommand = cmd
 			}
 			if isSandboxPullDiffCommand(cmd) {
 				pullDiffCommand = cmd
 				return 0, sandboxPatch, nil
+			}
+			if strings.Contains(cmd, "git reset HEAD") {
+				resetCommand = cmd
 			}
 			return 0, "", nil
 		}
@@ -2243,6 +2251,13 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		require.Contains(t, pullDiffCommand, "--binary")
 		require.Contains(t, pullDiffCommand, "--full-index")
 		require.True(t, foundReset, "git reset HEAD should use stdout-only output")
+		require.NotContains(t, addNCommand, ".rwx/sandboxes/sandboxes.json.lock")
+		require.NotContains(t, resetCommand, ".rwx/sandboxes/sandboxes.json.lock")
+		for _, cmd := range stdoutOnlyCommands {
+			if strings.Contains(cmd, "git ls-files --others") || isSandboxPullDiffCommand(cmd) {
+				require.Contains(t, cmd, ":(exclude).rwx/sandboxes")
+			}
+		}
 	})
 
 	t.Run("pull only includes sandbox exec-changed files", func(t *testing.T) {
