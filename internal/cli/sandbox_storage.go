@@ -122,7 +122,7 @@ func LockSandboxStorage() (*SandboxStorageLock, error) {
 	}
 
 	lockPath := storagePath + ".lock"
-	if err := os.MkdirAll(filepath.Dir(lockPath), os.ModePerm); err != nil {
+	if err := ensureSandboxStorageDir(filepath.Dir(lockPath)); err != nil {
 		return nil, err
 	}
 
@@ -143,7 +143,7 @@ func TryLockSandboxStorage() (*SandboxStorageLock, error) {
 	}
 
 	lockPath := storagePath + ".lock"
-	if err := os.MkdirAll(filepath.Dir(lockPath), os.ModePerm); err != nil {
+	if err := ensureSandboxStorageDir(filepath.Dir(lockPath)); err != nil {
 		return nil, err
 	}
 
@@ -210,11 +210,9 @@ func (s *SandboxStorage) Save() error {
 	}
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+	if err := ensureSandboxStorageDir(dir); err != nil {
 		return errors.Wrapf(err, "unable to create directory for %q", path)
 	}
-
-	ensureSandboxesDirGitignore(dir)
 
 	fd, err := os.Create(path)
 	if err != nil {
@@ -228,6 +226,15 @@ func (s *SandboxStorage) Save() error {
 		return errors.Wrapf(err, "unable to write %q", path)
 	}
 
+	return nil
+}
+
+func ensureSandboxStorageDir(dir string) error {
+	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+		return err
+	}
+
+	ensureSandboxesDirGitignore(dir)
 	return nil
 }
 

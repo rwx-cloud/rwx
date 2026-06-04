@@ -12,7 +12,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Create and stage a local change so it's included in the API-level patch sent
-# during sandbox start (untracked files are excluded from that patch).
+# during sandbox start.
 echo "local-change-content" > integration-test-local-change.txt
 git add integration-test-local-change.txt
 

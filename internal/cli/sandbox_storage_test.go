@@ -424,6 +424,34 @@ func TestSandboxStorage_LoadAndSave(t *testing.T) {
 	})
 }
 
+func TestSandboxStorage_LocksCreateGitignore(t *testing.T) {
+	t.Run("LockSandboxStorage", func(t *testing.T) {
+		tmpDir := setupTestStorageDir(t)
+
+		lock, err := cli.LockSandboxStorage()
+		require.NoError(t, err)
+		t.Cleanup(func() { cli.UnlockSandboxStorage(lock) })
+
+		gitignorePath := filepath.Join(tmpDir, ".rwx", "sandboxes", ".gitignore")
+		contents, err := os.ReadFile(gitignorePath)
+		require.NoError(t, err)
+		require.Equal(t, "*\n", string(contents))
+	})
+
+	t.Run("TryLockSandboxStorage", func(t *testing.T) {
+		tmpDir := setupTestStorageDir(t)
+
+		lock, err := cli.TryLockSandboxStorage()
+		require.NoError(t, err)
+		t.Cleanup(func() { cli.UnlockSandboxStorage(lock) })
+
+		gitignorePath := filepath.Join(tmpDir, ".rwx", "sandboxes", ".gitignore")
+		contents, err := os.ReadFile(gitignorePath)
+		require.NoError(t, err)
+		require.Equal(t, "*\n", string(contents))
+	})
+}
+
 func TestEncodeDecodeCliState(t *testing.T) {
 	t.Run("round-trips correctly", func(t *testing.T) {
 		encoded := cli.EncodeCliState("main", "/home/user/project/.rwx/sandbox.yml")

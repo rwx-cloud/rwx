@@ -341,6 +341,12 @@ func (c *Client) generatePatchData(pathspec []string) patchResult {
 }
 
 func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (PatchFile, error) {
+	cleanup, err := c.AddUntrackedFilesForPatch()
+	if err != nil {
+		cleanup = func() {}
+	}
+	defer cleanup()
+
 	data := c.generatePatchData(pathspec)
 	if !data.ok {
 		return PatchFile{}, fmt.Errorf("unable to generate patch data")

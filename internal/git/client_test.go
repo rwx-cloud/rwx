@@ -526,7 +526,7 @@ func TestGeneratePatchFile(t *testing.T) {
 			require.Equal(t, 0, patchFile.UntrackedFiles.Count)
 		})
 
-		t.Run("without changes to untracked files", func(t *testing.T) {
+		t.Run("including untracked files with other changes", func(t *testing.T) {
 			tempDir, sha := repoFixture(t, "testdata/GeneratePatchFile-diff-untracked")
 
 			client := &git.Client{Binary: "git", Dir: filepath.Join(tempDir, "repo")}
@@ -539,21 +539,33 @@ func TestGeneratePatchFile(t *testing.T) {
 			patch, err := os.ReadFile(patchFile.Path)
 			require.NoError(t, err)
 			require.Contains(t, string(patch), "new file mode 100644")
+			require.Contains(t, string(patch), "bar.txt")
 
-			require.Equal(t, []string{"bar.txt"}, patchFile.UntrackedFiles.Files)
-			require.Equal(t, 1, patchFile.UntrackedFiles.Count)
+			require.Equal(t, []string{}, patchFile.UntrackedFiles.Files)
+			require.Equal(t, 0, patchFile.UntrackedFiles.Count)
+			require.Equal(t, "foo.txt", mustGit(t, client.Dir, "diff", "--cached", "--name-only"))
+			require.Contains(t, strings.Split(mustGit(t, client.Dir, "ls-files", "--others", "--exclude-standard"), "\n"), "bar.txt")
 		})
 
 		t.Run("with only untracked files", func(t *testing.T) {
-			tempDir, _ := repoFixture(t, "testdata/GeneratePatchFile-diff-untracked-only")
+			tempDir, sha := repoFixture(t, "testdata/GeneratePatchFile-diff-untracked-only")
 
 			client := &git.Client{Binary: "git", Dir: filepath.Join(tempDir, "repo")}
 			patchFile, err := client.GeneratePatchFile(client.Dir, nil)
 			require.NoError(t, err)
 
-			require.Equal(t, false, patchFile.Written)
-			require.Equal(t, []string{"untracked.txt"}, patchFile.UntrackedFiles.Files)
-			require.Equal(t, 1, patchFile.UntrackedFiles.Count)
+			require.Equal(t, true, patchFile.Written)
+			require.Equal(t, filepath.Join(client.Dir, sha), patchFile.Path)
+
+			patch, err := os.ReadFile(patchFile.Path)
+			require.NoError(t, err)
+			require.Contains(t, string(patch), "new file mode 100644")
+			require.Contains(t, string(patch), "untracked.txt")
+
+			require.Equal(t, []string{}, patchFile.UntrackedFiles.Files)
+			require.Equal(t, 0, patchFile.UntrackedFiles.Count)
+			require.Equal(t, "", mustGit(t, client.Dir, "diff", "--cached", "--name-only"))
+			require.Contains(t, strings.Split(mustGit(t, client.Dir, "ls-files", "--others", "--exclude-standard"), "\n"), "untracked.txt")
 		})
 
 		t.Run("excluding paths via pathspec", func(t *testing.T) {
@@ -569,10 +581,12 @@ func TestGeneratePatchFile(t *testing.T) {
 			patch, err := os.ReadFile(patchFile.Path)
 			require.NoError(t, err)
 			require.Contains(t, string(patch), "included.txt")
+			require.Contains(t, string(patch), "untracked.txt")
 			require.NotContains(t, string(patch), "excluded.txt")
+			require.NotContains(t, string(patch), "untracked-excluded.txt")
 
-			require.Equal(t, []string{"untracked.txt"}, patchFile.UntrackedFiles.Files)
-			require.Equal(t, 1, patchFile.UntrackedFiles.Count)
+			require.Equal(t, []string{}, patchFile.UntrackedFiles.Files)
+			require.Equal(t, 0, patchFile.UntrackedFiles.Count)
 		})
 	})
 }

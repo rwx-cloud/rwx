@@ -56,7 +56,12 @@ func initiateRun(t *testing.T, patchFile git.PatchFile, expectedPatchMetadata ap
 	}
 	s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 		require.Equal(t, expectedPatchMetadata.Sent, cfg.Patch.Sent)
-		require.Equal(t, expectedPatchMetadata.UntrackedFiles, cfg.Patch.UntrackedFiles)
+		expectedUntrackedFiles := expectedPatchMetadata.UntrackedFiles
+		if expectedUntrackedFiles == nil {
+			expectedUntrackedFiles = []string{}
+		}
+		require.Equal(t, expectedUntrackedFiles, cfg.Patch.UntrackedFiles)
+		require.Equal(t, expectedPatchMetadata.UntrackedCount, cfg.Patch.UntrackedCount)
 		require.Equal(t, expectedPatchMetadata.LFSFiles, cfg.Patch.LFSFiles)
 		receivedRwxDir = cfg.RwxDirectory
 		return &api.InitiateRunResult{
@@ -283,11 +288,9 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 			patchFile := git.PatchFile{
 				UntrackedFiles: git.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
 			}
-			expectedPatch := api.PatchMetadata{UntrackedFiles: []string{"foo.txt"}, UntrackedCount: 1}
-			result := initiateRun(t, patchFile, expectedPatch)
+			result := initiateRun(t, patchFile, api.PatchMetadata{})
 			require.NotContains(t, result.stderr, "Included a git patch")
-			require.Contains(t, result.stderr, "The patch did not include the following untracked file. Add it with git add to use it in the run:")
-			require.Contains(t, result.stderr, "  foo.txt")
+			require.NotContains(t, result.stderr, "untracked file")
 		})
 
 		t.Run("when a patch is written with 1 untracked file", func(t *testing.T) {
@@ -295,10 +298,10 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 				Written:        true,
 				UntrackedFiles: git.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
 			}
-			expectedPatch := api.PatchMetadata{Sent: true, UntrackedFiles: []string{"foo.txt"}, UntrackedCount: 1}
+			expectedPatch := api.PatchMetadata{Sent: true}
 			result := initiateRun(t, patchFile, expectedPatch)
-			require.Contains(t, result.stderr, "The patch did not include the following untracked file. Add it with git add to use it in the run:")
-			require.Contains(t, result.stderr, "  foo.txt")
+			require.Contains(t, result.stderr, "Included a git patch for uncommitted changes")
+			require.NotContains(t, result.stderr, "untracked file")
 		})
 
 		t.Run("when a patch is written with 5 untracked files", func(t *testing.T) {
@@ -307,13 +310,10 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 				Written:        true,
 				UntrackedFiles: git.UntrackedFilesMetadata{Files: files, Count: 5},
 			}
-			expectedPatch := api.PatchMetadata{Sent: true, UntrackedFiles: files, UntrackedCount: 5}
+			expectedPatch := api.PatchMetadata{Sent: true}
 			result := initiateRun(t, patchFile, expectedPatch)
-			require.Contains(t, result.stderr, "The patch did not include the following untracked files. Add them with git add to use them in the run:")
-			for _, file := range files {
-				require.Contains(t, result.stderr, "  "+file)
-			}
-			require.NotContains(t, result.stderr, "and ")
+			require.Contains(t, result.stderr, "Included a git patch for uncommitted changes")
+			require.NotContains(t, result.stderr, "untracked file")
 		})
 
 		t.Run("when a patch is written with more than 5 untracked files", func(t *testing.T) {
@@ -322,15 +322,11 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 				Written:        true,
 				UntrackedFiles: git.UntrackedFilesMetadata{Files: files, Count: 7},
 			}
-			expectedPatch := api.PatchMetadata{Sent: true, UntrackedFiles: files, UntrackedCount: 7}
+			expectedPatch := api.PatchMetadata{Sent: true}
 			result := initiateRun(t, patchFile, expectedPatch)
-			require.Contains(t, result.stderr, "The patch did not include the following untracked files. Add them with git add to use them in the run:")
-			for _, file := range files[:5] {
-				require.Contains(t, result.stderr, "  "+file)
-			}
-			require.NotContains(t, result.stderr, "  f.txt")
-			require.NotContains(t, result.stderr, "  g.txt")
-			require.Contains(t, result.stderr, "and 2 more")
+			require.Contains(t, result.stderr, "Included a git patch for uncommitted changes")
+			require.NotContains(t, result.stderr, "untracked file")
+			require.NotContains(t, result.stderr, "and 2 more")
 		})
 	})
 
@@ -363,11 +359,9 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 		t.Run("by default", func(t *testing.T) {
 			expectedPatchMetadata := api.PatchMetadata{
-				Sent:           true,
-				UntrackedFiles: untrackedFiles.Files,
-				UntrackedCount: untrackedFiles.Count,
-				LFSFiles:       lfsChangedFiles.Files,
-				LFSCount:       lfsChangedFiles.Count,
+				Sent:     true,
+				LFSFiles: lfsChangedFiles.Files,
+				LFSCount: lfsChangedFiles.Count,
 			}
 
 			result := initiateRun(t, patchFile, expectedPatchMetadata)
