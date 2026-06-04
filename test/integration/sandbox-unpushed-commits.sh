@@ -14,6 +14,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+rm -rf .rwx/sandboxes
+
 echo "unpushed commit content" > unpushed-commit-test.txt
 git add unpushed-commit-test.txt
 git commit -m "unpushed local commit"
