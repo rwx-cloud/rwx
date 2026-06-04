@@ -181,7 +181,7 @@ assert_sandbox_file_content "integration-force-move-new.txt" "new branch content
 
 echo "Scenario: unrelated local history is mirrored in sandbox"
 git switch --orphan "${TEST_ID}-orphan" >/dev/null
-git rm -rf . >/dev/null
+git rm -rf --ignore-unmatch . >/dev/null
 commit_file "integration-orphan-history.txt" "orphan history content" "integration orphan history"
 assert_sandbox_head_matches
 assert_sandbox_file_content "integration-orphan-history.txt" "orphan history content"
