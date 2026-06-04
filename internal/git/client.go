@@ -240,6 +240,11 @@ type BundleFile struct {
 	Size int64
 }
 
+type PackFile struct {
+	Path string
+	Size int64
+}
+
 // patchResult holds the result of generating patch data
 type patchResult struct {
 	patch     []byte
@@ -617,6 +622,82 @@ func (c *Client) CreateBundleFile(head string, excludes []string) (BundleFile, e
 	}
 
 	return BundleFile{Path: path, Ref: ref, Size: info.Size()}, nil
+}
+
+func (c *Client) CreateShallowStatePack(head string) (PackFile, error) {
+	if head == "" {
+		return PackFile{}, fmt.Errorf("no head commit provided")
+	}
+
+	rootTreeCmd := exec.Command(c.Binary, "show", "-s", "--format=%T", head)
+	rootTreeCmd.Dir = c.Dir
+	rootTreeOut, err := rootTreeCmd.CombinedOutput()
+	if err != nil {
+		return PackFile{}, fmt.Errorf("git show failed: %s", strings.TrimSpace(string(rootTreeOut)))
+	}
+
+	objects := []string{head, strings.TrimSpace(string(rootTreeOut))}
+	lsTreeCmd := exec.Command(c.Binary, "ls-tree", "-r", "-t", "-z", "--full-tree", head)
+	lsTreeCmd.Dir = c.Dir
+	lsTreeOut, err := lsTreeCmd.CombinedOutput()
+	if err != nil {
+		return PackFile{}, fmt.Errorf("git ls-tree failed: %s", strings.TrimSpace(string(lsTreeOut)))
+	}
+
+	for _, entry := range bytes.Split(lsTreeOut, []byte{0}) {
+		if len(entry) == 0 {
+			continue
+		}
+		header, _, _ := bytes.Cut(entry, []byte{'\t'})
+		fields := strings.Fields(string(header))
+		if len(fields) != 3 {
+			continue
+		}
+		if fields[1] == "tree" || fields[1] == "blob" {
+			objects = append(objects, fields[2])
+		}
+	}
+
+	seen := make(map[string]bool, len(objects))
+	var objectList strings.Builder
+	for _, object := range objects {
+		object = strings.TrimSpace(object)
+		if object == "" || seen[object] {
+			continue
+		}
+		seen[object] = true
+		objectList.WriteString(object)
+		objectList.WriteByte('\n')
+	}
+
+	tmp, err := os.CreateTemp("", "rwx-sandbox-state-*.pack")
+	if err != nil {
+		return PackFile{}, err
+	}
+	path := tmp.Name()
+	packCmd := exec.Command(c.Binary, "pack-objects", "--stdout")
+	packCmd.Dir = c.Dir
+	packCmd.Stdin = strings.NewReader(objectList.String())
+	packCmd.Stdout = tmp
+	var stderr bytes.Buffer
+	packCmd.Stderr = &stderr
+	if err := packCmd.Run(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(path)
+		return PackFile{}, fmt.Errorf("git pack-objects failed: %s", strings.TrimSpace(stderr.String()))
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(path)
+		return PackFile{}, err
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		_ = os.Remove(path)
+		return PackFile{}, err
+	}
+
+	return PackFile{Path: path, Size: info.Size()}, nil
 }
 
 // IsAncestor returns true if candidateSHA is an ancestor of (or equal to) headRef.

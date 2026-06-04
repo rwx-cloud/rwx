@@ -20,9 +20,67 @@ import (
 const (
 	sandboxDirectiveLockRequested = "__rwx_sandbox_lock_requested__"
 	sandboxDirectiveLockReleased  = "__rwx_sandbox_lock_released__"
-	maxSandboxGitBundleBytes      = 100 * 1024 * 1024
-	warnSandboxGitBundleBytes     = 25 * 1024 * 1024
 )
+
+type sandboxGitSyncTelemetry struct {
+	Transport               string
+	BundleMode              string
+	FetchStatus             string
+	FetchExitCode           int
+	SandboxHeadStatus       string
+	KnownTipCount           int
+	ExcludeCount            int
+	IncrementalBundleStatus string
+	IncrementalBundleBytes  int64
+	FullBundleStatus        string
+	FullBundleBytes         int64
+	ShallowPackStatus       string
+	ShallowPackBytes        int64
+	FallbackReason          string
+}
+
+func newSandboxGitSyncTelemetry() sandboxGitSyncTelemetry {
+	return sandboxGitSyncTelemetry{
+		Transport:               "unknown",
+		FetchStatus:             "skipped",
+		SandboxHeadStatus:       "skipped",
+		IncrementalBundleStatus: "skipped",
+		FullBundleStatus:        "skipped",
+		ShallowPackStatus:       "skipped",
+	}
+}
+
+func (m sandboxGitSyncTelemetry) props() map[string]any {
+	props := map[string]any{
+		"git_transport":                 m.Transport,
+		"git_fetch_status":              m.FetchStatus,
+		"git_sandbox_head_status":       m.SandboxHeadStatus,
+		"git_known_tip_count":           m.KnownTipCount,
+		"git_exclude_count":             m.ExcludeCount,
+		"git_incremental_bundle_status": m.IncrementalBundleStatus,
+		"git_full_bundle_status":        m.FullBundleStatus,
+		"git_shallow_pack_status":       m.ShallowPackStatus,
+	}
+	if m.BundleMode != "" {
+		props["git_bundle_mode"] = m.BundleMode
+	}
+	if m.FetchExitCode != 0 {
+		props["git_fetch_exit_code"] = m.FetchExitCode
+	}
+	if m.IncrementalBundleBytes != 0 {
+		props["git_incremental_bundle_bytes"] = int(m.IncrementalBundleBytes)
+	}
+	if m.FullBundleBytes != 0 {
+		props["git_full_bundle_bytes"] = int(m.FullBundleBytes)
+	}
+	if m.ShallowPackBytes != 0 {
+		props["git_shallow_pack_bytes"] = int(m.ShallowPackBytes)
+	}
+	if m.FallbackReason != "" {
+		props["git_fallback_reason"] = m.FallbackReason
+	}
+	return props
+}
 
 // Config types
 
@@ -1440,16 +1498,23 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 	patchBytes := 0
 	lfsSkippedCount := 0
 	var syncPushErr error
+	gitSyncTelemetry := newSandboxGitSyncTelemetry()
 	defer func() {
-		s.recordTelemetry("sandbox.sync_push", map[string]any{
+		props := map[string]any{
 			"patch_bytes":       patchBytes,
 			"duration_ms":       time.Since(syncStart).Milliseconds(),
 			"lfs_skipped_count": lfsSkippedCount,
 			"success":           syncPushErr == nil,
-		})
+		}
+		for key, value := range gitSyncTelemetry.props() {
+			props[key] = value
+		}
+		s.recordTelemetry("sandbox.sync_push", props)
 	}()
 
-	if err := s.ensureSandboxHasCommit(localHead, jsonMode); err != nil {
+	var err error
+	gitSyncTelemetry, err = s.ensureSandboxHasCommit(localHead)
+	if err != nil {
 		syncPushErr = err
 		return patchBytes, syncPushErr
 	}
@@ -1524,34 +1589,60 @@ func (s Service) warnUnresolvedRejectFiles() {
 	fmt.Fprintln(s.Stderr, "These will be synced to the sandbox and may cause issues. Resolve and delete them when possible.")
 }
 
-func (s Service) ensureSandboxHasCommit(localHead string, jsonMode bool) error {
+func (s Service) ensureSandboxHasCommit(localHead string) (sandboxGitSyncTelemetry, error) {
+	telemetry := newSandboxGitSyncTelemetry()
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 	gitDirExitCode, gitDirErr := s.SSHClient.ExecuteCommand("test -d .git || test -f .git")
 	if gitDirErr != nil {
 		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
-		return errors.Wrap(gitDirErr, "failed to check sandbox git directory")
+		return telemetry, errors.Wrap(gitDirErr, "failed to check sandbox git directory")
 	}
 	if gitDirExitCode != 0 {
 		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
-		return errors.ErrSandboxNoGitDir
+		return telemetry, errors.ErrSandboxNoGitDir
 	}
 
 	hasCommit := s.sandboxHasCommit(localHead)
 	if !hasCommit {
-		_, _ = s.SSHClient.ExecuteCommand("/usr/bin/git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1")
-		hasCommit = s.sandboxHasCommit(localHead)
-	}
+		sandboxHead, sandboxHeadStatus := s.sandboxHead()
+		telemetry.SandboxHeadStatus = sandboxHeadStatus
 
-	var knownTips []string
-	if !hasCommit {
-		knownTips = s.remoteKnownTips()
+		fetchStatus, fetchExitCode := s.fetchSandboxRemoteRefs()
+		telemetry.FetchStatus = fetchStatus
+		telemetry.FetchExitCode = fetchExitCode
+
+		hasCommit = s.sandboxHasCommit(localHead)
+
+		var knownTips []string
+		if !hasCommit {
+			knownTips = s.remoteKnownTips()
+			if sandboxHead != "" {
+				knownTips = append(knownTips, sandboxHead)
+			}
+			telemetry.KnownTipCount = len(knownTips)
+		}
+		if hasCommit {
+			telemetry.Transport = "fetch"
+		} else {
+			var excludes []string
+			excludes, telemetry.ExcludeCount = s.bundleExcludes(knownTips)
+			_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+			return s.importMissingCommit(localHead, excludes, telemetry)
+		}
 	}
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 
 	if hasCommit {
-		return nil
+		if telemetry.Transport == "unknown" {
+			telemetry.Transport = "already_present"
+		}
+		return telemetry, nil
 	}
 
+	return telemetry, fmt.Errorf("sandbox still does not contain local commit %s", localHead)
+}
+
+func (s Service) bundleExcludes(knownTips []string) ([]string, int) {
 	excludes := make([]string, 0, len(knownTips))
 	seen := make(map[string]bool, len(knownTips))
 	for _, tip := range knownTips {
@@ -1562,29 +1653,119 @@ func (s Service) ensureSandboxHasCommit(localHead string, jsonMode bool) error {
 		seen[tip] = true
 		excludes = append(excludes, tip)
 	}
+	return excludes, len(excludes)
+}
 
-	bundle, err := s.GitClient.CreateBundleFile(localHead, excludes)
-	if err != nil {
-		return errors.Wrap(err, "failed to create git bundle")
+func (s Service) importMissingCommit(localHead string, excludes []string, telemetry sandboxGitSyncTelemetry) (sandboxGitSyncTelemetry, error) {
+	if len(excludes) > 0 {
+		bundle, err := s.GitClient.CreateBundleFile(localHead, excludes)
+		if err != nil {
+			telemetry.IncrementalBundleStatus = "create_failed"
+			telemetry.FallbackReason = "incremental_bundle_create_failed"
+		} else {
+			telemetry.IncrementalBundleBytes = bundle.Size
+			status, err := s.importGitBundle(localHead, bundle)
+			telemetry.IncrementalBundleStatus = status
+			_ = os.Remove(bundle.Path)
+			if err == nil {
+				telemetry.Transport = "bundle"
+				telemetry.BundleMode = "incremental"
+				return telemetry, nil
+			}
+			telemetry.FallbackReason = status
+		}
+	} else {
+		telemetry.IncrementalBundleStatus = "skipped_no_excludes"
+		telemetry.FallbackReason = "no_excludes"
 	}
+
+	fullBundle, err := s.GitClient.CreateBundleFile(localHead, nil)
+	if err != nil {
+		telemetry.FullBundleStatus = "create_failed"
+		if telemetry.FallbackReason == "" {
+			telemetry.FallbackReason = "full_bundle_create_failed"
+		}
+	} else {
+		telemetry.FullBundleBytes = fullBundle.Size
+		status, err := s.importGitBundle(localHead, fullBundle)
+		telemetry.FullBundleStatus = status
+		_ = os.Remove(fullBundle.Path)
+		if err == nil {
+			telemetry.Transport = "bundle"
+			telemetry.BundleMode = "full"
+			return telemetry, nil
+		}
+		telemetry.FallbackReason = "bundle_import_failed"
+	}
+
+	pack, err := s.GitClient.CreateShallowStatePack(localHead)
+	if err != nil {
+		telemetry.ShallowPackStatus = "create_failed"
+		return telemetry, errors.Wrap(err, "failed to create shallow git state pack")
+	}
+	telemetry.ShallowPackBytes = pack.Size
+	status, err := s.importShallowStatePack(localHead, pack)
+	telemetry.ShallowPackStatus = status
+	_ = os.Remove(pack.Path)
+	if err != nil {
+		return telemetry, err
+	}
+
+	telemetry.Transport = "shallow_pack"
+	return telemetry, nil
+}
+
+func (s Service) sandboxHasCommit(sha string) bool {
+	exitCode, err := s.SSHClient.ExecuteCommand(fmt.Sprintf("/usr/bin/git cat-file -e %s^{commit} >/dev/null 2>&1", quoteShellArg(sha)))
+	return err == nil && exitCode == 0
+}
+
+func (s Service) sandboxHead() (string, string) {
+	exitCode, output, err := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git rev-parse --verify HEAD^{commit} 2>/dev/null")
+	if err != nil {
+		return "", "error"
+	}
+	output = strings.TrimSpace(output)
+	if exitCode != 0 || output == "" {
+		return "", "missing"
+	}
+	return output, "present"
+}
+
+func (s Service) fetchSandboxRemoteRefs() (string, int) {
+	exitCode, _, err := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' 2>&1")
+	if err != nil {
+		return "error", exitCode
+	}
+	if exitCode != 0 {
+		return "failed", exitCode
+	}
+	return "success", 0
+}
+
+func (s Service) remoteKnownTips() []string {
+	exitCode, output, err := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git for-each-ref --format='%(objectname)' refs/heads refs/remotes refs/tags refs/rwx refs/rwx-sync 2>/dev/null")
+	if err != nil || exitCode != 0 {
+		return nil
+	}
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return nil
+	}
+	return strings.Split(output, "\n")
+}
+
+func (s Service) importGitBundle(localHead string, bundle git.BundleFile) (string, error) {
 	if bundle.Path == "" {
-		return errors.New("failed to create git bundle")
+		return "create_failed", errors.New("failed to create git bundle")
 	}
 	if bundle.Ref == "" {
-		return errors.New("failed to create git bundle ref")
-	}
-	defer os.Remove(bundle.Path)
-
-	if bundle.Size > maxSandboxGitBundleBytes {
-		return fmt.Errorf("git bundle is %.1f MiB, which exceeds the %.0f MiB sandbox sync limit", float64(bundle.Size)/(1024*1024), float64(maxSandboxGitBundleBytes)/(1024*1024))
-	}
-	if bundle.Size > warnSandboxGitBundleBytes && !jsonMode {
-		fmt.Fprintf(s.Stderr, "Warning: streaming %.1f MiB of local git commits to the sandbox.\n", float64(bundle.Size)/(1024*1024))
+		return "create_failed", errors.New("failed to create git bundle ref")
 	}
 
 	fd, err := os.Open(bundle.Path)
 	if err != nil {
-		return errors.Wrap(err, "failed to open git bundle")
+		return "open_failed", errors.Wrap(err, "failed to open git bundle")
 	}
 	defer fd.Close()
 
@@ -1594,40 +1775,65 @@ func (s Service) ensureSandboxHasCommit(localHead string, jsonMode bool) error {
 		bundle.Ref,
 		bundle.Ref,
 	)
-	exitCode, output, streamErr := s.SSHClient.ExecuteCommandWithStdinAndCombinedOutput(
-		fetchBundleCmd,
-		fd,
-	)
-	hasCommit = streamErr == nil && exitCode == 0 && s.sandboxHasCommit(localHead)
+	exitCode, output, streamErr := s.SSHClient.ExecuteCommandWithStdinAndCombinedOutput(fetchBundleCmd, fd)
+	hasCommit := streamErr == nil && exitCode == 0 && s.sandboxHasCommit(localHead)
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if streamErr != nil {
-		return errors.Wrap(streamErr, "failed to stream git bundle to sandbox")
+		return "stream_failed", errors.Wrap(streamErr, "failed to stream git bundle to sandbox")
 	}
 	if exitCode != 0 {
-		if output = strings.TrimSpace(output); output != "" {
-			return fmt.Errorf("failed to import git bundle in sandbox: %s", output)
+		status := "import_failed"
+		if strings.Contains(output, "Repository lacks these prerequisite commits") {
+			status = "verify_failed"
 		}
-		return fmt.Errorf("failed to import git bundle in sandbox (exit code %d)", exitCode)
+		if output = strings.TrimSpace(output); output != "" {
+			return status, fmt.Errorf("failed to import git bundle in sandbox: %s", output)
+		}
+		return status, fmt.Errorf("failed to import git bundle in sandbox (exit code %d)", exitCode)
 	}
 
 	if !hasCommit {
-		return fmt.Errorf("sandbox still does not contain local commit %s after bundle import", localHead)
+		return "post_import_missing", fmt.Errorf("sandbox still does not contain local commit %s after bundle import", localHead)
 	}
 
-	return nil
+	return "imported", nil
 }
 
-func (s Service) sandboxHasCommit(sha string) bool {
-	exitCode, err := s.SSHClient.ExecuteCommand(fmt.Sprintf("/usr/bin/git cat-file -e %s^{commit} >/dev/null 2>&1", quoteShellArg(sha)))
-	return err == nil && exitCode == 0
-}
-
-func (s Service) remoteKnownTips() []string {
-	exitCode, output, err := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git for-each-ref --format='%(objectname)' refs/heads refs/remotes refs/tags refs/rwx refs/rwx-sync 2>/dev/null")
-	if err != nil || exitCode != 0 {
-		return nil
+func (s Service) importShallowStatePack(localHead string, pack git.PackFile) (string, error) {
+	if pack.Path == "" {
+		return "create_failed", errors.New("failed to create shallow git state pack")
 	}
-	return strings.Split(strings.TrimSpace(output), "\n")
+
+	fd, err := os.Open(pack.Path)
+	if err != nil {
+		return "open_failed", errors.Wrap(err, "failed to open shallow git state pack")
+	}
+	defer fd.Close()
+
+	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
+	importPackCmd := fmt.Sprintf(
+		"/bin/sh -lc '/usr/bin/git index-pack --stdin >/dev/null || exit 1; shallow=$(/usr/bin/git rev-parse --git-path shallow) || exit 1; /usr/bin/mkdir -p \"$(/usr/bin/dirname \"$shallow\")\" || exit 1; /usr/bin/touch \"$shallow\" || exit 1; /usr/bin/grep -qx %s \"$shallow\" 2>/dev/null || /usr/bin/printf \"%%s\\n\" %s >> \"$shallow\"; /usr/bin/git cat-file -e %s^{commit}'",
+		localHead,
+		localHead,
+		localHead,
+	)
+	exitCode, output, streamErr := s.SSHClient.ExecuteCommandWithStdinAndCombinedOutput(importPackCmd, fd)
+	hasCommit := streamErr == nil && exitCode == 0 && s.sandboxHasCommit(localHead)
+	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+	if streamErr != nil {
+		return "stream_failed", errors.Wrap(streamErr, "failed to stream shallow git state pack to sandbox")
+	}
+	if exitCode != 0 {
+		if output = strings.TrimSpace(output); output != "" {
+			return "import_failed", fmt.Errorf("failed to import shallow git state pack in sandbox: %s", output)
+		}
+		return "import_failed", fmt.Errorf("failed to import shallow git state pack in sandbox (exit code %d)", exitCode)
+	}
+	if !hasCommit {
+		return "post_import_missing", fmt.Errorf("sandbox still does not contain local commit %s after shallow state import", localHead)
+	}
+
+	return "imported", nil
 }
 
 func (s Service) checkoutSandboxHead(localHead string) error {

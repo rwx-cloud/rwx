@@ -87,6 +87,7 @@ TEMP_BRANCHES=(
   "${TEST_ID}-feature-merge"
   "${TEST_ID}-main-merge"
   "${TEST_ID}-force-move"
+  "${TEST_ID}-orphan"
   "${TEST_ID}-sandbox-created"
   "${TEST_ID}-detached-source"
   "${TEST_ID}-dirty-state"
@@ -99,6 +100,7 @@ TEST_FILES=(
   integration-main-merge.txt
   integration-force-move-old.txt
   integration-force-move-new.txt
+  integration-orphan-history.txt
   integration-sandbox-created-survives.txt
   integration-local-after-sandbox-created.txt
   integration-detached-head.txt
@@ -176,6 +178,14 @@ commit_file "integration-force-move-new.txt" "new branch content" "integration n
 assert_sandbox_head_matches
 assert_sandbox_file_missing "integration-force-move-old.txt"
 assert_sandbox_file_content "integration-force-move-new.txt" "new branch content"
+
+echo "Scenario: unrelated local history is mirrored in sandbox"
+git switch --orphan "${TEST_ID}-orphan" >/dev/null
+git rm -rf . >/dev/null
+commit_file "integration-orphan-history.txt" "orphan history content" "integration orphan history"
+assert_sandbox_head_matches
+assert_sandbox_file_content "integration-orphan-history.txt" "orphan history content"
+assert_sandbox_file_missing "go.mod"
 
 echo "Scenario: sandbox-created files pulled locally survive later local history movement"
 git switch -C "${TEST_ID}-sandbox-created" "$ORIGINAL_HEAD" >/dev/null

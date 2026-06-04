@@ -433,6 +433,59 @@ func TestCreateBundleFile(t *testing.T) {
 	require.Error(t, showRef.Run(), "temporary bundle ref should be removed")
 }
 
+func TestCreateShallowStatePack(t *testing.T) {
+	source := t.TempDir()
+	mustGit(t, source, "init")
+	mustGit(t, source, "config", "user.email", "test@example.com")
+	mustGit(t, source, "config", "user.name", "Test")
+	require.NoError(t, os.WriteFile(filepath.Join(source, "base.txt"), []byte("base\n"), 0o644))
+	mustGit(t, source, "add", "base.txt")
+	mustGit(t, source, "commit", "-m", "base")
+	mustGit(t, source, "switch", "-c", "feature")
+	require.NoError(t, os.WriteFile(filepath.Join(source, "feature.txt"), []byte("feature\n"), 0o644))
+	mustGit(t, source, "add", "feature.txt")
+	mustGit(t, source, "commit", "-m", "feature")
+
+	shallow := t.TempDir()
+	mustGit(t, "", "clone", "--depth", "1", "--branch", "feature", "file://"+source, shallow)
+
+	mustGit(t, source, "switch", "main")
+	require.NoError(t, os.WriteFile(filepath.Join(source, "main.txt"), []byte("main\n"), 0o644))
+	mustGit(t, source, "add", "main.txt")
+	mustGit(t, source, "commit", "-m", "main")
+	mustGit(t, source, "switch", "feature")
+	mustGit(t, source, "rebase", "main")
+	head := mustGit(t, source, "rev-parse", "HEAD")
+
+	client := &git.Client{Binary: "git", Dir: source}
+	pack, err := client.CreateShallowStatePack(head)
+	require.NoError(t, err)
+	defer os.Remove(pack.Path)
+	require.NotZero(t, pack.Size)
+
+	fd, err := os.Open(pack.Path)
+	require.NoError(t, err)
+	defer fd.Close()
+
+	indexPack := exec.Command("git", "index-pack", "--stdin")
+	indexPack.Dir = shallow
+	indexPack.Stdin = fd
+	out, err := indexPack.CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	shallowFile := filepath.Join(shallow, ".git", "shallow")
+	f, err := os.OpenFile(shallowFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	require.NoError(t, err)
+	_, err = f.WriteString(head + "\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	mustGit(t, shallow, "fsck", "--connectivity-only")
+	mustGit(t, shallow, "checkout", "--detach", head)
+	require.Equal(t, head, mustGit(t, shallow, "rev-parse", "HEAD"))
+	require.Equal(t, "", mustGit(t, shallow, "status", "--short"))
+}
+
 func TestGeneratePatchFile(t *testing.T) {
 	t.Run("does not write a patch file", func(t *testing.T) {
 		t.Run("when git is not installed", func(t *testing.T) {

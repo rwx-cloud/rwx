@@ -1614,6 +1614,221 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Equal(t, "unstaged-patch", stdinPayloads[2])
 	})
 
+	t.Run("retries with full bundle when incremental bundle cannot import", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-git-full-bundle"
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		sandboxHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		incrementalBundlePath := filepath.Join(setup.tmp, "incremental.bundle")
+		fullBundlePath := filepath.Join(setup.tmp, "full.bundle")
+		require.NoError(t, os.WriteFile(incrementalBundlePath, []byte("incremental-bundle"), 0o644))
+		require.NoError(t, os.WriteFile(fullBundlePath, []byte("full-bundle"), 0o644))
+
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetBranch = "feature/full-bundle"
+		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+			return git.DirtyPatches{}, nil
+		}
+		setup.mockGit.MockHasCommit = func(sha string) bool {
+			return sha == sandboxHead
+		}
+
+		var bundleCalls [][]string
+		setup.mockGit.MockCreateBundleFile = func(head string, excludes []string) (git.BundleFile, error) {
+			require.Equal(t, localHead, head)
+			bundleCalls = append(bundleCalls, append([]string{}, excludes...))
+			if len(bundleCalls) == 1 {
+				return git.BundleFile{Path: incrementalBundlePath, Ref: "refs/rwx/bundles/incremental", Size: int64(len("incremental-bundle"))}, nil
+			}
+			return git.BundleFile{Path: fullBundlePath, Ref: "refs/rwx/bundles/full", Size: int64(len("full-bundle"))}, nil
+		}
+		setup.mockGit.MockCreateShallowStatePack = func(head string) (git.PackFile, error) {
+			require.Fail(t, "shallow state pack should not be needed when full bundle imports")
+			return git.PackFile{}, nil
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+
+		localHeadAvailable := false
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				if localHeadAvailable {
+					return 0, nil
+				}
+				return 1, nil
+			default:
+				return 0, nil
+			}
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify HEAD"):
+				return 0, sandboxHead + "\n", nil
+			case strings.Contains(cmd, "for-each-ref"):
+				return 0, "", nil
+			default:
+				return 0, "", nil
+			}
+		}
+
+		var payloads []string
+		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
+			data, _ := io.ReadAll(stdin)
+			payloads = append(payloads, string(data))
+			if strings.Contains(command, "refs/rwx/bundles/incremental") {
+				return 1, "Repository lacks these prerequisite commits", nil
+			}
+			if strings.Contains(command, "refs/rwx/bundles/full") {
+				localHeadAvailable = true
+				return 0, "", nil
+			}
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+			Sync:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, runID, result.RunID)
+		require.Equal(t, [][]string{{sandboxHead}, {}}, bundleCalls)
+		require.Equal(t, []string{"incremental-bundle", "full-bundle"}, payloads)
+
+		pushEvent := findEvent(setup.drainEvents(), "sandbox.sync_push")
+		require.NotNil(t, pushEvent)
+		require.Equal(t, "bundle", pushEvent.Props["git_transport"])
+		require.Equal(t, "full", pushEvent.Props["git_bundle_mode"])
+		require.Equal(t, "verify_failed", pushEvent.Props["git_incremental_bundle_status"])
+		require.Equal(t, "imported", pushEvent.Props["git_full_bundle_status"])
+	})
+
+	t.Run("falls back to shallow state pack when bundles cannot import", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-git-shallow-state"
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		sandboxHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		incrementalBundlePath := filepath.Join(setup.tmp, "incremental.bundle")
+		fullBundlePath := filepath.Join(setup.tmp, "full.bundle")
+		packPath := filepath.Join(setup.tmp, "state.pack")
+		require.NoError(t, os.WriteFile(incrementalBundlePath, []byte("incremental-bundle"), 0o644))
+		require.NoError(t, os.WriteFile(fullBundlePath, []byte("full-bundle"), 0o644))
+		require.NoError(t, os.WriteFile(packPath, []byte("state-pack"), 0o644))
+
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetBranch = "feature/shallow-state"
+		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+			return git.DirtyPatches{}, nil
+		}
+		setup.mockGit.MockHasCommit = func(sha string) bool {
+			return sha == sandboxHead
+		}
+
+		setup.mockGit.MockCreateBundleFile = func(head string, excludes []string) (git.BundleFile, error) {
+			if len(excludes) > 0 {
+				return git.BundleFile{Path: incrementalBundlePath, Ref: "refs/rwx/bundles/incremental", Size: int64(len("incremental-bundle"))}, nil
+			}
+			return git.BundleFile{Path: fullBundlePath, Ref: "refs/rwx/bundles/full", Size: int64(len("full-bundle"))}, nil
+		}
+		var packHead string
+		setup.mockGit.MockCreateShallowStatePack = func(head string) (git.PackFile, error) {
+			packHead = head
+			return git.PackFile{Path: packPath, Size: int64(len("state-pack"))}, nil
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+
+		localHeadAvailable := false
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				if localHeadAvailable {
+					return 0, nil
+				}
+				return 1, nil
+			default:
+				return 0, nil
+			}
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify HEAD"):
+				return 0, sandboxHead + "\n", nil
+			case strings.Contains(cmd, "for-each-ref"):
+				return 0, "", nil
+			default:
+				return 0, "", nil
+			}
+		}
+
+		var payloads []string
+		var packCommand string
+		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
+			data, _ := io.ReadAll(stdin)
+			payloads = append(payloads, string(data))
+			switch {
+			case strings.Contains(command, "refs/rwx/bundles/incremental"):
+				return 1, "Repository lacks these prerequisite commits", nil
+			case strings.Contains(command, "refs/rwx/bundles/full"):
+				return 1, "failed to import full bundle", nil
+			case strings.Contains(command, "git index-pack --stdin"):
+				packCommand = command
+				localHeadAvailable = true
+				return 0, "", nil
+			default:
+				return 0, "", nil
+			}
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+			Sync:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, runID, result.RunID)
+		require.Equal(t, localHead, packHead)
+		require.Equal(t, []string{"incremental-bundle", "full-bundle", "state-pack"}, payloads)
+		require.Contains(t, packCommand, "git index-pack --stdin")
+		require.Contains(t, packCommand, "rev-parse --git-path shallow")
+		require.Contains(t, packCommand, localHead)
+
+		pushEvent := findEvent(setup.drainEvents(), "sandbox.sync_push")
+		require.NotNil(t, pushEvent)
+		require.Equal(t, "shallow_pack", pushEvent.Props["git_transport"])
+		require.Equal(t, "bundle_import_failed", pushEvent.Props["git_fallback_reason"])
+		require.Equal(t, len("state-pack"), pushEvent.Props["git_shallow_pack_bytes"])
+	})
+
 	t.Run("new sandbox sync removes pre-applied new files and snapshots only local dirty paths", func(t *testing.T) {
 		setup := setupTest(t)
 
@@ -1754,6 +1969,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			}
 		}
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			commands = append(commands, cmd)
 			return 0, "", nil
 		}
 
@@ -1823,7 +2039,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Contains(t, strings.Join(commands, "\n"), "git checkout -f --detach '"+localHead+"'")
 	})
 
-	t.Run("fails when missing commit bundle exceeds hard limit", func(t *testing.T) {
+	t.Run("streams large missing commit bundle without hard limit", func(t *testing.T) {
 		setup := setupTest(t)
 
 		runID := "run-bundle-too-large"
@@ -1847,17 +2063,27 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			}, nil
 		}
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+		localHeadAvailable := false
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			switch {
 			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
 				return 1, nil
 			case strings.Contains(cmd, "cat-file -e"):
+				if localHeadAvailable {
+					return 0, nil
+				}
 				return 1, nil
 			default:
 				return 0, nil
 			}
 		}
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			return 0, "", nil
+		}
+		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
+			data, _ := io.ReadAll(stdin)
+			require.Equal(t, "bundle-data", string(data))
+			localHeadAvailable = true
 			return 0, "", nil
 		}
 
@@ -1869,12 +2095,12 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Sync:       true,
 		})
 
-		require.Nil(t, result)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "exceeds the 100 MiB sandbox sync limit")
+		require.NoError(t, err)
+		require.Equal(t, runID, result.RunID)
+		require.NotContains(t, setup.mockStderr.String(), "sandbox sync limit")
 	})
 
-	t.Run("warns but streams when missing commit bundle exceeds warning threshold", func(t *testing.T) {
+	t.Run("streams large missing commit bundle without warning threshold", func(t *testing.T) {
 		setup := setupTest(t)
 
 		runID := "run-bundle-warning"
@@ -1936,7 +2162,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, runID, result.RunID)
-		require.Contains(t, setup.mockStderr.String(), "Warning: streaming 26.0 MiB of local git commits to the sandbox.")
+		require.NotContains(t, setup.mockStderr.String(), "Warning: streaming")
 	})
 
 	t.Run("returns helpful error when git is not installed", func(t *testing.T) {
