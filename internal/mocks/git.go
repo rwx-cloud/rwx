@@ -20,7 +20,7 @@ type Git struct {
 	MockGeneratePatch          func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error)
 	MockGenerateDirtyPatches   func() (git.DirtyPatches, error)
 	MockHasCommit              func(sha string) bool
-	MockCreateBundleFile       func(head string, excludes []string) (git.BundleFile, error)
+	MockPushRef                func(opts git.PushRefOptions) error
 	MockApplyPatch             func(patch []byte) *exec.Cmd
 	MockApplyPatchReject       func(patch []byte) *exec.Cmd
 	MockIsInstalled            bool
@@ -99,11 +99,11 @@ func (c *Git) HasCommit(sha string) bool {
 	return true
 }
 
-func (c *Git) CreateBundleFile(head string, excludes []string) (git.BundleFile, error) {
-	if c.MockCreateBundleFile != nil {
-		return c.MockCreateBundleFile(head, excludes)
+func (c *Git) PushRef(opts git.PushRefOptions) error {
+	if c.MockPushRef != nil {
+		return c.MockPushRef(opts)
 	}
-	return git.BundleFile{}, nil
+	return nil
 }
 
 func (c *Git) ApplyPatch(patch []byte) *exec.Cmd {

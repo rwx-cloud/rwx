@@ -399,38 +399,29 @@ func TestGenerateDirtyPatches(t *testing.T) {
 	require.Equal(t, "staged.txt", cachedNames)
 }
 
-func TestCreateBundleFile(t *testing.T) {
+func TestPushRef(t *testing.T) {
 	source := t.TempDir()
 	mustGit(t, source, "init")
 	mustGit(t, source, "config", "user.email", "test@example.com")
 	mustGit(t, source, "config", "user.name", "Test")
-	require.NoError(t, os.WriteFile(filepath.Join(source, "base.txt"), []byte("base\n"), 0o644))
-	mustGit(t, source, "add", "base.txt")
-	mustGit(t, source, "commit", "-m", "base")
-	base := mustGit(t, source, "rev-parse", "HEAD")
-
-	target := t.TempDir()
-	mustGit(t, target, "clone", source, ".")
-
-	require.NoError(t, os.WriteFile(filepath.Join(source, "feature.txt"), []byte("feature\n"), 0o644))
-	mustGit(t, source, "add", "feature.txt")
-	mustGit(t, source, "commit", "-m", "feature")
+	require.NoError(t, os.WriteFile(filepath.Join(source, "pushed.txt"), []byte("pushed\n"), 0o644))
+	mustGit(t, source, "add", "pushed.txt")
+	mustGit(t, source, "commit", "-m", "pushed")
 	head := mustGit(t, source, "rev-parse", "HEAD")
 
+	target := t.TempDir()
+	mustGit(t, target, "init", "--bare")
+
 	client := &git.Client{Binary: "git", Dir: source}
-	bundle, err := client.CreateBundleFile(head, []string{base})
+	err := client.PushRef(git.PushRefOptions{
+		Remote:  target,
+		Refspec: head + ":refs/rwx/push/test",
+		Env:     []string{"RWX_TEST_PUSH_ENV=1"},
+	})
+
 	require.NoError(t, err)
-	defer os.Remove(bundle.Path)
-	require.NotZero(t, bundle.Size)
-	require.True(t, strings.HasPrefix(bundle.Ref, "refs/rwx/bundles/"))
-
-	mustGit(t, target, "fetch", bundle.Path, bundle.Ref+":"+bundle.Ref)
-	fetched := mustGit(t, target, "rev-parse", bundle.Ref)
-	require.Equal(t, head, fetched)
-
-	showRef := exec.Command("git", "show-ref", "--verify", bundle.Ref)
-	showRef.Dir = source
-	require.Error(t, showRef.Run(), "temporary bundle ref should be removed")
+	pushed := mustGit(t, target, "rev-parse", "refs/rwx/push/test")
+	require.Equal(t, head, pushed)
 }
 
 func TestGeneratePatchFile(t *testing.T) {

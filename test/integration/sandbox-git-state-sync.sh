@@ -81,7 +81,7 @@ ORIGINAL_HEAD=$(git rev-parse HEAD)
 ORIGINAL_BRANCH=$(git branch --show-current)
 TEST_ID="rwx-sandbox-git-state-$$"
 TEMP_BRANCHES=(
-  "${TEST_ID}-bundle"
+  "${TEST_ID}-push"
   "${TEST_ID}-feature-rebase"
   "${TEST_ID}-main-rebase"
   "${TEST_ID}-feature-merge"
@@ -92,7 +92,7 @@ TEMP_BRANCHES=(
   "${TEST_ID}-dirty-state"
 )
 TEST_FILES=(
-  integration-bundled-commit.txt
+  integration-pushed-commit.txt
   integration-feature-before-rebase.txt
   integration-main-after-rebase.txt
   integration-feature-merge.txt
@@ -135,11 +135,11 @@ fi
 rm -rf .rwx/sandboxes
 require_clean_worktree
 
-echo "Scenario: unpushed local commits are bundled and become sandbox HEAD"
-git switch -C "${TEST_ID}-bundle" "$ORIGINAL_HEAD" >/dev/null
-commit_file "integration-bundled-commit.txt" "bundled commit content" "integration bundled commit"
+echo "Scenario: unpushed local commits are pushed and become sandbox HEAD"
+git switch -C "${TEST_ID}-push" "$ORIGINAL_HEAD" >/dev/null
+commit_file "integration-pushed-commit.txt" "pushed commit content" "integration pushed commit"
 assert_sandbox_head_matches
-assert_sandbox_file_content "integration-bundled-commit.txt" "bundled commit content"
+assert_sandbox_file_content "integration-pushed-commit.txt" "pushed commit content"
 
 echo "Scenario: rebased branch carries newer main commits into reused sandbox"
 git switch -C "${TEST_ID}-feature-rebase" "$ORIGINAL_HEAD" >/dev/null
