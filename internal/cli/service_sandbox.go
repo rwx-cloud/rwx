@@ -1482,6 +1482,10 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 		if !jsonMode {
 			fmt.Fprintf(s.Stderr, "Warning: %d LFS file(s) changed locally and cannot be synced.\n", patches.LFSChangedFiles.Count)
 		}
+		if err := s.snapshotSandboxSyncRef(); err != nil {
+			syncPushErr = err
+			return patchBytes, syncPushErr
+		}
 		return patchBytes, nil
 	}
 
@@ -1714,7 +1718,7 @@ func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo
 	return git.PushRefOptions{
 		Remote:  fmt.Sprintf("mint-cli@%s:.", alias),
 		Refspec: fmt.Sprintf("%s:%s", localHead, remoteRef),
-		Env:     []string{"GIT_SSH_COMMAND=" + sshCommand},
+		Env:     []string{"GIT_SSH_COMMAND=" + sshCommand, "GIT_LFS_SKIP_PUSH=1"},
 	}, cleanup, nil
 }
 
@@ -1726,11 +1730,12 @@ func (s Service) sandboxHasCommit(sha string) bool {
 func (s Service) checkoutSandboxHead(localHead string) error {
 	head := quoteShellArg(localHead)
 	branch := s.GitClient.GetBranch()
+	git := "GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false /usr/bin/git"
 	var cmd string
 	if branch == "" {
-		cmd = fmt.Sprintf("/usr/bin/git checkout -f --detach %s >/dev/null 2>&1 && /usr/bin/git reset --hard %s >/dev/null 2>&1", head, head)
+		cmd = fmt.Sprintf("%s checkout -f --detach %s >/dev/null 2>&1 && %s reset --hard %s >/dev/null 2>&1", git, head, git, head)
 	} else {
-		cmd = fmt.Sprintf("/usr/bin/git checkout -f -B %s %s >/dev/null 2>&1 && /usr/bin/git reset --hard %s >/dev/null 2>&1", quoteShellArg(branch), head, head)
+		cmd = fmt.Sprintf("%s checkout -f -B %s %s >/dev/null 2>&1 && %s reset --hard %s >/dev/null 2>&1", git, quoteShellArg(branch), head, git, head)
 	}
 
 	exitCode, err := s.SSHClient.ExecuteCommand(cmd)

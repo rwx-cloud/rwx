@@ -61,7 +61,11 @@ run_and_capture_output() {
   shift
 
   set +e
-  "$@" 2>&1 | tee "$output_file"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 300 "$@" 2>&1 | tee "$output_file"
+  else
+    "$@" 2>&1 | tee "$output_file"
+  fi
   local exit_code=${PIPESTATUS[0]}
   set -e
 
@@ -111,6 +115,29 @@ assert_local_file_content() {
   if [ "$actual" != "$expected" ]; then
     fail "${file} content mismatch locally (expected: ${expected}, actual: ${actual})"
   fi
+}
+
+start_git_state_sandbox() {
+  if [ -n "$SANDBOX_RUN_ID" ]; then
+    "${RWX_CLI}" sandbox stop --id "$SANDBOX_RUN_ID" >/dev/null 2>&1 || true
+    SANDBOX_RUN_ID=""
+  fi
+
+  local sandbox_result
+  sandbox_result=$("${RWX_CLI}" sandbox start "$SANDBOX_CONFIG" --json --init ref=main --init "cli=${COMMIT_SHA}" --wait)
+  SANDBOX_RUN_ID=$(echo "$sandbox_result" | jq -r ".RunID")
+
+  local sandbox_url
+  sandbox_url=$(echo "$sandbox_result" | jq -r ".RunURL // empty")
+  if [ -n "$sandbox_url" ]; then
+    echo "Sandbox URL: ${sandbox_url}"
+    echo "$sandbox_url" > "$RWX_LINKS/Sandbox Run"
+  fi
+  if [ -z "$SANDBOX_RUN_ID" ] || [ "$SANDBOX_RUN_ID" = "null" ]; then
+    echo "$sandbox_result"
+    fail "sandbox start did not return a run id"
+  fi
+  rm -rf .rwx/sandboxes
 }
 
 require_clean_worktree
@@ -166,18 +193,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-sandbox_result=$("${RWX_CLI}" sandbox start "$SANDBOX_CONFIG" --json --init ref=main --init "cli=${COMMIT_SHA}" --wait)
-SANDBOX_RUN_ID=$(echo "$sandbox_result" | jq -r ".RunID")
-sandbox_url=$(echo "$sandbox_result" | jq -r ".RunURL // empty")
-if [ -n "$sandbox_url" ]; then
-  echo "Sandbox URL: ${sandbox_url}"
-  echo "$sandbox_url" > "$RWX_LINKS/Sandbox Run"
-fi
-if [ -z "$SANDBOX_RUN_ID" ] || [ "$SANDBOX_RUN_ID" = "null" ]; then
-  echo "$sandbox_result"
-  fail "sandbox start did not return a run id"
-fi
-rm -rf .rwx/sandboxes
+start_git_state_sandbox
 require_clean_worktree
 
 echo "Scenario: unpushed local commits are pushed and become sandbox HEAD"
@@ -263,6 +279,9 @@ if [ "$lfs_push_exit" -eq 0 ]; then
 fi
 echo "$lfs_push_output" | grep -q "LFS file(s) changed locally and cannot be synced to the sandbox" || fail "missing LFS sync error for committed LFS object: ${lfs_push_output}"
 echo "$lfs_push_output" | grep -q "integration-lfs-push.bin" || fail "missing committed LFS file path in error: ${lfs_push_output}"
+
+echo "Restarting sandbox after expected LFS sync failure"
+start_git_state_sandbox
 
 echo "Scenario: dirty LFS files are reported and skipped by patch sync"
 git switch -C "${TEST_ID}-lfs-patch" "$ORIGINAL_HEAD" >/dev/null

@@ -1287,7 +1287,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return 0, nil
 		}
 
+		var commands []string
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			commands = append(commands, cmd)
 			return 0, nil
 		}
 
@@ -1309,6 +1311,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Equal(t, 0, result.ExitCode)
 		require.False(t, syncPatchApplied)
 		require.Contains(t, setup.mockStderr.String(), "LFS file(s) changed")
+		require.Contains(t, strings.Join(commands, "\n"), "update-ref refs/rwx-sync HEAD")
 	})
 
 	t.Run("returns error when git apply fails", func(t *testing.T) {
@@ -1554,13 +1557,14 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Contains(t, pushOpts.Remote, "mint-cli@rwx-sandbox-")
 		require.True(t, strings.HasSuffix(pushOpts.Remote, ":."))
 		require.True(t, strings.HasPrefix(pushOpts.Refspec, localHead+":refs/rwx/push/"))
-		require.Len(t, pushOpts.Env, 1)
+		require.Len(t, pushOpts.Env, 2)
 		require.Contains(t, pushOpts.Env[0], "GIT_SSH_COMMAND=ssh")
 		require.Contains(t, pushOpts.Env[0], "-F /dev/null")
 		require.Contains(t, pushOpts.Env[0], "HostName=192.168.1.1")
 		require.Contains(t, pushOpts.Env[0], "HostKeyAlias=rwx-sandbox-")
 		require.Contains(t, pushOpts.Env[0], "StrictHostKeyChecking=yes")
 		require.Contains(t, pushOpts.Env[0], "-p 22")
+		require.Equal(t, "GIT_LFS_SKIP_PUSH=1", pushOpts.Env[1])
 		require.Contains(t, strings.Join(commandOrder, "\n"), "git fetch --prune origin")
 		require.Contains(t, strings.Join(commandOrder, "\n"), "git checkout -f -B 'feature/sync' '"+localHead+"'")
 		require.Contains(t, strings.Join(commandOrder, "\n"), "git write-tree")
