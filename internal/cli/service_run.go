@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -88,6 +89,34 @@ func appendWorkflowUploadEntry(entries []RwxDirectoryEntry, runDef RwxDirectoryE
 	})
 
 	return entries
+}
+
+func runPatchPathspec(relativeRunDefinitionPath, rwxDirectoryPath string) []string {
+	pathspec := []string{".", ":!" + filepath.ToSlash(relativeRunDefinitionPath)}
+
+	relativeRwxDirectoryPath := filepath.ToSlash(relativePathspecFromWd(rwxDirectoryPath))
+	if relativeRwxDirectoryPath == "" || filepath.IsAbs(relativeRwxDirectoryPath) || relativeRwxDirectoryPath == ".." || strings.HasPrefix(relativeRwxDirectoryPath, "../") {
+		return pathspec
+	}
+
+	for _, runtimeDir := range []string{"sandboxes", "downloads", "test-suites"} {
+		pathspec = append(pathspec, ":!"+path.Join(relativeRwxDirectoryPath, runtimeDir))
+	}
+
+	return pathspec
+}
+
+func relativePathspecFromWd(path string) string {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return relativePathFromWd(path)
+	}
+
+	if resolved, err := filepath.EvalSymlinks(absPath); err == nil {
+		return relativePathFromWd(resolved)
+	}
+
+	return relativePathFromWd(absPath)
 }
 
 type InitiateRunConfig struct {
@@ -198,7 +227,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 
 	if patchable {
 		var patchErr error
-		patchFile, patchErr = s.GitClient.GeneratePatchFile(patchDir, []string{".", ":!" + relativeRunDefinitionPath})
+		patchFile, patchErr = s.GitClient.GeneratePatchFile(patchDir, runPatchPathspec(relativeRunDefinitionPath, rwxDirectoryPath))
 		if patchErr != nil {
 			errorMessage = patchErr.Error()
 			fmt.Fprintf(s.Stderr, "Warning: failed to generate patch: %s\n\n", errorMessage)
