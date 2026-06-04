@@ -1692,8 +1692,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.True(t, pushed)
 		require.Contains(t, err.Error(), "1 LFS file(s) changed locally and cannot be synced to the sandbox:")
 		require.Contains(t, err.Error(), "  large.bin")
-		require.Contains(t, err.Error(), "Git LFS check output:")
-		require.Contains(t, err.Error(), "objects: missing: large.bin")
+		require.NotContains(t, err.Error(), "Git LFS check output:")
+		require.NotContains(t, err.Error(), "objects: missing: large.bin")
 
 		pushIndex := slices.IndexFunc(commandOrder, func(cmd string) bool {
 			return strings.HasPrefix(cmd, "git push ")

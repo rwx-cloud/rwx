@@ -1603,7 +1603,7 @@ func sandboxLFSFsckError(localHead, output string, exitCode int) error {
 	output = strings.TrimSpace(output)
 	files := sandboxLFSFilesFromFsckOutput(output)
 	if len(files) > 0 {
-		return fmt.Errorf("%d LFS file(s) changed locally and cannot be synced to the sandbox:\n%s\n\nGit LFS check output:\n%s", len(files), indentLines(files), output)
+		return fmt.Errorf("%d LFS file(s) changed locally and cannot be synced to the sandbox:\n%s", len(files), indentLines(files))
 	}
 	if output == "" {
 		return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s (git lfs fsck exit code %d)", localHead, exitCode)
