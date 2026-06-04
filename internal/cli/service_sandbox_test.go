@@ -1618,6 +1618,90 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Equal(t, "unstaged-patch", stdinPayloads[1])
 	})
 
+	t.Run("pushes missing commits before failing on broken sandbox LFS objects", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-lfs-push"
+		address := "192.168.1.1:22"
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetBranch = "feature/lfs-push"
+		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+			t.Fatal("dirty patches should not be generated after broken LFS objects are detected")
+			return git.DirtyPatches{}, nil
+		}
+
+		var commandOrder []string
+		pushed := false
+		setup.mockGit.MockPushRef = func(opts git.PushRefOptions) error {
+			pushed = true
+			commandOrder = append(commandOrder, "git push "+opts.Remote+" "+opts.Refspec)
+			return nil
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			return nil
+		}
+		catFileChecks := 0
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			commandOrder = append(commandOrder, cmd)
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				catFileChecks++
+				if catFileChecks < 3 {
+					return 1, nil
+				}
+				return 0, nil
+			default:
+				return 0, nil
+			}
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			commandOrder = append(commandOrder, cmd)
+			if strings.Contains(cmd, "git lfs fsck --objects") {
+				return 2, "objects: missing: large.bin (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)\n", nil
+			}
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+			Sync:       true,
+		})
+
+		require.Nil(t, result)
+		require.Error(t, err)
+		require.True(t, pushed)
+		require.Contains(t, err.Error(), "1 LFS file(s) changed locally and cannot be synced to the sandbox:")
+		require.Contains(t, err.Error(), "  large.bin")
+		require.Contains(t, err.Error(), "Git LFS check output:")
+		require.Contains(t, err.Error(), "objects: missing: large.bin")
+
+		pushIndex := slices.IndexFunc(commandOrder, func(cmd string) bool {
+			return strings.HasPrefix(cmd, "git push ")
+		})
+		fsckIndex := slices.IndexFunc(commandOrder, func(cmd string) bool {
+			return strings.Contains(cmd, "git lfs fsck --objects")
+		})
+		require.NotEqual(t, -1, pushIndex)
+		require.NotEqual(t, -1, fsckIndex)
+		require.Less(t, pushIndex, fsckIndex)
+	})
+
 	t.Run("new sandbox sync removes pre-applied new files and snapshots only local dirty paths", func(t *testing.T) {
 		setup := setupTest(t)
 

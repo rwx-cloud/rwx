@@ -268,35 +268,16 @@ func (c *Client) generatePatchData(pathspec []string) patchResult {
 		return patchResult{}
 	}
 
-	lfsChangedFiles := []string{}
-
-	for _, file := range strings.Split(strings.TrimSpace(string(files)), "\n") {
-		if file == "" {
-			continue
-		}
-		cmd := exec.Command(c.Binary, "check-attr", "filter", "--", file)
-		cmd.Dir = c.Dir
-
-		attrs, err := cmd.CombinedOutput()
-		if err != nil {
-			return patchResult{}
-		}
-
-		if strings.Contains(string(attrs), "filter: lfs") {
-			parts := strings.SplitN(string(attrs), ":", 2)
-			lfsFile := strings.TrimSpace(parts[0])
-			lfsChangedFiles = append(lfsChangedFiles, string(lfsFile))
-		}
+	lfsChanged, err := c.lfsFilesForPaths(strings.Split(strings.TrimSpace(string(files)), "\n"))
+	if err != nil {
+		return patchResult{}
 	}
 
-	if len(lfsChangedFiles) > 0 {
+	if lfsChanged.Count > 0 {
 		return patchResult{
 			sha: sha,
-			lfs: LFSChangedFilesMetadata{
-				Files: lfsChangedFiles,
-				Count: len(lfsChangedFiles),
-			},
-			ok: true,
+			lfs: lfsChanged,
+			ok:  true,
 		}
 	}
 
@@ -572,6 +553,35 @@ func (c *Client) HasCommit(sha string) bool {
 	cmd := exec.Command(c.Binary, "cat-file", "-e", sha+"^{commit}")
 	cmd.Dir = c.Dir
 	return cmd.Run() == nil
+}
+
+func (c *Client) lfsFilesForPaths(files []string) (LFSChangedFilesMetadata, error) {
+	lfsChangedFiles := []string{}
+
+	for _, file := range files {
+		if file == "" {
+			continue
+		}
+
+		cmd := exec.Command(c.Binary, "check-attr", "filter", "--", file)
+		cmd.Dir = c.Dir
+
+		attrs, err := cmd.CombinedOutput()
+		if err != nil {
+			return LFSChangedFilesMetadata{}, err
+		}
+
+		if strings.Contains(string(attrs), "filter: lfs") {
+			parts := strings.SplitN(string(attrs), ":", 2)
+			lfsFile := strings.TrimSpace(parts[0])
+			lfsChangedFiles = append(lfsChangedFiles, lfsFile)
+		}
+	}
+
+	return LFSChangedFilesMetadata{
+		Files: lfsChangedFiles,
+		Count: len(lfsChangedFiles),
+	}, nil
 }
 
 func (c *Client) PushRef(opts PushRefOptions) error {

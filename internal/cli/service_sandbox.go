@@ -1454,6 +1454,16 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 	if err := s.checkoutSandboxHead(localHead); err != nil {
+		lfsErr := s.verifySandboxLFSObjects(localHead)
+		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+		if lfsErr != nil {
+			syncPushErr = lfsErr
+			return patchBytes, syncPushErr
+		}
+		syncPushErr = err
+		return patchBytes, syncPushErr
+	}
+	if err := s.verifySandboxLFSObjects(localHead); err != nil {
 		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 		syncPushErr = err
 		return patchBytes, syncPushErr
@@ -1571,6 +1581,73 @@ func (s Service) pushLocalHeadToSandbox(localHead string, connInfo *api.SandboxC
 	}
 
 	return nil
+}
+
+func (s Service) verifySandboxLFSObjects(localHead string) error {
+	exitCode, output, err := s.SSHClient.ExecuteCommandWithOutput(sandboxLFSFsckCommand(localHead))
+	if err != nil {
+		return errors.Wrap(err, "failed to check sandbox Git LFS objects")
+	}
+	if exitCode == 0 {
+		return nil
+	}
+
+	return sandboxLFSFsckError(localHead, output, exitCode)
+}
+
+func sandboxLFSFsckError(localHead, output string, exitCode int) error {
+	output = strings.TrimSpace(output)
+	files := sandboxLFSFilesFromFsckOutput(output)
+	if len(files) > 0 {
+		return fmt.Errorf("%d LFS file(s) changed locally and cannot be synced to the sandbox:\n%s\n\nGit LFS check output:\n%s", len(files), indentLines(files), output)
+	}
+	if output == "" {
+		return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s (git lfs fsck exit code %d)", localHead, exitCode)
+	}
+	return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s.\n\nGit LFS check output:\n%s", localHead, output)
+}
+
+func sandboxLFSFilesFromFsckOutput(output string) []string {
+	seen := map[string]bool{}
+	files := []string{}
+
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "objects:") {
+			continue
+		}
+
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) < 3 {
+			continue
+		}
+
+		file := strings.TrimSpace(parts[2])
+		if idx := strings.LastIndex(file, " ("); idx != -1 {
+			file = strings.TrimSpace(file[:idx])
+		}
+		if file == "" || seen[file] {
+			continue
+		}
+
+		seen[file] = true
+		files = append(files, file)
+	}
+
+	return files
+}
+
+func indentLines(lines []string) string {
+	indented := make([]string, len(lines))
+	for i, line := range lines {
+		indented[i] = "  " + line
+	}
+	return strings.Join(indented, "\n")
+}
+
+func sandboxLFSFsckCommand(localHead string) string {
+	script := fmt.Sprintf("if /usr/bin/git lfs version >/dev/null 2>&1; then /usr/bin/git lfs fsck --objects %s 2>&1; fi", quoteShellArg(localHead))
+	return "/bin/sh -lc " + quoteShellArg(script)
 }
 
 func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo) (git.PushRefOptions, func(), error) {
