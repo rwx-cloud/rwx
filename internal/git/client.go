@@ -624,16 +624,16 @@ func (c *Client) CreateBundleFile(head string, excludes []string) (BundleFile, e
 	return BundleFile{Path: path, Ref: ref, Size: info.Size()}, nil
 }
 
-func (c *Client) CreateShallowStatePack(head string) (PackFile, error) {
+func (c *Client) shallowStateObjects(head string) ([]string, error) {
 	if head == "" {
-		return PackFile{}, fmt.Errorf("no head commit provided")
+		return nil, fmt.Errorf("no head commit provided")
 	}
 
 	rootTreeCmd := exec.Command(c.Binary, "show", "-s", "--format=%T", head)
 	rootTreeCmd.Dir = c.Dir
 	rootTreeOut, err := rootTreeCmd.CombinedOutput()
 	if err != nil {
-		return PackFile{}, fmt.Errorf("git show failed: %s", strings.TrimSpace(string(rootTreeOut)))
+		return nil, fmt.Errorf("git show failed: %s", strings.TrimSpace(string(rootTreeOut)))
 	}
 
 	objects := []string{head, strings.TrimSpace(string(rootTreeOut))}
@@ -641,7 +641,7 @@ func (c *Client) CreateShallowStatePack(head string) (PackFile, error) {
 	lsTreeCmd.Dir = c.Dir
 	lsTreeOut, err := lsTreeCmd.CombinedOutput()
 	if err != nil {
-		return PackFile{}, fmt.Errorf("git ls-tree failed: %s", strings.TrimSpace(string(lsTreeOut)))
+		return nil, fmt.Errorf("git ls-tree failed: %s", strings.TrimSpace(string(lsTreeOut)))
 	}
 
 	for _, entry := range bytes.Split(lsTreeOut, []byte{0}) {
@@ -658,11 +658,40 @@ func (c *Client) CreateShallowStatePack(head string) (PackFile, error) {
 		}
 	}
 
+	return objects, nil
+}
+
+func (c *Client) CreateShallowStatePack(head string, excludes []string) (PackFile, error) {
+	objects, err := c.shallowStateObjects(head)
+	if err != nil {
+		return PackFile{}, err
+	}
+
+	// Sandboxes are often shallow, so only subtract each known tip's current
+	// state rather than assuming its full local history exists remotely.
+	excludedObjects := make(map[string]bool)
+	for _, exclude := range excludes {
+		exclude = strings.TrimSpace(exclude)
+		if exclude == "" || exclude == head || !c.HasCommit(exclude) {
+			continue
+		}
+		excludeObjects, err := c.shallowStateObjects(exclude)
+		if err != nil {
+			continue
+		}
+		for _, object := range excludeObjects {
+			object = strings.TrimSpace(object)
+			if object != "" && object != head {
+				excludedObjects[object] = true
+			}
+		}
+	}
+
 	seen := make(map[string]bool, len(objects))
 	var objectList strings.Builder
 	for _, object := range objects {
 		object = strings.TrimSpace(object)
-		if object == "" || seen[object] {
+		if object == "" || seen[object] || excludedObjects[object] {
 			continue
 		}
 		seen[object] = true

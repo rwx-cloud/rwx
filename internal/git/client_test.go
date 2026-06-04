@@ -445,6 +445,8 @@ func TestCreateShallowStatePack(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(source, "feature.txt"), []byte("feature\n"), 0o644))
 	mustGit(t, source, "add", "feature.txt")
 	mustGit(t, source, "commit", "-m", "feature")
+	oldFeatureHead := mustGit(t, source, "rev-parse", "HEAD")
+	existingFeatureBlob := mustGit(t, source, "rev-parse", "HEAD:feature.txt")
 
 	shallow := t.TempDir()
 	mustGit(t, "", "clone", "--depth", "1", "--branch", "feature", "file://"+source, shallow)
@@ -456,12 +458,17 @@ func TestCreateShallowStatePack(t *testing.T) {
 	mustGit(t, source, "switch", "feature")
 	mustGit(t, source, "rebase", "main")
 	head := mustGit(t, source, "rev-parse", "HEAD")
+	newMainBlob := mustGit(t, source, "rev-parse", "HEAD:main.txt")
 
 	client := &git.Client{Binary: "git", Dir: source}
-	pack, err := client.CreateShallowStatePack(head)
+	pack, err := client.CreateShallowStatePack(head, []string{oldFeatureHead})
 	require.NoError(t, err)
 	defer os.Remove(pack.Path)
 	require.NotZero(t, pack.Size)
+	packedObjects := verifyPackObjects(t, pack.Path)
+	require.Contains(t, packedObjects, head)
+	require.Contains(t, packedObjects, newMainBlob)
+	require.NotContains(t, packedObjects, existingFeatureBlob)
 
 	fd, err := os.Open(pack.Path)
 	require.NoError(t, err)
@@ -484,6 +491,35 @@ func TestCreateShallowStatePack(t *testing.T) {
 	mustGit(t, shallow, "checkout", "--detach", head)
 	require.Equal(t, head, mustGit(t, shallow, "rev-parse", "HEAD"))
 	require.Equal(t, "", mustGit(t, shallow, "status", "--short"))
+}
+
+func verifyPackObjects(t *testing.T, packPath string) map[string]bool {
+	t.Helper()
+
+	dir := t.TempDir()
+	copiedPackPath := filepath.Join(dir, "pack.pack")
+	packBytes, err := os.ReadFile(packPath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(copiedPackPath, packBytes, 0o644))
+
+	indexPath := filepath.Join(dir, "pack.idx")
+	indexCmd := exec.Command("git", "index-pack", copiedPackPath)
+	indexOut, err := indexCmd.CombinedOutput()
+	require.NoError(t, err, string(indexOut))
+
+	verifyCmd := exec.Command("git", "verify-pack", "-v", indexPath)
+	verifyOut, err := verifyCmd.CombinedOutput()
+	require.NoError(t, err, string(verifyOut))
+
+	objects := map[string]bool{}
+	for _, line := range strings.Split(string(verifyOut), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || len(fields[0]) != 40 {
+			continue
+		}
+		objects[fields[0]] = true
+	}
+	return objects
 }
 
 func TestGeneratePatchFile(t *testing.T) {

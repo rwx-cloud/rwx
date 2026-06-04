@@ -79,7 +79,7 @@ type GitClient interface {
 	GenerateDirtyPatches() (git.DirtyPatches, error)
 	HasCommit(sha string) bool
 	CreateBundleFile(head string, excludes []string) (git.BundleFile, error)
-	CreateShallowStatePack(head string) (git.PackFile, error)
+	CreateShallowStatePack(head string, excludes []string) (git.PackFile, error)
 	ApplyPatch(patch []byte) *exec.Cmd
 	ApplyPatchReject(patch []byte) *exec.Cmd
 	IsInstalled() bool

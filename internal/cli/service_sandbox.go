@@ -32,9 +32,8 @@ type sandboxGitSyncTelemetry struct {
 	ExcludeCount            int
 	IncrementalBundleStatus string
 	IncrementalBundleBytes  int64
-	FullBundleStatus        string
-	FullBundleBytes         int64
 	ShallowPackStatus       string
+	ShallowPackMode         string
 	ShallowPackBytes        int64
 	FallbackReason          string
 }
@@ -45,7 +44,6 @@ func newSandboxGitSyncTelemetry() sandboxGitSyncTelemetry {
 		FetchStatus:             "skipped",
 		SandboxHeadStatus:       "skipped",
 		IncrementalBundleStatus: "skipped",
-		FullBundleStatus:        "skipped",
 		ShallowPackStatus:       "skipped",
 	}
 }
@@ -58,20 +56,19 @@ func (m sandboxGitSyncTelemetry) props() map[string]any {
 		"git_known_tip_count":           m.KnownTipCount,
 		"git_exclude_count":             m.ExcludeCount,
 		"git_incremental_bundle_status": m.IncrementalBundleStatus,
-		"git_full_bundle_status":        m.FullBundleStatus,
 		"git_shallow_pack_status":       m.ShallowPackStatus,
 	}
 	if m.BundleMode != "" {
 		props["git_bundle_mode"] = m.BundleMode
+	}
+	if m.ShallowPackMode != "" {
+		props["git_shallow_pack_mode"] = m.ShallowPackMode
 	}
 	if m.FetchExitCode != 0 {
 		props["git_fetch_exit_code"] = m.FetchExitCode
 	}
 	if m.IncrementalBundleBytes != 0 {
 		props["git_incremental_bundle_bytes"] = int(m.IncrementalBundleBytes)
-	}
-	if m.FullBundleBytes != 0 {
-		props["git_full_bundle_bytes"] = int(m.FullBundleBytes)
 	}
 	if m.ShallowPackBytes != 0 {
 		props["git_shallow_pack_bytes"] = int(m.ShallowPackBytes)
@@ -1679,26 +1676,11 @@ func (s Service) importMissingCommit(localHead string, excludes []string, teleme
 		telemetry.FallbackReason = "no_excludes"
 	}
 
-	fullBundle, err := s.GitClient.CreateBundleFile(localHead, nil)
-	if err != nil {
-		telemetry.FullBundleStatus = "create_failed"
-		if telemetry.FallbackReason == "" {
-			telemetry.FallbackReason = "full_bundle_create_failed"
-		}
-	} else {
-		telemetry.FullBundleBytes = fullBundle.Size
-		status, err := s.importGitBundle(localHead, fullBundle)
-		telemetry.FullBundleStatus = status
-		_ = os.Remove(fullBundle.Path)
-		if err == nil {
-			telemetry.Transport = "bundle"
-			telemetry.BundleMode = "full"
-			return telemetry, nil
-		}
-		telemetry.FallbackReason = "bundle_import_failed"
+	telemetry.ShallowPackMode = "target_state"
+	if len(excludes) > 0 {
+		telemetry.ShallowPackMode = "incremental"
 	}
-
-	pack, err := s.GitClient.CreateShallowStatePack(localHead)
+	pack, err := s.GitClient.CreateShallowStatePack(localHead, excludes)
 	if err != nil {
 		telemetry.ShallowPackStatus = "create_failed"
 		return telemetry, errors.Wrap(err, "failed to create shallow git state pack")
@@ -1771,7 +1753,7 @@ func (s Service) importGitBundle(localHead string, bundle git.BundleFile) (strin
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 	fetchBundleCmd := fmt.Sprintf(
-		"/bin/sh -lc 'tmp=$(mktemp /tmp/rwx-bundle.XXXXXX) || exit 1; trap \"rm -f \\\"$tmp\\\"\" EXIT; cat > \"$tmp\" || exit 1; /usr/bin/git bundle verify \"$tmp\" >/dev/null || exit 1; /usr/bin/git fetch \"$tmp\" %s:%s >/dev/null'",
+		"/bin/sh -lc 'tmp=$(mktemp /tmp/rwx-bundle.XXXXXX) || exit 1; trap \"rm -f \\\"$tmp\\\"\" EXIT; cat > \"$tmp\" || exit 1; /usr/bin/git bundle verify \"$tmp\" || exit 1; /usr/bin/git fetch \"$tmp\" %s:%s >/dev/null'",
 		bundle.Ref,
 		bundle.Ref,
 	)

@@ -21,7 +21,7 @@ type Git struct {
 	MockGenerateDirtyPatches   func() (git.DirtyPatches, error)
 	MockHasCommit              func(sha string) bool
 	MockCreateBundleFile       func(head string, excludes []string) (git.BundleFile, error)
-	MockCreateShallowStatePack func(head string) (git.PackFile, error)
+	MockCreateShallowStatePack func(head string, excludes []string) (git.PackFile, error)
 	MockApplyPatch             func(patch []byte) *exec.Cmd
 	MockApplyPatchReject       func(patch []byte) *exec.Cmd
 	MockIsInstalled            bool
@@ -107,9 +107,9 @@ func (c *Git) CreateBundleFile(head string, excludes []string) (git.BundleFile, 
 	return git.BundleFile{}, nil
 }
 
-func (c *Git) CreateShallowStatePack(head string) (git.PackFile, error) {
+func (c *Git) CreateShallowStatePack(head string, excludes []string) (git.PackFile, error) {
 	if c.MockCreateShallowStatePack != nil {
-		return c.MockCreateShallowStatePack(head)
+		return c.MockCreateShallowStatePack(head, excludes)
 	}
 	return git.PackFile{}, nil
 }
