@@ -1602,13 +1602,14 @@ func (s Service) verifySandboxLFSObjects(localHead string) error {
 func sandboxLFSFsckError(localHead, output string, exitCode int) error {
 	output = strings.TrimSpace(output)
 	files := sandboxLFSFilesFromFsckOutput(output)
+	recovery := "To recover, push your changes and reset the sandbox."
 	if len(files) > 0 {
-		return fmt.Errorf("%d LFS file(s) changed locally and cannot be synced to the sandbox:\n%s", len(files), indentLines(files))
+		return fmt.Errorf("%d LFS file(s) changed locally and cannot be synced to the sandbox:\n%s\n\n%s", len(files), indentLines(files), recovery)
 	}
 	if output == "" {
-		return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s (git lfs fsck exit code %d)", localHead, exitCode)
+		return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s (git lfs fsck exit code %d).\n\n%s", localHead, exitCode, recovery)
 	}
-	return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s.\n\nGit LFS check output:\n%s", localHead, output)
+	return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s.\n\n%s\n\nGit LFS check output:\n%s", localHead, recovery, output)
 }
 
 func sandboxLFSFilesFromFsckOutput(output string) []string {

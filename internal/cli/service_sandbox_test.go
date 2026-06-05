@@ -1692,6 +1692,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.True(t, pushed)
 		require.Contains(t, err.Error(), "1 LFS file(s) changed locally and cannot be synced to the sandbox:")
 		require.Contains(t, err.Error(), "  large.bin")
+		require.Contains(t, err.Error(), "To recover, push your changes and reset the sandbox.")
 		require.NotContains(t, err.Error(), "Git LFS check output:")
 		require.NotContains(t, err.Error(), "objects: missing: large.bin")
 

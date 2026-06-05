@@ -279,6 +279,7 @@ if [ "$lfs_push_exit" -eq 0 ]; then
 fi
 echo "$lfs_push_output" | grep -q "LFS file(s) changed locally and cannot be synced to the sandbox" || fail "missing LFS sync error for committed LFS object: ${lfs_push_output}"
 echo "$lfs_push_output" | grep -q "integration-lfs-push.bin" || fail "missing committed LFS file path in error: ${lfs_push_output}"
+echo "$lfs_push_output" | grep -q "To recover, push your changes and reset the sandbox." || fail "missing LFS sync recovery guidance: ${lfs_push_output}"
 
 echo "Restarting sandbox after expected LFS sync failure"
 start_git_state_sandbox
