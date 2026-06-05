@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,6 +22,9 @@ const (
 	sandboxDirectiveLockRequested = "__rwx_sandbox_lock_requested__"
 	sandboxDirectiveLockReleased  = "__rwx_sandbox_lock_released__"
 	rwxCLISSHUser                 = "rwx-cli"
+	// Reuse one fixed ref (force-pushed) rather than a unique ref per push so the
+	// sandbox's ref namespace doesn't accumulate dangling refs.
+	sandboxPushRef = "refs/rwx/sync-push"
 )
 
 // Config types
@@ -1455,10 +1459,12 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 	if err := s.checkoutSandboxHead(localHead); err != nil {
-		lfsErr := s.verifySandboxLFSObjects(localHead)
+		// Prefer the more actionable "missing LFS objects" error, but ignore a
+		// failure of the check itself so it can't mask the checkout error.
+		lfsMissing, _ := s.checkSandboxLFSObjects(localHead)
 		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
-		if lfsErr != nil {
-			syncPushErr = lfsErr
+		if lfsMissing != nil {
+			syncPushErr = lfsMissing
 			return patchBytes, syncPushErr
 		}
 		syncPushErr = err
@@ -1483,7 +1489,7 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 		if !jsonMode {
 			fmt.Fprintf(s.Stderr, "Warning: %d LFS file(s) changed locally and cannot be synced.\n", patches.LFSChangedFiles.Count)
 		}
-		if err := s.snapshotSandboxSyncRef(); err != nil {
+		if err := s.snapshotSandboxSyncRefForExec(isNewSandbox, patches.Files); err != nil {
 			syncPushErr = err
 			return patchBytes, syncPushErr
 		}
@@ -1502,14 +1508,8 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 		return patchBytes, syncPushErr
 	}
 
-	var snapshotErr error
-	if isNewSandbox {
-		snapshotErr = s.snapshotSandboxSyncRefForPaths(patches.Files)
-	} else {
-		snapshotErr = s.snapshotSandboxSyncRef()
-	}
-	if snapshotErr != nil {
-		syncPushErr = snapshotErr
+	if err := s.snapshotSandboxSyncRefForExec(isNewSandbox, patches.Files); err != nil {
+		syncPushErr = err
 		return patchBytes, syncPushErr
 	}
 
@@ -1569,10 +1569,10 @@ func (s Service) pushLocalHeadToSandbox(localHead string, connInfo *api.SandboxC
 	}
 
 	opts, cleanup, err := sandboxGitPushOptions(localHead, connInfo)
+	defer cleanup()
 	if err != nil {
 		return err
 	}
-	defer cleanup()
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 	pushErr := s.GitClient.PushRef(opts)
@@ -1589,15 +1589,26 @@ func (s Service) pushLocalHeadToSandbox(localHead string, connInfo *api.SandboxC
 }
 
 func (s Service) verifySandboxLFSObjects(localHead string) error {
+	missing, checkErr := s.checkSandboxLFSObjects(localHead)
+	if checkErr != nil {
+		return checkErr
+	}
+	return missing
+}
+
+// checkSandboxLFSObjects separates a detected missing-object problem (missing)
+// from a failure to run the check (checkErr), so callers can ignore the latter
+// when they already have a more specific error.
+func (s Service) checkSandboxLFSObjects(localHead string) (missing error, checkErr error) {
 	exitCode, output, err := s.SSHClient.ExecuteCommandWithOutput(sandboxLFSFsckCommand(localHead))
 	if err != nil {
-		return errors.Wrap(err, "failed to check sandbox Git LFS objects")
+		return nil, errors.Wrap(err, "failed to check sandbox Git LFS objects")
 	}
 	if exitCode == 0 {
-		return nil
+		return nil, nil
 	}
 
-	return sandboxLFSFsckError(localHead, output, exitCode)
+	return sandboxLFSFsckError(localHead, output, exitCode), nil
 }
 
 func sandboxLFSFsckError(localHead, output string, exitCode int) error {
@@ -1613,25 +1624,23 @@ func sandboxLFSFsckError(localHead, output string, exitCode int) error {
 	return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s.\n\n%s\n\nGit LFS check output:\n%s", localHead, recovery, output)
 }
 
+// lfsFsckObjectLineRe matches a per-object `git lfs fsck` line (group 1 is the
+// path). Requiring the trailing ` (<oid>)` skips status lines like
+// `objects: repair: ...` and keeps paths that contain " (" intact.
+var lfsFsckObjectLineRe = regexp.MustCompile(`^objects: [^:]+: (.+?) \([0-9a-fA-F]{40,64}\)`)
+
 func sandboxLFSFilesFromFsckOutput(output string) []string {
 	seen := map[string]bool{}
 	files := []string{}
 
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "objects:") {
+		match := lfsFsckObjectLineRe.FindStringSubmatch(line)
+		if match == nil {
 			continue
 		}
 
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) < 3 {
-			continue
-		}
-
-		file := strings.TrimSpace(parts[2])
-		if idx := strings.LastIndex(file, " ("); idx != -1 {
-			file = strings.TrimSpace(file[:idx])
-		}
+		file := strings.TrimSpace(match[1])
 		if file == "" || seen[file] {
 			continue
 		}
@@ -1657,20 +1666,19 @@ func sandboxLFSFsckCommand(localHead string) string {
 }
 
 func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo) (git.PushRefOptions, func(), error) {
-	host, port, err := net.SplitHostPort(connInfo.Address)
-	if err != nil {
-		return git.PushRefOptions{}, func() {}, errors.Wrap(err, "unable to parse sandbox SSH address")
-	}
-
-	alias := fmt.Sprintf("rwx-sandbox-%d-%d", os.Getpid(), time.Now().UnixNano())
-	remoteRef := fmt.Sprintf("refs/rwx/push/%d-%d", os.Getpid(), time.Now().UnixNano())
-
 	paths := []string{}
 	cleanup := func() {
 		for _, path := range paths {
 			_ = os.Remove(path)
 		}
 	}
+
+	host, port, err := net.SplitHostPort(connInfo.Address)
+	if err != nil {
+		return git.PushRefOptions{}, cleanup, errors.Wrap(err, "unable to parse sandbox SSH address")
+	}
+
+	alias := fmt.Sprintf("rwx-sandbox-%d-%d", os.Getpid(), time.Now().UnixNano())
 
 	keyFile, err := os.CreateTemp("", "rwx-sandbox-key-*")
 	if err != nil {
@@ -1679,29 +1687,24 @@ func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo
 	keyPath := keyFile.Name()
 	paths = append(paths, keyPath)
 	if err := keyFile.Close(); err != nil {
-		cleanup()
-		return git.PushRefOptions{}, func() {}, err
+		return git.PushRefOptions{}, cleanup, err
 	}
 	if err := os.WriteFile(keyPath, []byte(connInfo.PrivateUserKey), 0o600); err != nil {
-		cleanup()
-		return git.PushRefOptions{}, func() {}, err
+		return git.PushRefOptions{}, cleanup, err
 	}
 
 	knownHostsFile, err := os.CreateTemp("", "rwx-sandbox-known-hosts-*")
 	if err != nil {
-		cleanup()
-		return git.PushRefOptions{}, func() {}, err
+		return git.PushRefOptions{}, cleanup, err
 	}
 	knownHostsPath := knownHostsFile.Name()
 	paths = append(paths, knownHostsPath)
 	if err := knownHostsFile.Close(); err != nil {
-		cleanup()
-		return git.PushRefOptions{}, func() {}, err
+		return git.PushRefOptions{}, cleanup, err
 	}
 	knownHosts := fmt.Sprintf("%s %s\n", alias, strings.TrimSpace(connInfo.PublicHostKey))
 	if err := os.WriteFile(knownHostsPath, []byte(knownHosts), 0o600); err != nil {
-		cleanup()
-		return git.PushRefOptions{}, func() {}, err
+		return git.PushRefOptions{}, cleanup, err
 	}
 
 	sshCommand := shellescape.QuoteCommand([]string{
@@ -1719,7 +1722,7 @@ func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo
 
 	return git.PushRefOptions{
 		Remote:  fmt.Sprintf("%s@%s:.", rwxCLISSHUser, alias),
-		Refspec: fmt.Sprintf("%s:%s", localHead, remoteRef),
+		Refspec: fmt.Sprintf("+%s:%s", localHead, sandboxPushRef),
 		Env:     []string{"GIT_SSH_COMMAND=" + sshCommand, "GIT_LFS_SKIP_PUSH=1"},
 	}, cleanup, nil
 }
@@ -1808,6 +1811,16 @@ func (s Service) applyPatchToSandbox(command string, patch []byte) error {
 		return errors.WrapSentinel(fmt.Errorf("failed to sync changes to sandbox: git apply failed with exit code %d", exitCode), errors.ErrPatch)
 	}
 	return nil
+}
+
+// snapshotSandboxSyncRefForExec records the post-sync baseline. A new sandbox
+// stages only local dirty paths so server pre-applied files aren't baked into
+// the baseline; a reused sandbox already matches local state.
+func (s Service) snapshotSandboxSyncRefForExec(isNewSandbox bool, paths []string) error {
+	if isNewSandbox {
+		return s.snapshotSandboxSyncRefForPaths(paths)
+	}
+	return s.snapshotSandboxSyncRef()
 }
 
 func (s Service) snapshotSandboxSyncRef() error {
