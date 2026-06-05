@@ -20,8 +20,7 @@ import (
 const (
 	sandboxDirectiveLockRequested = "__rwx_sandbox_lock_requested__"
 	sandboxDirectiveLockReleased  = "__rwx_sandbox_lock_released__"
-	maxSandboxGitBundleBytes      = 100 * 1024 * 1024
-	warnSandboxGitBundleBytes     = 25 * 1024 * 1024
+	rwxCLISSHUser                 = "rwx-cli"
 )
 
 // Config types
@@ -767,7 +766,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	var syncPushPatchBytes int
 	if cfg.Sync {
 		syncPushStart := time.Now()
-		patchBytes, err := s.prepareSandboxForExec(cfg.Json, isNewSandbox, localHeadForSync)
+		patchBytes, err := s.prepareSandboxForExec(cfg.Json, isNewSandbox, localHeadForSync, connInfo)
 		syncPushMs = time.Since(syncPushStart).Milliseconds()
 		syncPushPatchBytes = patchBytes
 		if err != nil {
@@ -1429,7 +1428,7 @@ func (s Service) revertSandboxToGitState(localHead string) error {
 	return nil
 }
 
-func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHead string) (int, error) {
+func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
 	if localHead == "" {
 		return 0, fmt.Errorf("sandbox sync requires a git repository with a valid HEAD")
 	}
@@ -1449,13 +1448,23 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 		})
 	}()
 
-	if err := s.ensureSandboxHasCommit(localHead, jsonMode); err != nil {
+	if err := s.ensureSandboxHasCommit(localHead, connInfo); err != nil {
 		syncPushErr = err
 		return patchBytes, syncPushErr
 	}
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 	if err := s.checkoutSandboxHead(localHead); err != nil {
+		lfsErr := s.verifySandboxLFSObjects(localHead)
+		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+		if lfsErr != nil {
+			syncPushErr = lfsErr
+			return patchBytes, syncPushErr
+		}
+		syncPushErr = err
+		return patchBytes, syncPushErr
+	}
+	if err := s.verifySandboxLFSObjects(localHead); err != nil {
 		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 		syncPushErr = err
 		return patchBytes, syncPushErr
@@ -1473,6 +1482,10 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 		lfsSkippedCount = patches.LFSChangedFiles.Count
 		if !jsonMode {
 			fmt.Fprintf(s.Stderr, "Warning: %d LFS file(s) changed locally and cannot be synced.\n", patches.LFSChangedFiles.Count)
+		}
+		if err := s.snapshotSandboxSyncRef(); err != nil {
+			syncPushErr = err
+			return patchBytes, syncPushErr
 		}
 		return patchBytes, nil
 	}
@@ -1524,7 +1537,7 @@ func (s Service) warnUnresolvedRejectFiles() {
 	fmt.Fprintln(s.Stderr, "These will be synced to the sandbox and may cause issues. Resolve and delete them when possible.")
 }
 
-func (s Service) ensureSandboxHasCommit(localHead string, jsonMode bool) error {
+func (s Service) ensureSandboxHasCommit(localHead string, connInfo *api.SandboxConnectionInfo) error {
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 	gitDirExitCode, gitDirErr := s.SSHClient.ExecuteCommand("test -d .git || test -f .git")
 	if gitDirErr != nil {
@@ -1541,80 +1554,174 @@ func (s Service) ensureSandboxHasCommit(localHead string, jsonMode bool) error {
 		_, _ = s.SSHClient.ExecuteCommand("/usr/bin/git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1")
 		hasCommit = s.sandboxHasCommit(localHead)
 	}
-
-	var knownTips []string
-	if !hasCommit {
-		knownTips = s.remoteKnownTips()
-	}
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 
 	if hasCommit {
 		return nil
 	}
 
-	excludes := make([]string, 0, len(knownTips))
-	seen := make(map[string]bool, len(knownTips))
-	for _, tip := range knownTips {
-		tip = strings.TrimSpace(tip)
-		if tip == "" || seen[tip] || !s.GitClient.HasCommit(tip) {
-			continue
-		}
-		seen[tip] = true
-		excludes = append(excludes, tip)
+	return s.pushLocalHeadToSandbox(localHead, connInfo)
+}
+
+func (s Service) pushLocalHeadToSandbox(localHead string, connInfo *api.SandboxConnectionInfo) error {
+	if connInfo == nil {
+		return fmt.Errorf("sandbox connection info is required to push local commits")
 	}
 
-	bundle, err := s.GitClient.CreateBundleFile(localHead, excludes)
+	opts, cleanup, err := sandboxGitPushOptions(localHead, connInfo)
 	if err != nil {
-		return errors.Wrap(err, "failed to create git bundle")
+		return err
 	}
-	if bundle.Path == "" {
-		return errors.New("failed to create git bundle")
-	}
-	if bundle.Ref == "" {
-		return errors.New("failed to create git bundle ref")
-	}
-	defer os.Remove(bundle.Path)
-
-	if bundle.Size > maxSandboxGitBundleBytes {
-		return fmt.Errorf("git bundle is %.1f MiB, which exceeds the %.0f MiB sandbox sync limit", float64(bundle.Size)/(1024*1024), float64(maxSandboxGitBundleBytes)/(1024*1024))
-	}
-	if bundle.Size > warnSandboxGitBundleBytes && !jsonMode {
-		fmt.Fprintf(s.Stderr, "Warning: streaming %.1f MiB of local git commits to the sandbox.\n", float64(bundle.Size)/(1024*1024))
-	}
-
-	fd, err := os.Open(bundle.Path)
-	if err != nil {
-		return errors.Wrap(err, "failed to open git bundle")
-	}
-	defer fd.Close()
+	defer cleanup()
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	fetchBundleCmd := fmt.Sprintf(
-		"/bin/sh -lc 'tmp=$(mktemp /tmp/rwx-bundle.XXXXXX) || exit 1; trap \"rm -f \\\"$tmp\\\"\" EXIT; cat > \"$tmp\" || exit 1; /usr/bin/git bundle verify \"$tmp\" >/dev/null || exit 1; /usr/bin/git fetch \"$tmp\" %s:%s >/dev/null'",
-		bundle.Ref,
-		bundle.Ref,
-	)
-	exitCode, output, streamErr := s.SSHClient.ExecuteCommandWithStdinAndCombinedOutput(
-		fetchBundleCmd,
-		fd,
-	)
-	hasCommit = streamErr == nil && exitCode == 0 && s.sandboxHasCommit(localHead)
+	pushErr := s.GitClient.PushRef(opts)
+	hasCommit := pushErr == nil && s.sandboxHasCommit(localHead)
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
-	if streamErr != nil {
-		return errors.Wrap(streamErr, "failed to stream git bundle to sandbox")
+	if pushErr != nil {
+		return errors.Wrap(pushErr, "failed to push git commits to sandbox")
 	}
-	if exitCode != 0 {
-		if output = strings.TrimSpace(output); output != "" {
-			return fmt.Errorf("failed to import git bundle in sandbox: %s", output)
-		}
-		return fmt.Errorf("failed to import git bundle in sandbox (exit code %d)", exitCode)
-	}
-
 	if !hasCommit {
-		return fmt.Errorf("sandbox still does not contain local commit %s after bundle import", localHead)
+		return fmt.Errorf("sandbox still does not contain local commit %s after git push", localHead)
 	}
 
 	return nil
+}
+
+func (s Service) verifySandboxLFSObjects(localHead string) error {
+	exitCode, output, err := s.SSHClient.ExecuteCommandWithOutput(sandboxLFSFsckCommand(localHead))
+	if err != nil {
+		return errors.Wrap(err, "failed to check sandbox Git LFS objects")
+	}
+	if exitCode == 0 {
+		return nil
+	}
+
+	return sandboxLFSFsckError(localHead, output, exitCode)
+}
+
+func sandboxLFSFsckError(localHead, output string, exitCode int) error {
+	output = strings.TrimSpace(output)
+	files := sandboxLFSFilesFromFsckOutput(output)
+	recovery := "To recover, push your changes and reset the sandbox."
+	if len(files) > 0 {
+		return fmt.Errorf("%d LFS file(s) changed locally and cannot be synced to the sandbox:\n%s\n\n%s", len(files), indentLines(files), recovery)
+	}
+	if output == "" {
+		return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s (git lfs fsck exit code %d).\n\n%s", localHead, exitCode, recovery)
+	}
+	return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s.\n\n%s\n\nGit LFS check output:\n%s", localHead, recovery, output)
+}
+
+func sandboxLFSFilesFromFsckOutput(output string) []string {
+	seen := map[string]bool{}
+	files := []string{}
+
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "objects:") {
+			continue
+		}
+
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) < 3 {
+			continue
+		}
+
+		file := strings.TrimSpace(parts[2])
+		if idx := strings.LastIndex(file, " ("); idx != -1 {
+			file = strings.TrimSpace(file[:idx])
+		}
+		if file == "" || seen[file] {
+			continue
+		}
+
+		seen[file] = true
+		files = append(files, file)
+	}
+
+	return files
+}
+
+func indentLines(lines []string) string {
+	indented := make([]string, len(lines))
+	for i, line := range lines {
+		indented[i] = "  " + line
+	}
+	return strings.Join(indented, "\n")
+}
+
+func sandboxLFSFsckCommand(localHead string) string {
+	script := fmt.Sprintf("if /usr/bin/git lfs version >/dev/null 2>&1; then /usr/bin/git lfs fsck --objects %s 2>&1; fi", quoteShellArg(localHead))
+	return "/bin/sh -lc " + quoteShellArg(script)
+}
+
+func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo) (git.PushRefOptions, func(), error) {
+	host, port, err := net.SplitHostPort(connInfo.Address)
+	if err != nil {
+		return git.PushRefOptions{}, func() {}, errors.Wrap(err, "unable to parse sandbox SSH address")
+	}
+
+	alias := fmt.Sprintf("rwx-sandbox-%d-%d", os.Getpid(), time.Now().UnixNano())
+	remoteRef := fmt.Sprintf("refs/rwx/push/%d-%d", os.Getpid(), time.Now().UnixNano())
+
+	paths := []string{}
+	cleanup := func() {
+		for _, path := range paths {
+			_ = os.Remove(path)
+		}
+	}
+
+	keyFile, err := os.CreateTemp("", "rwx-sandbox-key-*")
+	if err != nil {
+		return git.PushRefOptions{}, cleanup, err
+	}
+	keyPath := keyFile.Name()
+	paths = append(paths, keyPath)
+	if err := keyFile.Close(); err != nil {
+		cleanup()
+		return git.PushRefOptions{}, func() {}, err
+	}
+	if err := os.WriteFile(keyPath, []byte(connInfo.PrivateUserKey), 0o600); err != nil {
+		cleanup()
+		return git.PushRefOptions{}, func() {}, err
+	}
+
+	knownHostsFile, err := os.CreateTemp("", "rwx-sandbox-known-hosts-*")
+	if err != nil {
+		cleanup()
+		return git.PushRefOptions{}, func() {}, err
+	}
+	knownHostsPath := knownHostsFile.Name()
+	paths = append(paths, knownHostsPath)
+	if err := knownHostsFile.Close(); err != nil {
+		cleanup()
+		return git.PushRefOptions{}, func() {}, err
+	}
+	knownHosts := fmt.Sprintf("%s %s\n", alias, strings.TrimSpace(connInfo.PublicHostKey))
+	if err := os.WriteFile(knownHostsPath, []byte(knownHosts), 0o600); err != nil {
+		cleanup()
+		return git.PushRefOptions{}, func() {}, err
+	}
+
+	sshCommand := shellescape.QuoteCommand([]string{
+		"ssh",
+		"-F", "/dev/null",
+		"-i", keyPath,
+		"-o", "BatchMode=yes",
+		"-o", "IdentitiesOnly=yes",
+		"-o", "StrictHostKeyChecking=yes",
+		"-o", "UserKnownHostsFile=" + knownHostsPath,
+		"-o", "HostKeyAlias=" + alias,
+		"-o", "HostName=" + host,
+		"-p", port,
+	})
+
+	return git.PushRefOptions{
+		Remote:  fmt.Sprintf("%s@%s:.", rwxCLISSHUser, alias),
+		Refspec: fmt.Sprintf("%s:%s", localHead, remoteRef),
+		Env:     []string{"GIT_SSH_COMMAND=" + sshCommand, "GIT_LFS_SKIP_PUSH=1"},
+	}, cleanup, nil
 }
 
 func (s Service) sandboxHasCommit(sha string) bool {
@@ -1622,22 +1729,15 @@ func (s Service) sandboxHasCommit(sha string) bool {
 	return err == nil && exitCode == 0
 }
 
-func (s Service) remoteKnownTips() []string {
-	exitCode, output, err := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git for-each-ref --format='%(objectname)' refs/heads refs/remotes refs/tags refs/rwx refs/rwx-sync 2>/dev/null")
-	if err != nil || exitCode != 0 {
-		return nil
-	}
-	return strings.Split(strings.TrimSpace(output), "\n")
-}
-
 func (s Service) checkoutSandboxHead(localHead string) error {
 	head := quoteShellArg(localHead)
 	branch := s.GitClient.GetBranch()
+	git := "GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false /usr/bin/git"
 	var cmd string
 	if branch == "" {
-		cmd = fmt.Sprintf("/usr/bin/git checkout -f --detach %s >/dev/null 2>&1 && /usr/bin/git reset --hard %s >/dev/null 2>&1", head, head)
+		cmd = fmt.Sprintf("%s checkout -f --detach %s >/dev/null 2>&1 && %s reset --hard %s >/dev/null 2>&1", git, head, git, head)
 	} else {
-		cmd = fmt.Sprintf("/usr/bin/git checkout -f -B %s %s >/dev/null 2>&1 && /usr/bin/git reset --hard %s >/dev/null 2>&1", quoteShellArg(branch), head, head)
+		cmd = fmt.Sprintf("%s checkout -f -B %s %s >/dev/null 2>&1 && %s reset --hard %s >/dev/null 2>&1", git, quoteShellArg(branch), head, git, head)
 	}
 
 	exitCode, err := s.SSHClient.ExecuteCommand(cmd)
@@ -1985,7 +2085,7 @@ func (s Service) connectSSH(connInfo *api.SandboxConnectionInfo) error {
 	}
 
 	sshConfig := ssh.ClientConfig{
-		User:            "mint-cli",
+		User:            rwxCLISSHUser,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(privateUserKey)},
 		HostKeyCallback: ssh.FixedHostKey(publicHostKey),
 	}

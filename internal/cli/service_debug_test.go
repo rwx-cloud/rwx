@@ -48,8 +48,9 @@ AAAEC6442PQKevgYgeT0SIu9zwlnEMl6MF59ZgM+i0ByMv4eLJPqG3xnZcEQmktHj/GY2i
 			}, nil
 		}
 
-		s.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+		s.mockSSH.MockConnect = func(addr string, cfg ssh.ClientConfig) error {
 			require.Equal(t, agentAddress, addr)
+			require.Equal(t, "rwx-cli", cfg.User)
 			connectedViaSSH = true
 			return nil
 		}

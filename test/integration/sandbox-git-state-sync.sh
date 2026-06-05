@@ -30,6 +30,48 @@ commit_file() {
   git -c user.email="sandbox-integration@example.com" -c user.name="Sandbox Integration" commit -m "$message" >/dev/null
 }
 
+commit_lfs_file() {
+  local file="$1"
+  local content="$2"
+  local message="$3"
+
+  git lfs track "$file" >/dev/null
+  printf '%s\n' "$content" > "$file"
+  git add .gitattributes "$file"
+  git -c user.email="sandbox-integration@example.com" -c user.name="Sandbox Integration" commit -m "$message" >/dev/null
+}
+
+require_git_lfs() {
+  git lfs version >/dev/null 2>&1 || fail "sandbox LFS integration scenarios require git-lfs"
+}
+
+ensure_sandbox_git_lfs() {
+  "${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" --no-sync -- sh -c '
+    set -e
+    if ! /usr/bin/git lfs version >/dev/null 2>&1; then
+      sudo apt-get update >/dev/null
+      sudo apt-get install -y git-lfs >/dev/null
+    fi
+    /usr/bin/git lfs install --local >/dev/null
+  '
+}
+
+run_and_capture_output() {
+  local output_file="$1"
+  shift
+
+  set +e
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 300 "$@" 2>&1 | tee "$output_file"
+  else
+    "$@" 2>&1 | tee "$output_file"
+  fi
+  local exit_code=${PIPESTATUS[0]}
+  set -e
+
+  return "$exit_code"
+}
+
 assert_sandbox_head_matches() {
   local expected
   local actual
@@ -75,13 +117,36 @@ assert_local_file_content() {
   fi
 }
 
+start_git_state_sandbox() {
+  if [ -n "$SANDBOX_RUN_ID" ]; then
+    "${RWX_CLI}" sandbox stop --id "$SANDBOX_RUN_ID" >/dev/null 2>&1 || true
+    SANDBOX_RUN_ID=""
+  fi
+
+  local sandbox_result
+  sandbox_result=$("${RWX_CLI}" sandbox start "$SANDBOX_CONFIG" --json --init ref=main --init "cli=${COMMIT_SHA}" --wait)
+  SANDBOX_RUN_ID=$(echo "$sandbox_result" | jq -r ".RunID")
+
+  local sandbox_url
+  sandbox_url=$(echo "$sandbox_result" | jq -r ".RunURL // empty")
+  if [ -n "$sandbox_url" ]; then
+    echo "Sandbox URL: ${sandbox_url}"
+    echo "$sandbox_url" > "$RWX_LINKS/Sandbox Run"
+  fi
+  if [ -z "$SANDBOX_RUN_ID" ] || [ "$SANDBOX_RUN_ID" = "null" ]; then
+    echo "$sandbox_result"
+    fail "sandbox start did not return a run id"
+  fi
+  rm -rf .rwx/sandboxes
+}
+
 require_clean_worktree
 
 ORIGINAL_HEAD=$(git rev-parse HEAD)
 ORIGINAL_BRANCH=$(git branch --show-current)
 TEST_ID="rwx-sandbox-git-state-$$"
 TEMP_BRANCHES=(
-  "${TEST_ID}-bundle"
+  "${TEST_ID}-push"
   "${TEST_ID}-feature-rebase"
   "${TEST_ID}-main-rebase"
   "${TEST_ID}-feature-merge"
@@ -89,10 +154,12 @@ TEMP_BRANCHES=(
   "${TEST_ID}-force-move"
   "${TEST_ID}-sandbox-created"
   "${TEST_ID}-detached-source"
+  "${TEST_ID}-lfs-push"
+  "${TEST_ID}-lfs-patch"
   "${TEST_ID}-dirty-state"
 )
 TEST_FILES=(
-  integration-bundled-commit.txt
+  integration-pushed-commit.txt
   integration-feature-before-rebase.txt
   integration-main-after-rebase.txt
   integration-feature-merge.txt
@@ -102,6 +169,8 @@ TEST_FILES=(
   integration-sandbox-created-survives.txt
   integration-local-after-sandbox-created.txt
   integration-detached-head.txt
+  integration-lfs-push.bin
+  integration-lfs-patch.bin
   integration-staged-state.txt
 )
 
@@ -117,29 +186,21 @@ cleanup() {
   else
     git switch --detach "$ORIGINAL_HEAD" >/dev/null 2>&1
   fi
+  if ! git cat-file -e "$ORIGINAL_HEAD":.gitattributes >/dev/null 2>&1; then
+    rm -f .gitattributes
+  fi
   git branch -D "${TEMP_BRANCHES[@]}" >/dev/null 2>&1
 }
 trap cleanup EXIT
 
-sandbox_result=$("${RWX_CLI}" sandbox start "$SANDBOX_CONFIG" --json --init ref=main --init "cli=${COMMIT_SHA}" --wait)
-SANDBOX_RUN_ID=$(echo "$sandbox_result" | jq -r ".RunID")
-sandbox_url=$(echo "$sandbox_result" | jq -r ".RunURL // empty")
-if [ -n "$sandbox_url" ]; then
-  echo "Sandbox URL: ${sandbox_url}"
-  echo "$sandbox_url" > "$RWX_LINKS/Sandbox Run"
-fi
-if [ -z "$SANDBOX_RUN_ID" ] || [ "$SANDBOX_RUN_ID" = "null" ]; then
-  echo "$sandbox_result"
-  fail "sandbox start did not return a run id"
-fi
-rm -rf .rwx/sandboxes
+start_git_state_sandbox
 require_clean_worktree
 
-echo "Scenario: unpushed local commits are bundled and become sandbox HEAD"
-git switch -C "${TEST_ID}-bundle" "$ORIGINAL_HEAD" >/dev/null
-commit_file "integration-bundled-commit.txt" "bundled commit content" "integration bundled commit"
+echo "Scenario: unpushed local commits are pushed and become sandbox HEAD"
+git switch -C "${TEST_ID}-push" "$ORIGINAL_HEAD" >/dev/null
+commit_file "integration-pushed-commit.txt" "pushed commit content" "integration pushed commit"
 assert_sandbox_head_matches
-assert_sandbox_file_content "integration-bundled-commit.txt" "bundled commit content"
+assert_sandbox_file_content "integration-pushed-commit.txt" "pushed commit content"
 
 echo "Scenario: rebased branch carries newer main commits into reused sandbox"
 git switch -C "${TEST_ID}-feature-rebase" "$ORIGINAL_HEAD" >/dev/null
@@ -198,6 +259,50 @@ sandbox_branch=$("${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sh -c 'git 
 if [ -n "$sandbox_branch" ]; then
   fail "sandbox branch should be detached but was ${sandbox_branch}"
 fi
+
+require_git_lfs
+
+echo "Scenario: unpushed committed LFS objects fail after sandbox git push"
+ensure_sandbox_git_lfs
+git switch -C "${TEST_ID}-lfs-push" "$ORIGINAL_HEAD" >/dev/null
+echo "Creating local committed LFS object"
+commit_lfs_file "integration-lfs-push.bin" "committed lfs content" "integration committed lfs object"
+
+echo "Running sandbox exec expected to fail because the committed LFS object was not pushed"
+lfs_push_output_file=$(mktemp)
+lfs_push_exit=0
+run_and_capture_output "$lfs_push_output_file" "${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- true || lfs_push_exit=$?
+lfs_push_output=$(cat "$lfs_push_output_file")
+rm -f "$lfs_push_output_file"
+if [ "$lfs_push_exit" -eq 0 ]; then
+  fail "sandbox exec succeeded with an unpushed committed LFS object"
+fi
+echo "$lfs_push_output" | grep -q "LFS file(s) changed locally and cannot be synced to the sandbox" || fail "missing LFS sync error for committed LFS object: ${lfs_push_output}"
+echo "$lfs_push_output" | grep -q "integration-lfs-push.bin" || fail "missing committed LFS file path in error: ${lfs_push_output}"
+echo "$lfs_push_output" | grep -q "To recover, push your changes and reset the sandbox." || fail "missing LFS sync recovery guidance: ${lfs_push_output}"
+
+echo "Restarting sandbox after expected LFS sync failure"
+start_git_state_sandbox
+
+echo "Scenario: dirty LFS files are reported and skipped by patch sync"
+git switch -C "${TEST_ID}-lfs-patch" "$ORIGINAL_HEAD" >/dev/null
+git lfs track "integration-lfs-patch.bin" >/dev/null
+printf '%s\n' "dirty lfs content" > integration-lfs-patch.bin
+
+lfs_patch_output_file=$(mktemp)
+lfs_patch_exit=0
+run_and_capture_output "$lfs_patch_output_file" "${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sh -c 'test ! -e integration-lfs-patch.bin' || lfs_patch_exit=$?
+lfs_patch_output=$(cat "$lfs_patch_output_file")
+rm -f "$lfs_patch_output_file"
+if [ "$lfs_patch_exit" -ne 0 ]; then
+  fail "sandbox exec failed while checking dirty LFS patch skip: ${lfs_patch_output}"
+fi
+echo "$lfs_patch_output" | grep -q "Warning: 1 LFS file(s) changed locally and cannot be synced." || fail "missing dirty LFS warning: ${lfs_patch_output}"
+if [ ! -f integration-lfs-patch.bin ]; then
+  fail "dirty LFS file was removed locally after patch sync"
+fi
+git reset -- .gitattributes integration-lfs-patch.bin >/dev/null 2>&1 || true
+rm -f .gitattributes integration-lfs-patch.bin
 
 echo "Scenario: staged and unstaged local state keep their shape in sandbox"
 git switch -C "${TEST_ID}-dirty-state" "$ORIGINAL_HEAD" >/dev/null

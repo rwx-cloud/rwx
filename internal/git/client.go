@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 type Client struct {
@@ -234,10 +233,10 @@ func (p DirtyPatches) Size() int {
 	return len(p.Staged) + len(p.Unstaged)
 }
 
-type BundleFile struct {
-	Path string
-	Ref  string
-	Size int64
+type PushRefOptions struct {
+	Remote  string
+	Refspec string
+	Env     []string
 }
 
 // patchResult holds the result of generating patch data
@@ -269,35 +268,16 @@ func (c *Client) generatePatchData(pathspec []string) patchResult {
 		return patchResult{}
 	}
 
-	lfsChangedFiles := []string{}
-
-	for _, file := range strings.Split(strings.TrimSpace(string(files)), "\n") {
-		if file == "" {
-			continue
-		}
-		cmd := exec.Command(c.Binary, "check-attr", "filter", "--", file)
-		cmd.Dir = c.Dir
-
-		attrs, err := cmd.CombinedOutput()
-		if err != nil {
-			return patchResult{}
-		}
-
-		if strings.Contains(string(attrs), "filter: lfs") {
-			parts := strings.SplitN(string(attrs), ":", 2)
-			lfsFile := strings.TrimSpace(parts[0])
-			lfsChangedFiles = append(lfsChangedFiles, string(lfsFile))
-		}
+	lfsChanged, err := c.lfsFilesForPaths(strings.Split(strings.TrimSpace(string(files)), "\n"))
+	if err != nil {
+		return patchResult{}
 	}
 
-	if len(lfsChangedFiles) > 0 {
+	if lfsChanged.Count > 0 {
 		return patchResult{
 			sha: sha,
-			lfs: LFSChangedFilesMetadata{
-				Files: lfsChangedFiles,
-				Count: len(lfsChangedFiles),
-			},
-			ok: true,
+			lfs: lfsChanged,
+			ok:  true,
 		}
 	}
 
@@ -575,54 +555,57 @@ func (c *Client) HasCommit(sha string) bool {
 	return cmd.Run() == nil
 }
 
-func (c *Client) CreateBundleFile(head string, excludes []string) (BundleFile, error) {
-	if head == "" {
-		return BundleFile{}, fmt.Errorf("no head commit provided")
-	}
+func (c *Client) lfsFilesForPaths(files []string) (LFSChangedFilesMetadata, error) {
+	lfsChangedFiles := []string{}
 
-	tmp, err := os.CreateTemp("", "rwx-sandbox-*.bundle")
-	if err != nil {
-		return BundleFile{}, err
-	}
-	path := tmp.Name()
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(path)
-		return BundleFile{}, err
-	}
+	for _, file := range files {
+		if file == "" {
+			continue
+		}
 
-	ref := fmt.Sprintf("refs/rwx/bundles/%d-%d", os.Getpid(), time.Now().UnixNano())
-	updateCmd := exec.Command(c.Binary, "update-ref", ref, head)
-	updateCmd.Dir = c.Dir
-	if out, err := updateCmd.CombinedOutput(); err != nil {
-		_ = os.Remove(path)
-		return BundleFile{}, fmt.Errorf("git update-ref failed: %s", strings.TrimSpace(string(out)))
-	}
-	defer func() {
-		deleteCmd := exec.Command(c.Binary, "update-ref", "-d", ref)
-		deleteCmd.Dir = c.Dir
-		_ = deleteCmd.Run()
-	}()
+		cmd := exec.Command(c.Binary, "check-attr", "filter", "--", file)
+		cmd.Dir = c.Dir
 
-	args := []string{"bundle", "create", path, ref}
-	for _, exclude := range excludes {
-		if exclude != "" && c.HasCommit(exclude) {
-			args = append(args, "^"+exclude)
+		attrs, err := cmd.CombinedOutput()
+		if err != nil {
+			return LFSChangedFilesMetadata{}, err
+		}
+
+		if strings.Contains(string(attrs), "filter: lfs") {
+			parts := strings.SplitN(string(attrs), ":", 2)
+			lfsFile := strings.TrimSpace(parts[0])
+			lfsChangedFiles = append(lfsChangedFiles, lfsFile)
 		}
 	}
-	cmd := exec.Command(c.Binary, args...)
+
+	return LFSChangedFilesMetadata{
+		Files: lfsChangedFiles,
+		Count: len(lfsChangedFiles),
+	}, nil
+}
+
+func (c *Client) PushRef(opts PushRefOptions) error {
+	if opts.Remote == "" {
+		return fmt.Errorf("no remote provided")
+	}
+	if opts.Refspec == "" {
+		return fmt.Errorf("no refspec provided")
+	}
+
+	cmd := exec.Command(c.Binary, "push", opts.Remote, opts.Refspec)
 	cmd.Dir = c.Dir
+	if len(opts.Env) > 0 {
+		cmd.Env = append(os.Environ(), opts.Env...)
+	}
 	if out, err := cmd.CombinedOutput(); err != nil {
-		_ = os.Remove(path)
-		return BundleFile{}, fmt.Errorf("git bundle create failed: %s", strings.TrimSpace(string(out)))
+		output := strings.TrimSpace(string(out))
+		if output != "" {
+			return fmt.Errorf("git push failed: %s", output)
+		}
+		return fmt.Errorf("git push failed: %w", err)
 	}
 
-	info, err := os.Stat(path)
-	if err != nil {
-		_ = os.Remove(path)
-		return BundleFile{}, err
-	}
-
-	return BundleFile{Path: path, Ref: ref, Size: info.Size()}, nil
+	return nil
 }
 
 // IsAncestor returns true if candidateSHA is an ancestor of (or equal to) headRef.

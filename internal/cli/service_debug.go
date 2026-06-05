@@ -53,7 +53,7 @@ func (s Service) DebugTask(cfg DebugTaskConfig) error {
 	}
 
 	sshConfig := ssh.ClientConfig{
-		User:            "mint-cli", // TODO: Add version number
+		User:            rwxCLISSHUser,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(privateUserKey)},
 		HostKeyCallback: ssh.FixedHostKey(publicHostKey),
 		BannerCallback: func(message string) error {

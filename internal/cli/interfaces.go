@@ -78,7 +78,7 @@ type GitClient interface {
 	GeneratePatch(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error)
 	GenerateDirtyPatches() (git.DirtyPatches, error)
 	HasCommit(sha string) bool
-	CreateBundleFile(head string, excludes []string) (git.BundleFile, error)
+	PushRef(opts git.PushRefOptions) error
 	ApplyPatch(patch []byte) *exec.Cmd
 	ApplyPatchReject(patch []byte) *exec.Cmd
 	IsInstalled() bool
