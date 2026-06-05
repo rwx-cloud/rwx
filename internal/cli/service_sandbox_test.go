@@ -1554,7 +1554,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, runID, result.RunID)
-		require.Contains(t, pushOpts.Remote, "mint-cli@rwx-sandbox-")
+		require.Contains(t, pushOpts.Remote, "rwx-cli@rwx-sandbox-")
 		require.True(t, strings.HasSuffix(pushOpts.Remote, ":."))
 		require.True(t, strings.HasPrefix(pushOpts.Refspec, localHead+":refs/rwx/push/"))
 		require.Len(t, pushOpts.Env, 2)
