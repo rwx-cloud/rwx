@@ -6,6 +6,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSandboxLFSFilesFromFsckOutput(t *testing.T) {
+	oid := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	t.Run("parses a single missing object and ignores the repair status line", func(t *testing.T) {
+		output := "objects: openError: large.bin (" + oid + ") could not be checked: no such file or directory\n" +
+			"objects: repair: moving corrupt objects to /sandbox/.git/lfs/bad"
+		require.Equal(t, []string{"large.bin"}, sandboxLFSFilesFromFsckOutput(output))
+	})
+
+	t.Run("parses multiple objects across categories", func(t *testing.T) {
+		output := "objects: openError: a/one.bin (" + oid + ") could not be checked: no such file or directory\n" +
+			"objects: corruptObject: two.bin (" + oid + ") is corrupt\n" +
+			"objects: repair: moving corrupt objects to /sandbox/.git/lfs/bad"
+		require.Equal(t, []string{"a/one.bin", "two.bin"}, sandboxLFSFilesFromFsckOutput(output))
+	})
+
+	t.Run("preserves a file path that itself contains a parenthesis", func(t *testing.T) {
+		output := "objects: openError: data (final).bin (" + oid + ") could not be checked: no such file or directory"
+		require.Equal(t, []string{"data (final).bin"}, sandboxLFSFilesFromFsckOutput(output))
+	})
+
+	t.Run("dedupes repeated files", func(t *testing.T) {
+		output := "objects: openError: dup.bin (" + oid + ") could not be checked: x\n" +
+			"objects: corruptObject: dup.bin (" + oid + ") is corrupt"
+		require.Equal(t, []string{"dup.bin"}, sandboxLFSFilesFromFsckOutput(output))
+	})
+
+	t.Run("returns nothing for status-only or unparseable output", func(t *testing.T) {
+		require.Empty(t, sandboxLFSFilesFromFsckOutput(""))
+		require.Empty(t, sandboxLFSFilesFromFsckOutput("objects: repair: moving corrupt objects to /sandbox/.git/lfs/bad"))
+		require.Empty(t, sandboxLFSFilesFromFsckOutput("some unrelated git output\nnot an objects line"))
+	})
+}
+
 func TestParseNewFilePaths(t *testing.T) {
 	t.Run("returns paths only for new-file additions", func(t *testing.T) {
 		patch := []byte(`diff --git a/tracked.txt b/tracked.txt

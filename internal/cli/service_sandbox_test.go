@@ -1311,7 +1311,16 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Equal(t, 0, result.ExitCode)
 		require.False(t, syncPatchApplied)
 		require.Contains(t, setup.mockStderr.String(), "LFS file(s) changed")
-		require.Contains(t, strings.Join(commands, "\n"), "update-ref refs/rwx-sync HEAD")
+		// The post-exec revert also runs `update-ref refs/rwx-sync HEAD`; match
+		// the snapshot's commit step to confirm the LFS-skip path took it.
+		snapshotTaken := false
+		for _, cmd := range commands {
+			if strings.Contains(cmd, "commit --allow-empty") && strings.Contains(cmd, "update-ref refs/rwx-sync HEAD") {
+				snapshotTaken = true
+				break
+			}
+		}
+		require.True(t, snapshotTaken, "LFS-skip path should snapshot refs/rwx-sync")
 	})
 
 	t.Run("returns error when git apply fails", func(t *testing.T) {
@@ -1556,7 +1565,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Equal(t, runID, result.RunID)
 		require.Contains(t, pushOpts.Remote, "rwx-cli@rwx-sandbox-")
 		require.True(t, strings.HasSuffix(pushOpts.Remote, ":."))
-		require.True(t, strings.HasPrefix(pushOpts.Refspec, localHead+":refs/rwx/push/"))
+		require.Equal(t, "+"+localHead+":refs/rwx/sync-push", pushOpts.Refspec)
 		require.Len(t, pushOpts.Env, 2)
 		require.Contains(t, pushOpts.Env[0], "GIT_SSH_COMMAND=ssh")
 		require.Contains(t, pushOpts.Env[0], "-F /dev/null")
@@ -1674,7 +1683,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
 			commandOrder = append(commandOrder, cmd)
 			if strings.Contains(cmd, "git lfs fsck --objects") {
-				return 2, "objects: missing: large.bin (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)\n", nil
+				// Mirror real `git lfs fsck` output: a per-object error line plus a
+				// trailing `repair:` status line that must not be parsed as a file.
+				return 1, "objects: openError: large.bin (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) could not be checked: no such file or directory\nobjects: repair: moving corrupt objects to /sandbox/.git/lfs/bad\n", nil
 			}
 			return 0, "", nil
 		}
@@ -1694,7 +1705,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Contains(t, err.Error(), "  large.bin")
 		require.Contains(t, err.Error(), "To recover, push your changes and reset the sandbox.")
 		require.NotContains(t, err.Error(), "Git LFS check output:")
-		require.NotContains(t, err.Error(), "objects: missing: large.bin")
+		require.NotContains(t, err.Error(), "objects: openError")
+		require.NotContains(t, err.Error(), "2 LFS file(s)")
+		require.NotContains(t, err.Error(), "moving corrupt objects")
 
 		pushIndex := slices.IndexFunc(commandOrder, func(cmd string) bool {
 			return strings.HasPrefix(cmd, "git push ")
@@ -1705,6 +1718,113 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.NotEqual(t, -1, pushIndex)
 		require.NotEqual(t, -1, fsckIndex)
 		require.Less(t, pushIndex, fsckIndex)
+	})
+
+	t.Run("checkout failure surfaces the LFS error when fsck finds missing objects", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-checkout-fail-lfs"
+		address := "192.168.1.1:22"
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		oid := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetBranch = "feature/checkout-fail-lfs"
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			switch {
+			case strings.Contains(cmd, "checkout -f"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				return 0, nil // commit already present -> no push
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			default:
+				return 0, nil
+			}
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			if strings.Contains(cmd, "git lfs fsck --objects") {
+				return 1, "objects: openError: large.bin (" + oid + ") could not be checked: no such file or directory\nobjects: repair: moving corrupt objects to /sandbox/.git/lfs/bad\n", nil
+			}
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+			Sync:       true,
+		})
+
+		require.Nil(t, result)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "1 LFS file(s) changed locally and cannot be synced to the sandbox:")
+		require.Contains(t, err.Error(), "  large.bin")
+		require.NotContains(t, err.Error(), "failed to reset sandbox to local git state")
+	})
+
+	t.Run("checkout failure surfaces the checkout error when the LFS check cannot run", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-checkout-fail-transport"
+		address := "192.168.1.1:22"
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetBranch = "feature/checkout-fail-transport"
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			switch {
+			case strings.Contains(cmd, "checkout -f"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				return 0, nil // commit already present -> no push
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			default:
+				return 0, nil
+			}
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			if strings.Contains(cmd, "git lfs fsck --objects") {
+				return 0, "", fmt.Errorf("ssh connection lost")
+			}
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+			Sync:       true,
+		})
+
+		require.Nil(t, result)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to reset sandbox to local git state")
+		require.NotContains(t, err.Error(), "LFS file(s) changed locally")
+		require.NotContains(t, err.Error(), "failed to check sandbox Git LFS objects")
 	})
 
 	t.Run("new sandbox sync removes pre-applied new files and snapshots only local dirty paths", func(t *testing.T) {
