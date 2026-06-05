@@ -20,7 +20,7 @@ import (
 const (
 	sandboxDirectiveLockRequested = "__rwx_sandbox_lock_requested__"
 	sandboxDirectiveLockReleased  = "__rwx_sandbox_lock_released__"
-	sandboxSSHUser                = "rwx-cli"
+	rwxCLISSHUser                 = "rwx-cli"
 )
 
 // Config types
@@ -1718,7 +1718,7 @@ func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo
 	})
 
 	return git.PushRefOptions{
-		Remote:  fmt.Sprintf("%s@%s:.", sandboxSSHUser, alias),
+		Remote:  fmt.Sprintf("%s@%s:.", rwxCLISSHUser, alias),
 		Refspec: fmt.Sprintf("%s:%s", localHead, remoteRef),
 		Env:     []string{"GIT_SSH_COMMAND=" + sshCommand, "GIT_LFS_SKIP_PUSH=1"},
 	}, cleanup, nil
@@ -2085,7 +2085,7 @@ func (s Service) connectSSH(connInfo *api.SandboxConnectionInfo) error {
 	}
 
 	sshConfig := ssh.ClientConfig{
-		User:            sandboxSSHUser,
+		User:            rwxCLISSHUser,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(privateUserKey)},
 		HostKeyCallback: ssh.FixedHostKey(publicHostKey),
 	}
