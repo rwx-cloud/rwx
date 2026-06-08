@@ -11,7 +11,7 @@ trap stop_sandbox EXIT
 "${RWX_CLI}" sandbox exec -- sh -c 'echo "before-reset" > /tmp/reset-marker.txt'
 
 # Verify the file exists
-marker_check=$("${RWX_CLI}" sandbox exec -- cat /tmp/reset-marker.txt)
+marker_check=$("${RWX_CLI}" sandbox exec -- cat /tmp/reset-marker.txt | awk 'NR==1')
 if [ "$marker_check" != "before-reset" ]; then
   echo "Marker file not found in sandbox before reset"
   exit 1
