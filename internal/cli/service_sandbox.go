@@ -1834,7 +1834,7 @@ func (s Service) snapshotSandboxSyncRefForPaths(paths []string) error {
 		for i, path := range paths {
 			quoted[i] = quoteShellArg(path)
 		}
-		script += "/usr/bin/git add -A -- " + strings.Join(quoted, " ") + " && "
+		script += "/usr/bin/git update-index --add --remove -- " + strings.Join(quoted, " ") + " && "
 	} else if paths == nil {
 		script += "/usr/bin/git add -A && "
 	}
