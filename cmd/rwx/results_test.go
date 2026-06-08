@@ -78,3 +78,51 @@ func TestHandleAmbiguousDefinitionPathError(t *testing.T) {
 		require.Equal(t, err, result)
 	})
 }
+
+func TestMergeEnrichedResults(t *testing.T) {
+	t.Run("PascalCases enriched keys, including nested maps and slices", func(t *testing.T) {
+		base := map[string]any{"RunID": "abc123"}
+		details := map[string]any{
+			"started_at": "2026-06-04T17:02:11Z",
+			"status":     map[string]any{"finished_status": "failed"},
+			"tasks": []any{
+				map[string]any{"id": "task_def456", "completed_runtime_seconds": float64(250)},
+			},
+		}
+
+		merged := rwx.MergeEnrichedResults(base, details)
+
+		require.Equal(t, "abc123", merged["RunID"])
+		require.Equal(t, "2026-06-04T17:02:11Z", merged["StartedAt"])
+		require.Equal(t, map[string]any{"FinishedStatus": "failed"}, merged["Status"])
+		require.Equal(t, []any{map[string]any{"ID": "task_def456", "CompletedRuntimeSeconds": float64(250)}}, merged["Tasks"])
+	})
+
+	t.Run("keeps the enriched id as ID alongside the base id keys", func(t *testing.T) {
+		base := map[string]any{"RunID": "abc123"}
+		details := map[string]any{"id": "abc123", "branch": "main"}
+
+		merged := rwx.MergeEnrichedResults(base, details)
+
+		require.Equal(t, "abc123", merged["ID"])
+		require.Equal(t, "abc123", merged["RunID"])
+		require.Equal(t, "main", merged["Branch"])
+	})
+
+	t.Run("preserves base keys on collision", func(t *testing.T) {
+		base := map[string]any{"Branch": "base-value"}
+		details := map[string]any{"branch": "enriched-value"}
+
+		merged := rwx.MergeEnrichedResults(base, details)
+
+		require.Equal(t, "base-value", merged["Branch"])
+	})
+
+	t.Run("returns base unchanged for empty details", func(t *testing.T) {
+		base := map[string]any{"RunID": "abc123", "ResultStatus": "failed"}
+
+		merged := rwx.MergeEnrichedResults(base, map[string]any{})
+
+		require.Equal(t, map[string]any{"RunID": "abc123", "ResultStatus": "failed"}, merged)
+	})
+}

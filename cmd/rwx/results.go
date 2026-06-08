@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
@@ -28,7 +29,16 @@ var (
 		GroupID: "outputs",
 		Use:     "results [run-id | run-id --task <key>]",
 		Short:   "Get results for a run",
-		Args:    cobra.MaximumNArgs(1),
+		Long: `Get results for a run.
+
+The default output is an LLM-friendly prompt for investigating run failures: the
+run's status plus a failure summary you can hand to a coding agent.
+
+Pass --output json to get structured run and task fields instead. For the full
+list of JSON fields, see https://rwx.com/docs/results or run:
+
+    rwx docs pull /results`,
+		Args: cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return requireAccessToken()
 		},
@@ -99,7 +109,32 @@ var (
 				if promptErr == nil {
 					jsonOutput.Prompt = promptResult.Prompt
 				}
-				resultJson, err := json.Marshal(jsonOutput)
+
+				baseJson, err := json.Marshal(jsonOutput)
+				if err != nil {
+					return err
+				}
+				var base map[string]any
+				if err := json.Unmarshal(baseJson, &base); err != nil {
+					return err
+				}
+
+				// Fetch the enriched payload and fold it into the base output. An
+				// empty object means enrichment is not enabled for the org, so the
+				// merge is a no-op. Pass the original run/task identifier (not the
+				// resolved run ID) so a task-scoped lookup stays task-scoped.
+				details, err := service.GetRunDetails(cli.GetRunDetailsConfig{
+					RunID:   runID,
+					TaskKey: ResultsTaskKey,
+				})
+				if err != nil {
+					return err
+				}
+				if len(details) > 0 {
+					base = MergeEnrichedResults(base, details)
+				}
+
+				resultJson, err := json.Marshal(base)
 				if err != nil {
 					return err
 				}
@@ -192,4 +227,66 @@ func HandleAmbiguousDefinitionPathError(err error, branch, repo string) error {
 	}
 
 	return err
+}
+
+// MergeEnrichedResults overlays the enriched /details payload onto the base JSON
+// map. The enriched payload uses snake_case keys, which are rewritten to
+// PascalCase to match the casing of the base payload. The enriched id is kept and
+// surfaced as ID (mirroring the run/task id already exposed as RunID/TaskID), so
+// callers can read it under any of those keys. Existing base keys are preserved on
+// collision.
+func MergeEnrichedResults(base, details map[string]any) map[string]any {
+	merged := make(map[string]any, len(base)+len(details))
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range pascalCaseKeys(details).(map[string]any) {
+		if _, exists := merged[key]; !exists {
+			merged[key] = value
+		}
+	}
+
+	return merged
+}
+
+// pascalCaseKeys recursively rewrites map keys from snake_case to PascalCase,
+// recursing into nested maps and slices. Non-map/slice values are returned
+// unchanged.
+func pascalCaseKeys(v any) any {
+	switch value := v.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(value))
+		for key, nested := range value {
+			result[pascalCase(key)] = pascalCaseKeys(nested)
+		}
+		return result
+	case []any:
+		for i, element := range value {
+			value[i] = pascalCaseKeys(element)
+		}
+		return value
+	default:
+		return v
+	}
+}
+
+// pascalCase converts a snake_case identifier to PascalCase by upper-casing the
+// first rune of each underscore-delimited segment (e.g. completed_runtime_seconds
+// -> CompletedRuntimeSeconds). The "id" segment is treated as an initialism and
+// rendered as "ID" to match the base payload's RunID/TaskID keys.
+func pascalCase(key string) string {
+	var builder strings.Builder
+	for _, segment := range strings.Split(key, "_") {
+		if segment == "" {
+			continue
+		}
+		if strings.EqualFold(segment, "id") {
+			builder.WriteString("ID")
+			continue
+		}
+		runes := []rune(segment)
+		builder.WriteString(strings.ToUpper(string(runes[0])))
+		builder.WriteString(string(runes[1:]))
+	}
+	return builder.String()
 }

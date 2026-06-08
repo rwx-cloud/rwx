@@ -39,6 +39,7 @@ type APIClient interface {
 	TaskKeyStatus(api.TaskKeyStatusConfig) (api.TaskStatusResult, error)
 	TaskIDStatus(api.TaskIDStatusConfig) (api.TaskStatusResult, error)
 	RunStatus(api.RunStatusConfig) (api.RunStatusResult, error)
+	GetRunDetails(api.RunDetailsConfig) (map[string]any, error)
 	GetLogDownloadRequest(taskId string) (api.LogDownloadRequestResult, error)
 	GetLogDownloadRequestByTaskKey(runID, taskKey string) (api.LogDownloadRequestResult, error)
 	DownloadLogs(api.LogDownloadRequestResult, ...int) ([]byte, error)
