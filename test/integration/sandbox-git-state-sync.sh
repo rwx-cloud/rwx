@@ -46,7 +46,7 @@ require_git_lfs() {
 }
 
 ensure_sandbox_git_lfs() {
-  "${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" --no-sync -- sh -c '
+  "${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sh -c '
     set -e
     if ! /usr/bin/git lfs version >/dev/null 2>&1; then
       sudo apt-get update >/dev/null

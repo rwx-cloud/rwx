@@ -1022,7 +1022,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Error(t, err)
@@ -1030,7 +1029,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Contains(t, err.Error(), "not a git repository")
 	})
 
-	t.Run("syncs changes when Sync is true", func(t *testing.T) {
+	t.Run("syncs changes", func(t *testing.T) {
 		setup := setupTest(t)
 
 		runID := "run-sync-123"
@@ -1076,7 +1075,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -1084,55 +1082,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Equal(t, 0, result.ExitCode)
 		require.True(t, patchApplied)
 		require.Equal(t, "diff --git a/file.txt b/file.txt\n", string(appliedPatch))
-	})
-
-	t.Run("skips sync when Sync is false", func(t *testing.T) {
-		setup := setupTest(t)
-
-		runID := "run-no-sync-123"
-		address := "192.168.1.1:22"
-		syncPatchApplied := false
-
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
-			return api.SandboxConnectionInfo{
-				Sandboxable:    true,
-				Address:        address,
-				PrivateUserKey: sandboxPrivateTestKey,
-				PublicHostKey:  sandboxPublicTestKey,
-			}, nil
-		}
-
-		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
-			return nil
-		}
-
-		setup.mockSSH.MockExecuteCommandWithStdin = func(command string, stdin io.Reader) (int, error) {
-			syncPatchApplied = true
-			return 0, nil
-		}
-
-		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
-			return 0, nil
-		}
-
-		// Pull mocks (no changes on sandbox)
-
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
-			return nil, nil, nil
-		}
-
-		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
-			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
-			Command:    []string{"echo", "hello"},
-			RunID:      runID,
-			Json:       true,
-			Sync:       false,
-		})
-
-		require.NoError(t, err)
-		require.Equal(t, runID, result.RunID)
-		require.Equal(t, 0, result.ExitCode)
-		require.False(t, syncPatchApplied)
 	})
 
 	t.Run("skips sync when no changes", func(t *testing.T) {
@@ -1182,7 +1131,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -1235,7 +1183,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -1303,7 +1250,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       false, // Enable warning output
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -1363,7 +1309,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Error(t, err)
@@ -1414,7 +1359,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -1558,7 +1502,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -1695,7 +1638,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Nil(t, result)
@@ -1764,7 +1706,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Nil(t, result)
@@ -1817,7 +1758,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Nil(t, result)
@@ -1899,7 +1839,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			ConfigFile: configFile,
 			Command:    []string{"true"},
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -1999,7 +1938,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			ConfigFile: configFile,
 			Command:    []string{"true"},
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -2069,7 +2007,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -2122,7 +2059,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -2171,7 +2107,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Nil(t, result)
@@ -2221,7 +2156,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Nil(t, result)
@@ -2269,7 +2203,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Error(t, err)
@@ -2317,7 +2250,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Error(t, err)
@@ -2378,7 +2310,6 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -2431,7 +2362,6 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			Command:    []string{"make", "test"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -2499,7 +2429,6 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -2576,7 +2505,6 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -2626,7 +2554,6 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Error(t, err)
@@ -2636,59 +2563,6 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		require.NotContains(t, commandText, "git update-ref refs/rwx-sync HEAD 2>/dev/null")
 	})
 
-	t.Run("skips pull when Sync is false", func(t *testing.T) {
-		setup := setupTest(t)
-
-		runID := "run-pull-no-sync-123"
-		address := "192.168.1.1:22"
-		gitDiffCalled := false
-
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
-			return api.SandboxConnectionInfo{
-				Sandboxable:    true,
-				Address:        address,
-				PrivateUserKey: sandboxPrivateTestKey,
-				PublicHostKey:  sandboxPublicTestKey,
-			}, nil
-		}
-
-		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
-			return nil
-		}
-
-		// Sandbox has changes, but pull should never be attempted
-		sandboxPatch := "diff --git a/file.txt b/file.txt\nindex abc..def 100644\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
-
-		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
-			if isSandboxPullDiffCommand(cmd) {
-				gitDiffCalled = true
-				return 0, sandboxPatch, nil
-			}
-			return 0, "", nil
-		}
-
-		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
-			return 0, nil
-		}
-
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
-			return nil, nil, nil
-		}
-
-		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
-			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
-			Command:    []string{"echo", "hello"},
-			RunID:      runID,
-			Json:       true,
-			Sync:       false,
-		})
-
-		require.NoError(t, err)
-		require.Equal(t, runID, result.RunID)
-		require.Equal(t, 0, result.ExitCode)
-		require.Empty(t, result.PulledFiles, "pull should be skipped when Sync is false")
-		require.False(t, gitDiffCalled, "git diff refs/rwx-sync should not be called when Sync is false")
-	})
 }
 
 func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
@@ -2745,7 +2619,6 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Error(t, err)
@@ -2809,7 +2682,6 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -2874,7 +2746,6 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Error(t, err)
@@ -2929,7 +2800,6 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -4342,7 +4212,6 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -4394,7 +4263,6 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.Error(t, err)
@@ -4483,7 +4351,6 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -4531,54 +4398,6 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 		require.Greater(t, checkoutIdx, checkoutStartIdx, "checkout command should follow sync_start")
 		require.Greater(t, checkoutEndIdx, checkoutIdx, "checkout sync_end should follow checkout command")
 		require.Greater(t, execIdx, checkoutEndIdx, "exec should follow checkout")
-	})
-
-	t.Run("pre-exec cleanup is skipped when Sync is false", func(t *testing.T) {
-		setup := setupTest(t)
-
-		runID := "run-no-clean"
-		address := "192.168.1.1:22"
-
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
-			return api.SandboxConnectionInfo{
-				Sandboxable:    true,
-				Address:        address,
-				PrivateUserKey: sandboxPrivateTestKey,
-				PublicHostKey:  sandboxPublicTestKey,
-			}, nil
-		}
-
-		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
-			return nil
-		}
-
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
-			return nil, nil, nil
-		}
-
-		cleanCmd := "/usr/bin/git checkout . >/dev/null 2>&1; /usr/bin/git clean -fd >/dev/null 2>&1"
-		cleanRan := false
-
-		var commandOrder []string
-		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
-			commandOrder = append(commandOrder, cmd)
-			if cmd == cleanCmd {
-				cleanRan = true
-			}
-			return 0, nil
-		}
-
-		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
-			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
-			Command:    []string{"echo", "hello"},
-			RunID:      runID,
-			Json:       true,
-			Sync:       false,
-		})
-
-		require.NoError(t, err)
-		require.Equal(t, 0, result.ExitCode)
-		require.False(t, cleanRan, "cleanup should not run when Sync is false")
 	})
 
 	t.Run("lock_released is sent when user command exits non-zero", func(t *testing.T) {

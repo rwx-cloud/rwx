@@ -55,7 +55,6 @@ type ExecSandboxConfig struct {
 	RunID          string
 	RwxDirectory   string
 	Json           bool
-	Sync           bool
 	InitParameters map[string]string
 	Reset          bool
 }
@@ -435,13 +434,9 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	}
 	branch := GetCurrentGitBranch(cwd)
 
-	localHeadForSync := ""
-	if cfg.Sync {
-		var headErr error
-		localHeadForSync, headErr = s.GitClient.GetHeadCommit()
-		if headErr != nil {
-			return nil, errors.Wrap(headErr, "sandbox sync requires a git repository with a valid HEAD")
-		}
+	localHeadForSync, headErr := s.GitClient.GetHeadCommit()
+	if headErr != nil {
+		return nil, errors.Wrap(headErr, "sandbox sync requires a git repository with a valid HEAD")
 	}
 
 	var runID string
@@ -765,36 +760,34 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 		_, _ = s.SSHClient.ExecuteCommand(sandboxDirectiveLockReleased)
 	}()
 
-	// Sync local changes to sandbox if enabled
+	// Sync local changes to sandbox
 	var syncPushMs int64
 	var syncPushPatchBytes int
-	if cfg.Sync {
-		syncPushStart := time.Now()
-		patchBytes, err := s.prepareSandboxForExec(cfg.Json, isNewSandbox, localHeadForSync, connInfo)
-		syncPushMs = time.Since(syncPushStart).Milliseconds()
-		syncPushPatchBytes = patchBytes
-		if err != nil {
-			if errors.Is(err, errors.ErrSandboxNoGitDir) {
-				// Stop the sandbox so the user gets a fresh one on retry
-				if _, endErr := s.SSHClient.ExecuteCommand("__rwx_sandbox_end__"); endErr != nil {
-					fmt.Fprintf(s.Stderr, "Warning: failed to stop sandbox: %v\n", endErr)
-				}
-				if lockFile, lockErr := s.lockSandboxStorageWithInfo(cfg.Json); lockErr == nil {
-					if storage, loadErr := LoadSandboxStorage(); loadErr == nil {
-						storage.DeleteSessionByRunID(runID)
-						if saveErr := storage.Save(); saveErr != nil {
-							fmt.Fprintf(s.Stderr, "Warning: failed to remove sandbox session: %v\n", saveErr)
-						}
-					} else {
-						fmt.Fprintf(s.Stderr, "Warning: failed to remove sandbox session: %v\n", loadErr)
-					}
-					UnlockSandboxStorage(lockFile)
-				} else {
-					fmt.Fprintf(s.Stderr, "Warning: failed to lock sandbox storage: %v\n", lockErr)
-				}
+	syncPushStart := time.Now()
+	patchBytes, err := s.prepareSandboxForExec(cfg.Json, isNewSandbox, localHeadForSync, connInfo)
+	syncPushMs = time.Since(syncPushStart).Milliseconds()
+	syncPushPatchBytes = patchBytes
+	if err != nil {
+		if errors.Is(err, errors.ErrSandboxNoGitDir) {
+			// Stop the sandbox so the user gets a fresh one on retry
+			if _, endErr := s.SSHClient.ExecuteCommand("__rwx_sandbox_end__"); endErr != nil {
+				fmt.Fprintf(s.Stderr, "Warning: failed to stop sandbox: %v\n", endErr)
 			}
-			return nil, errors.Wrap(err, "failed to sync changes to sandbox")
+			if lockFile, lockErr := s.lockSandboxStorageWithInfo(cfg.Json); lockErr == nil {
+				if storage, loadErr := LoadSandboxStorage(); loadErr == nil {
+					storage.DeleteSessionByRunID(runID)
+					if saveErr := storage.Save(); saveErr != nil {
+						fmt.Fprintf(s.Stderr, "Warning: failed to remove sandbox session: %v\n", saveErr)
+					}
+				} else {
+					fmt.Fprintf(s.Stderr, "Warning: failed to remove sandbox session: %v\n", loadErr)
+				}
+				UnlockSandboxStorage(lockFile)
+			} else {
+				fmt.Fprintf(s.Stderr, "Warning: failed to lock sandbox storage: %v\n", lockErr)
+			}
 		}
+		return nil, errors.Wrap(err, "failed to sync changes to sandbox")
 	}
 
 	// Execute command — shell-quote each argument so the remote shell
@@ -816,40 +809,38 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	var pulledFiles []string
 	var syncPullMs int64
 	var syncPullPatchBytes int
-	if cfg.Sync {
-		var syncPullSuccess bool
-		var syncPullRejCount int
-		pullStart := time.Now()
-		pulled, pullPatchBytes, pullErr := s.pullChangesFromSandbox(cwd, cfg.Json)
-		syncPullMs = time.Since(pullStart).Milliseconds()
-		syncPullPatchBytes = pullPatchBytes
-		if pullErr != nil {
-			syncPullRejCount = len(findRejFiles(cwd, pulled))
-			s.recordTelemetry("sandbox.sync_pull", map[string]any{
-				"patch_bytes":    pullPatchBytes,
-				"duration_ms":    syncPullMs,
-				"success":        false,
-				"rej_file_count": syncPullRejCount,
-			})
-			return nil, errors.Wrap(pullErr, "failed to pull changes from sandbox")
-		} else {
-			syncPullSuccess = true
-		}
-		if pulled != nil {
-			pulledFiles = pulled
-		}
-
+	var syncPullSuccess bool
+	var syncPullRejCount int
+	pullStart := time.Now()
+	pulled, pullPatchBytes, pullErr := s.pullChangesFromSandbox(cwd, cfg.Json)
+	syncPullMs = time.Since(pullStart).Milliseconds()
+	syncPullPatchBytes = pullPatchBytes
+	if pullErr != nil {
+		syncPullRejCount = len(findRejFiles(cwd, pulled))
 		s.recordTelemetry("sandbox.sync_pull", map[string]any{
 			"patch_bytes":    pullPatchBytes,
 			"duration_ms":    syncPullMs,
-			"success":        syncPullSuccess,
+			"success":        false,
 			"rej_file_count": syncPullRejCount,
 		})
+		return nil, errors.Wrap(pullErr, "failed to pull changes from sandbox")
+	} else {
+		syncPullSuccess = true
 	}
+	if pulled != nil {
+		pulledFiles = pulled
+	}
+
+	s.recordTelemetry("sandbox.sync_pull", map[string]any{
+		"patch_bytes":    pullPatchBytes,
+		"duration_ms":    syncPullMs,
+		"success":        syncPullSuccess,
+		"rej_file_count": syncPullRejCount,
+	})
 
 	// Revert sandbox to clean HEAD so the next exec starts from a known state
 	var revertErr error
-	if cfg.Sync && localHeadForSync != "" {
+	if localHeadForSync != "" {
 		revertErr = s.revertSandboxToGitState(localHeadForSync)
 	} else {
 		revertErr = s.revertSandbox()

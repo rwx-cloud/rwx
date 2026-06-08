@@ -585,7 +585,6 @@ func TestTelemetry_SSHConnect(t *testing.T) {
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -708,7 +707,6 @@ func TestTelemetry_SandboxExec(t *testing.T) {
 			Command:    []string{"make", "test"},
 			RunID:      "run-exec-123",
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -764,7 +762,6 @@ func TestTelemetry_SandboxExecNonZeroExitCode(t *testing.T) {
 			Command:    []string{"false"},
 			RunID:      "run-exec-fail",
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -814,7 +811,6 @@ func TestTelemetry_SandboxSyncPush(t *testing.T) {
 			Command:    []string{"echo"},
 			RunID:      "run-sync-push",
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
@@ -858,7 +854,6 @@ func TestTelemetry_SandboxSyncPull(t *testing.T) {
 			Command:    []string{"echo"},
 			RunID:      "run-sync-pull",
 			Json:       true,
-			Sync:       true,
 		})
 
 		require.NoError(t, err)
