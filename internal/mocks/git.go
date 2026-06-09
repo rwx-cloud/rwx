@@ -15,6 +15,7 @@ type Git struct {
 	MockGetCommit              string
 	MockGetCommitError         error
 	MockGetOriginUrl           string
+	MockRelativePathToTopLevel func(path string) string
 	MockGeneratePatchFile      git.PatchFile
 	MockGeneratePatchFileError error
 	MockGeneratePatch          func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error)
@@ -49,6 +50,13 @@ func (c *Git) GetCommit() (string, error) {
 
 func (c *Git) GetOriginUrl() string {
 	return c.MockGetOriginUrl
+}
+
+func (c *Git) RelativePathToTopLevel(path string) string {
+	if c.MockRelativePathToTopLevel != nil {
+		return c.MockRelativePathToTopLevel(path)
+	}
+	return ""
 }
 
 func (c *Git) GeneratePatchFile(destDir string, pathspec []string) (git.PatchFile, error) {

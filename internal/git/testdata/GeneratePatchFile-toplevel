@@ -1,0 +1,27 @@
+#!/bin/bash
+set -eou pipefail
+
+mkdir origin
+pushd origin > /dev/null
+git init > /dev/null
+git commit --allow-empty -m "Initial commit" > /dev/null
+
+git rev-parse HEAD
+
+popd > /dev/null
+
+git clone origin repo > /dev/null 2>&1
+
+pushd repo > /dev/null
+# a change at the repo root
+touch root-change.txt
+git add root-change.txt
+# a change in a nested subdirectory we'll invoke from
+mkdir -p nested
+touch nested/nested-change.txt
+git add nested/nested-change.txt
+# the run definition we want excluded from the patch
+mkdir .rwx
+touch .rwx/rwx.yml
+git add .rwx/rwx.yml
+popd > /dev/null

@@ -48,6 +48,37 @@ func (c *Client) GetTopLevel() string {
 	return strings.TrimSpace(string(out))
 }
 
+// RelativePathToTopLevel expresses path relative to the repository's top-level
+// directory, so it can be used in a :(top)-anchored pathspec independent of the
+// current working directory. It returns "" when the top level can't be
+// determined or path lies outside the work tree.
+func (c *Client) RelativePathToTopLevel(path string) string {
+	topLevel := c.GetTopLevel()
+	if topLevel == "" {
+		return ""
+	}
+
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(c.Dir, path)
+	}
+
+	// Resolve symlinks so both paths share a base; e.g. on macOS /var is a
+	// symlink to /private/var and git reports the resolved top-level path.
+	if resolved, err := filepath.EvalSymlinks(topLevel); err == nil {
+		topLevel = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+
+	rel, err := filepath.Rel(topLevel, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+
+	return rel
+}
+
 func (c *Client) GetBranch() string {
 	cmd := exec.Command(c.Binary, "branch", "--show-current")
 	cmd.Dir = c.Dir

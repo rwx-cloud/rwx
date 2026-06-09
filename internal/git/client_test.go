@@ -579,6 +579,29 @@ func TestGeneratePatchFile(t *testing.T) {
 			require.Equal(t, []string{}, patchFile.UntrackedFiles.Files)
 			require.Equal(t, 0, patchFile.UntrackedFiles.Count)
 		})
+
+		t.Run("captures changes outside cwd when anchored to the repo top level", func(t *testing.T) {
+			tempDir, _ := repoFixture(t, "testdata/GeneratePatchFile-toplevel")
+
+			// Invoke from a nested subdirectory to prove coverage is independent of cwd.
+			client := &git.Client{Binary: "git", Dir: filepath.Join(tempDir, "repo", "nested")}
+
+			rel := client.RelativePathToTopLevel(filepath.Join(tempDir, "repo", ".rwx", "rwx.yml"))
+			require.Equal(t, filepath.Join(".rwx", "rwx.yml"), rel)
+
+			patchFile, err := client.GeneratePatchFile(t.TempDir(), []string{":(top)", ":(top,exclude)" + rel})
+			require.NoError(t, err)
+			require.True(t, patchFile.Written)
+
+			patch, err := os.ReadFile(patchFile.Path)
+			require.NoError(t, err)
+			// Changes at the repo root and in a sibling subtree are included even
+			// though cwd is nested/.
+			require.Contains(t, string(patch), "root-change.txt")
+			require.Contains(t, string(patch), "nested-change.txt")
+			// The run definition is excluded.
+			require.NotContains(t, string(patch), "rwx.yml")
+		})
 	})
 }
 

@@ -74,6 +74,7 @@ type GitClient interface {
 	GetHeadCommit() (string, error)
 	GetCommit() (string, error)
 	GetOriginUrl() string
+	RelativePathToTopLevel(path string) string
 	GeneratePatchFile(destDir string, pathspec []string) (git.PatchFile, error)
 	GeneratePatch(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error)
 	GenerateDirtyPatches() (git.DirtyPatches, error)

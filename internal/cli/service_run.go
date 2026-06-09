@@ -197,8 +197,17 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 	}
 
 	if patchable {
+		// Anchor the patch to the repository root with git's :(top) magic so it
+		// captures changes everywhere in the repo, not just the current working
+		// directory. A bare "." pathspec is relative to cwd, which silently scoped
+		// the patch to a subtree when `rwx run` was invoked from a subdirectory.
+		patchPathspec := []string{".", ":!" + relativeRunDefinitionPath}
+		if topRelativeRunDefinitionPath := s.GitClient.RelativePathToTopLevel(runDefinitionPath); topRelativeRunDefinitionPath != "" {
+			patchPathspec = []string{":(top)", ":(top,exclude)" + topRelativeRunDefinitionPath}
+		}
+
 		var patchErr error
-		patchFile, patchErr = s.GitClient.GeneratePatchFile(patchDir, []string{".", ":!" + relativeRunDefinitionPath})
+		patchFile, patchErr = s.GitClient.GeneratePatchFile(patchDir, patchPathspec)
 		if patchErr != nil {
 			errorMessage = patchErr.Error()
 			fmt.Fprintf(s.Stderr, "Warning: failed to generate patch: %s\n\n", errorMessage)
