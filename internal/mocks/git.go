@@ -26,6 +26,10 @@ type Git struct {
 	MockApplyPatchReject       func(patch []byte) *exec.Cmd
 	MockIsInstalled            bool
 	MockIsInsideWorkTree       bool
+
+	// GeneratePatchFilePathspec records the pathspec passed to the most recent
+	// GeneratePatchFile call, for asserting how callers construct it.
+	GeneratePatchFilePathspec []string
 }
 
 func (c *Git) GetBranch() string {
@@ -60,6 +64,8 @@ func (c *Git) RelativePathToTopLevel(path string) string {
 }
 
 func (c *Git) GeneratePatchFile(destDir string, pathspec []string) (git.PatchFile, error) {
+	c.GeneratePatchFilePathspec = pathspec
+
 	if c.MockGeneratePatchFileError != nil {
 		return git.PatchFile{}, c.MockGeneratePatchFileError
 	}
