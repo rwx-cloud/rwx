@@ -13,9 +13,11 @@ popd > /dev/null
 git clone origin repo > /dev/null 2>&1
 
 pushd repo > /dev/null
-# a change at the repo root
+# a staged change at the repo root
 touch root-change.txt
 git add root-change.txt
+# an untracked file at the repo root (outside the nested cwd)
+echo "untracked at root" > root-untracked.txt
 # a change in a nested subdirectory we'll invoke from
 mkdir -p nested
 touch nested/nested-change.txt

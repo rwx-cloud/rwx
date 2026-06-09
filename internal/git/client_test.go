@@ -596,8 +596,9 @@ func TestGeneratePatchFile(t *testing.T) {
 			patch, err := os.ReadFile(patchFile.Path)
 			require.NoError(t, err)
 			// Changes at the repo root and in a sibling subtree are included even
-			// though cwd is nested/.
+			// though cwd is nested/, including untracked files outside cwd.
 			require.Contains(t, string(patch), "root-change.txt")
+			require.Contains(t, string(patch), "root-untracked.txt")
 			require.Contains(t, string(patch), "nested-change.txt")
 			// The run definition is excluded.
 			require.NotContains(t, string(patch), "rwx.yml")

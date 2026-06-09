@@ -76,7 +76,9 @@ func (c *Client) RelativePathToTopLevel(path string) string {
 		return ""
 	}
 
-	return rel
+	// Git pathspecs always use forward slashes, even on Windows where
+	// filepath.Rel returns backslash-separated paths.
+	return filepath.ToSlash(rel)
 }
 
 func (c *Client) GetBranch() string {
@@ -352,7 +354,7 @@ func (c *Client) generatePatchData(pathspec []string) patchResult {
 }
 
 func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (PatchFile, error) {
-	cleanup, err := c.AddUntrackedFilesForPatch()
+	cleanup, err := c.AddUntrackedFilesForPatch(pathspec)
 	if err != nil {
 		cleanup = func() {}
 	}
@@ -388,10 +390,19 @@ func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (PatchFile
 }
 
 // AddUntrackedFilesForPatch temporarily adds untracked files with intent-to-add
-// so they appear in git diff. Returns a cleanup function to undo the add.
-func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
+// so they appear in git diff. The pathspec must match the one used to generate
+// the patch, so that intent-to-add coverage is scoped identically to the diff
+// (e.g. a :(top) pathspec captures untracked files across the whole repo, not
+// just those under the current working directory). Returns a cleanup function
+// to undo the add.
+func (c *Client) AddUntrackedFilesForPatch(pathspec []string) (cleanup func(), err error) {
 	// Get untracked files
-	cmd := exec.Command(c.Binary, "ls-files", "--others", "--exclude-standard")
+	lsArgs := []string{"ls-files", "--others", "--exclude-standard"}
+	if len(pathspec) > 0 {
+		lsArgs = append(lsArgs, "--")
+		lsArgs = append(lsArgs, pathspec...)
+	}
+	cmd := exec.Command(c.Binary, lsArgs...)
 	cmd.Dir = c.Dir
 	output, err := cmd.Output()
 	if err != nil {
@@ -434,7 +445,7 @@ func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
 // Returns (nil, nil, nil) if no changes or unable to generate patch.
 func (c *Client) GeneratePatch(pathspec []string) ([]byte, *LFSChangedFilesMetadata, error) {
 	// Add untracked files temporarily so they appear in the diff
-	cleanup, err := c.AddUntrackedFilesForPatch()
+	cleanup, err := c.AddUntrackedFilesForPatch(pathspec)
 	if err != nil {
 		// Non-fatal: proceed without untracked files
 		cleanup = func() {}
@@ -458,7 +469,7 @@ func (c *Client) GeneratePatch(pathspec []string) ([]byte, *LFSChangedFilesMetad
 }
 
 func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
-	cleanup, err := c.AddUntrackedFilesForPatch()
+	cleanup, err := c.AddUntrackedFilesForPatch(nil)
 	if err != nil {
 		cleanup = func() {}
 	}
