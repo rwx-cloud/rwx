@@ -579,7 +579,44 @@ func TestGeneratePatchFile(t *testing.T) {
 			require.Equal(t, []string{}, patchFile.UntrackedFiles.Files)
 			require.Equal(t, 0, patchFile.UntrackedFiles.Count)
 		})
+
+		t.Run("returns a PatchError identifying the failing git command", func(t *testing.T) {
+			tempDir, _ := repoFixture(t, "testdata/GeneratePatchFile-diff")
+			client := &git.Client{Binary: "git", Dir: filepath.Join(tempDir, "repo")}
+
+			// An invalid pathspec magic makes `git diff --name-only` fail
+			// deterministically, exercising the error-capture path.
+			_, err := client.GeneratePatchFile(t.TempDir(), []string{":(top,bogusmagic)x"})
+			require.Error(t, err)
+
+			var pe *git.PatchError
+			require.ErrorAs(t, err, &pe)
+			require.Equal(t, "diff_name_only", pe.Command)
+			require.Equal(t, 128, pe.ExitCode)
+			require.Contains(t, pe.Stderr, "Invalid pathspec magic")
+			// The underlying git stderr is surfaced in the error message.
+			require.Contains(t, pe.Error(), "failed to generate patch (git diff --name-only):")
+		})
 	})
+}
+
+func TestPatchErrorReason(t *testing.T) {
+	cases := []struct {
+		stderr string
+		want   string
+	}{
+		{"fatal: bad object 9a3b1c4e", "shallow_clone"},
+		{"fatal: pathspec '.rwx' is beyond a symbolic link", "beyond_symlink"},
+		{"error: external filter 'git-lfs filter-process' failed", "missing_external_filter"},
+		{"signal: killed", "oom_killed"},
+		{"fatal: something else entirely", "unknown"},
+		{"", "unknown"},
+	}
+
+	for _, tc := range cases {
+		pe := &git.PatchError{Stderr: tc.stderr}
+		require.Equal(t, tc.want, pe.Reason(), "stderr: %q", tc.stderr)
+	}
 }
 
 func TestIsAncestor(t *testing.T) {

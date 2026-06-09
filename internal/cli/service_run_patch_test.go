@@ -243,7 +243,66 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 			Patchable:    true,
 		})
 		require.NoError(t, err)
-		require.Contains(t, s.mockStderr.String(), "Warning: failed to generate patch: unable to generate patch data")
+		require.Contains(t, s.mockStderr.String(), "Warning: unable to generate patch data")
+
+		// A non-PatchError failure still records the event, bucketed as unknown.
+		event := findEvent(s.drainEvents(), "run.patch_error")
+		require.NotNil(t, event)
+		require.Equal(t, "unknown", event.Props["failed_command"])
+		require.Equal(t, -1, event.Props["exit_code"])
+		require.Equal(t, "unknown", event.Props["reason"])
+	})
+
+	t.Run("when patch generation fails with a git command error", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+		s.mockGit.MockGeneratePatchFileError = &git.PatchError{
+			Command:  "diff_name_only",
+			Display:  "git diff --name-only",
+			Stderr:   "fatal: bad object 9a3b1c4e",
+			ExitCode: 128,
+		}
+
+		rwxDir := filepath.Join(s.tmp, ".rwx")
+		err := os.MkdirAll(rwxDir, 0o755)
+		require.NoError(t, err)
+
+		definitionsFile := filepath.Join(rwxDir, "rwx.yml")
+		definition := "on:\n  cli:\n    init:\n      sha: ${{ event.git.sha }}\n\nbase:\n  os: ubuntu 24.04\n  tag: 1.0\n\ntasks:\n  - key: foo\n    run: echo 'bar'\n"
+		err = os.WriteFile(definitionsFile, []byte(definition), 0o644)
+		require.NoError(t, err)
+
+		s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{
+				LatestMajor: make(map[string]string),
+				LatestMinor: make(map[string]map[string]string),
+			}, nil
+		}
+		s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			// The run metadata carries the descriptive message (the user's own repo data).
+			require.Equal(t, "failed to generate patch (git diff --name-only): fatal: bad object 9a3b1c4e", cfg.Patch.ErrorMessage)
+			return &api.InitiateRunResult{
+				RunID:  "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
+				RunURL: "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
+			}, nil
+		}
+
+		_, err = s.service.InitiateRun(cli.InitiateRunConfig{
+			RwxDirectory: rwxDir,
+			MintFilePath: definitionsFile,
+			Patchable:    true,
+		})
+		require.NoError(t, err)
+
+		// The user-facing warning names the command and passes git's stderr through verbatim.
+		require.Contains(t, s.mockStderr.String(), "Warning: failed to generate patch (git diff --name-only): fatal: bad object 9a3b1c4e")
+
+		// Telemetry gets the stable bucket — exit code and a classified reason, no raw stderr.
+		event := findEvent(s.drainEvents(), "run.patch_error")
+		require.NotNil(t, event)
+		require.Equal(t, "diff_name_only", event.Props["failed_command"])
+		require.Equal(t, 128, event.Props["exit_code"])
+		require.Equal(t, "shallow_clone", event.Props["reason"])
 	})
 
 	t.Run("when the run is not patchable", func(t *testing.T) {
