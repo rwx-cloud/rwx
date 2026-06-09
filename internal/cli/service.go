@@ -225,7 +225,7 @@ func (s Service) SkillUpdate(symlink string) (*SkillUpdateResult, error) {
 	}
 	latestVersion, err := semver.NewVersion(latestVersionStr)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to parse latest skill version")
+		return &SkillUpdateResult{}, nil
 	}
 
 	var entries []SkillUpdateEntry

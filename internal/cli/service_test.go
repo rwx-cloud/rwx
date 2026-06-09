@@ -356,6 +356,25 @@ func TestSkillUpdate(t *testing.T) {
 		require.Equal(t, "skipped", result.Entries[0].Action)
 		require.Equal(t, "marketplace", result.Entries[0].Installation.Source)
 	})
+
+	t.Run("unparseable latest version returns empty entries", func(t *testing.T) {
+		s := setupSkillTest(t)
+		seedSkillFile(t, s.tmp, "1.0.0")
+
+		s.mockAPI.MockGetSkillLatestVersion = func() (string, error) {
+			return "dev", nil
+		}
+
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+
+		result, err := s.service.SkillUpdate("")
+		require.NoError(t, err)
+		require.Empty(t, result.Entries)
+	})
 }
 
 func TestSkillInstall(t *testing.T) {
