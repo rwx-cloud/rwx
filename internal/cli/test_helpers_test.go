@@ -50,6 +50,9 @@ func setupTest(t *testing.T) *testSetup {
 	require.NoError(t, os.Mkdir(filepath.Join(setup.tmp, ".rwx"), 0o755))
 	setup.mockAPI = new(mocks.API)
 	setup.mockSSH = new(mocks.SSH)
+	setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+		return 0, "", nil
+	}
 	setup.mockGit = &mocks.Git{
 		MockIsInstalled:      true,
 		MockIsInsideWorkTree: true,

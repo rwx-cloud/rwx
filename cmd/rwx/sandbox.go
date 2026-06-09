@@ -144,8 +144,6 @@ FILE SYNCING
   Before each command, local uncommitted changes are automatically synced to
   the sandbox via git patch. This includes staged changes, unstaged changes,
   and untracked files.
-  Use --no-sync to skip this step if you want to run against the sandbox's
-  original state.
 
   After the command completes, any changes made in the sandbox are
   automatically pulled back to the local working directory via git patch.
@@ -204,7 +202,6 @@ CONFIG FILE
 			RunID:          sandboxRunID,
 			RwxDirectory:   sandboxRwxDir,
 			Json:           useJson,
-			Sync:           !sandboxNoSync,
 			InitParameters: initParams,
 			Reset:          sandboxReset,
 		})
@@ -387,7 +384,6 @@ var (
 	sandboxRwxDir     string
 	sandboxOpen       bool
 	sandboxWait       bool
-	sandboxNoSync     bool
 	sandboxReset      bool
 	sandboxInitParams []string
 )
@@ -411,7 +407,10 @@ func init() {
 	sandboxExecCmd.Flags().StringVarP(&sandboxRwxDir, "dir", "d", "", "RWX directory")
 	sandboxExecCmd.Flags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")
 	sandboxExecCmd.Flags().BoolVar(&sandboxOpen, "open", false, "Open the run in a browser")
-	sandboxExecCmd.Flags().BoolVar(&sandboxNoSync, "no-sync", false, "Skip syncing local changes before execution")
+	sandboxExecCmd.Flags().Bool("no-sync", false, "Deprecated; syncing always runs before execution")
+	if err := sandboxExecCmd.Flags().MarkDeprecated("no-sync", "syncing always runs before execution"); err != nil {
+		panic(err)
+	}
 	sandboxExecCmd.Flags().BoolVar(&sandboxReset, "reset", false, "Reset the sandbox before executing")
 	sandboxExecCmd.Flags().StringArrayVar(&sandboxInitParams, "init", []string{}, "initialization parameters for the sandbox run, available in the `init` context. Can be specified multiple times")
 

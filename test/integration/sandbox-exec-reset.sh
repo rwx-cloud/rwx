@@ -11,7 +11,7 @@ trap stop_sandbox EXIT
 "${RWX_CLI}" sandbox exec -- sh -c 'echo "sentinel" > /tmp/exec-reset-marker.txt'
 
 # Verify the sentinel exists before reset
-marker=$("${RWX_CLI}" sandbox exec --no-sync -- cat /tmp/exec-reset-marker.txt)
+marker=$("${RWX_CLI}" sandbox exec -- cat /tmp/exec-reset-marker.txt | awk 'NR==1')
 if [ "$marker" != "sentinel" ]; then
   echo "ERROR: Sentinel file not found in sandbox before exec --reset"
   exit 1
@@ -22,7 +22,7 @@ fi
 
 # In the fresh sandbox, the sentinel file should not exist
 exit_code=0
-"${RWX_CLI}" sandbox exec --no-sync -- cat /tmp/exec-reset-marker.txt 2>/dev/null || exit_code=$?
+"${RWX_CLI}" sandbox exec -- cat /tmp/exec-reset-marker.txt 2>/dev/null || exit_code=$?
 
 if [ "$exit_code" -eq 0 ]; then
   echo "ERROR: Sentinel file still exists after exec --reset - sandbox was not re-provisioned"
