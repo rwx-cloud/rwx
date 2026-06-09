@@ -99,7 +99,7 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 					TaskID       string `json:",omitempty"`
 					ResultStatus string
 					Completed    bool
-					Prompt       string `json:",omitempty"`
+					ResultPrompt string `json:",omitempty"`
 				}{
 					RunID:        result.RunID,
 					TaskID:       result.TaskID,
@@ -107,7 +107,7 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 					Completed:    result.Completed,
 				}
 				if promptErr == nil {
-					jsonOutput.Prompt = promptResult.Prompt
+					jsonOutput.ResultPrompt = promptResult.Prompt
 				}
 
 				baseJson, err := json.Marshal(jsonOutput)
