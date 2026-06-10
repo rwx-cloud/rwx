@@ -337,6 +337,11 @@ type RunStatusConfig struct {
 	FailFast       bool
 }
 
+type RunDetailsConfig struct {
+	RunID   string
+	TaskKey string
+}
+
 type RunStatus struct {
 	Result string `json:"result"`
 }

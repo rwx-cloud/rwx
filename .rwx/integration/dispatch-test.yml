@@ -72,7 +72,7 @@ tasks:
         exit 1
       fi
 
-      prompt=$(echo "$kickoff" | tail -1 | jq -r '.Prompt')
+      prompt=$(echo "$kickoff" | tail -1 | jq -r '.ResultPrompt')
       if ! echo "$prompt" | grep -q "fail-fast"; then
         echo "Expected prompt to include 'fail-fast', but it did not."
         echo "$kickoff"
@@ -110,7 +110,7 @@ tasks:
         exit 1
       fi
 
-      prompt=$(echo "$kickoff" | tail -1 | jq -r '.Prompt')
+      prompt=$(echo "$kickoff" | tail -1 | jq -r '.ResultPrompt')
       if ! echo "$prompt" | grep -q "fail-fast"; then
         echo "Expected prompt to include 'fail-fast', but it did not."
         echo "$kickoff"

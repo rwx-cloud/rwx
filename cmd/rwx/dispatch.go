@@ -112,14 +112,14 @@ var (
 						RunID        string
 						RunURL       string
 						ResultStatus string
-						Prompt       string `json:",omitempty"`
+						ResultPrompt string `json:",omitempty"`
 					}{
 						RunID:        runs[0].RunID,
 						RunURL:       runs[0].RunURL,
 						ResultStatus: waitResult.ResultStatus,
 					}
 					if promptErr == nil {
-						jsonOutput.Prompt = promptResult.Prompt
+						jsonOutput.ResultPrompt = promptResult.Prompt
 					}
 					waitResultJson, err := json.Marshal(jsonOutput)
 					if err != nil {

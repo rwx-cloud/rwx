@@ -1103,6 +1103,37 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 	return result, nil
 }
 
+func (c Client) GetRunDetails(cfg RunDetailsConfig) (map[string]any, error) {
+	params := url.Values{}
+	if cfg.TaskKey != "" {
+		params.Set("run_id", cfg.RunID)
+		params.Set("task_key", cfg.TaskKey)
+	} else {
+		params.Set("id", cfg.RunID)
+	}
+	endpoint := "/mint/api/results/details?" + params.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	result := map[string]any{}
+	if err = decodeResponseJSON(resp, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 func (c Client) GetRunPrompt(runID string) (string, error) {
 	endpoint := fmt.Sprintf("/mint/api/results/prompt?id=%s", url.QueryEscape(runID))
 

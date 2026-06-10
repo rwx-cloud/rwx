@@ -110,7 +110,7 @@ tasks:
         exit 1
       fi
 
-      prompt=$(echo "$result" | jq -r '.Prompt // empty')
+      prompt=$(echo "$result" | jq -r '.ResultPrompt // empty')
 
       if ! echo "$prompt" | grep -q "will-fail-fast"; then
         echo "Expected prompt to include 'will-fail-fast', but it did not."
