@@ -248,11 +248,71 @@ type patchResult struct {
 	ok        bool
 }
 
+// PatchError identifies which git command failed while generating a patch,
+// along with its exit code and stderr, so callers can show the underlying git
+// error to the user and record a stable, PII-free bucket in telemetry.
+type PatchError struct {
+	Command  string // stable identifier for telemetry: diff_name_only, check_attr, ls_files, diff_patch
+	Display  string // human-readable command, e.g. "git diff --name-only"
+	Stderr   string // trimmed git stderr (the user's own repo data)
+	ExitCode int    // process exit code, or -1 if the command never started
+}
+
+func (e *PatchError) Error() string {
+	if e.Stderr == "" {
+		return fmt.Sprintf("failed to generate patch (%s)", e.Display)
+	}
+	return fmt.Sprintf("failed to generate patch (%s): %s", e.Display, e.Stderr)
+}
+
+// Reason buckets the git stderr into a stable category for telemetry. Raw
+// stderr must never be sent to telemetry — it embeds customer file paths,
+// branch names, and repo layout.
+func (e *PatchError) Reason() string {
+	s := strings.ToLower(e.Stderr)
+	switch {
+	case strings.Contains(s, "bad object"), strings.Contains(s, "shallow"):
+		return "shallow_clone"
+	case strings.Contains(s, "beyond a symbolic link"):
+		return "beyond_symlink"
+	case strings.Contains(s, "external filter"), strings.Contains(s, "filter-process"):
+		return "missing_external_filter"
+	case strings.Contains(s, "signal: killed"), strings.Contains(s, "out of memory"), strings.Contains(s, "cannot allocate memory"):
+		return "oom_killed"
+	default:
+		return "unknown"
+	}
+}
+
+// newPatchError builds a PatchError from a failed exec, extracting the exit
+// code and stderr from an *exec.ExitError when available. fallbackStderr is
+// used when the error doesn't carry captured stderr (e.g. CombinedOutput).
+func newPatchError(command, display string, err error, fallbackStderr string) *PatchError {
+	pe := &PatchError{Command: command, Display: display, ExitCode: -1}
+
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		pe.ExitCode = exitErr.ExitCode()
+		pe.Stderr = strings.TrimSpace(string(exitErr.Stderr))
+	}
+
+	if pe.Stderr == "" {
+		pe.Stderr = strings.TrimSpace(fallbackStderr)
+	}
+	if pe.Stderr == "" {
+		pe.Stderr = strings.TrimSpace(err.Error())
+	}
+
+	return pe
+}
+
 // generatePatchData generates patch data for working tree changes relative to the base commit on origin.
-func (c *Client) generatePatchData(pathspec []string) patchResult {
+// On a git command failure it returns a *PatchError identifying which command failed and why.
+func (c *Client) generatePatchData(pathspec []string) (patchResult, *PatchError) {
 	sha, err := c.GetCommit()
 	if sha == "" || err != nil {
-		return patchResult{}
+		// GetCommit failures are pre-filtered upstream in InitiateRun; treat as
+		// "nothing to patch" here rather than a git command failure.
+		return patchResult{}, nil
 	}
 
 	diffArgs := []string{"diff", sha, "--name-only"}
@@ -265,12 +325,12 @@ func (c *Client) generatePatchData(pathspec []string) patchResult {
 
 	files, err := cmd.Output()
 	if err != nil {
-		return patchResult{}
+		return patchResult{}, newPatchError("diff_name_only", "git diff --name-only", err, "")
 	}
 
-	lfsChanged, err := c.lfsFilesForPaths(strings.Split(strings.TrimSpace(string(files)), "\n"))
-	if err != nil {
-		return patchResult{}
+	lfsChanged, lfsErr := c.lfsFilesForPaths(strings.Split(strings.TrimSpace(string(files)), "\n"))
+	if lfsErr != nil {
+		return patchResult{}, lfsErr
 	}
 
 	if lfsChanged.Count > 0 {
@@ -278,7 +338,7 @@ func (c *Client) generatePatchData(pathspec []string) patchResult {
 			sha: sha,
 			lfs: lfsChanged,
 			ok:  true,
-		}
+		}, nil
 	}
 
 	lsFilesArgs := []string{"ls-files", "--others", "--exclude-standard"}
@@ -291,7 +351,7 @@ func (c *Client) generatePatchData(pathspec []string) patchResult {
 
 	untracked, err := cmd.Output()
 	if err != nil {
-		return patchResult{}
+		return patchResult{}, newPatchError("ls_files", "git ls-files --others --exclude-standard", err, "")
 	}
 
 	untrackedFiles := strings.Fields(string(untracked))
@@ -306,7 +366,7 @@ func (c *Client) generatePatchData(pathspec []string) patchResult {
 
 	patch, err := cmd.Output()
 	if err != nil {
-		return patchResult{}
+		return patchResult{}, newPatchError("diff_patch", "git diff -p --binary", err, "")
 	}
 
 	return patchResult{
@@ -317,7 +377,7 @@ func (c *Client) generatePatchData(pathspec []string) patchResult {
 			Count: len(untrackedFiles),
 		},
 		ok: true,
-	}
+	}, nil
 }
 
 func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (PatchFile, error) {
@@ -327,7 +387,10 @@ func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (PatchFile
 	}
 	defer cleanup()
 
-	data := c.generatePatchData(pathspec)
+	data, patchErr := c.generatePatchData(pathspec)
+	if patchErr != nil {
+		return PatchFile{}, patchErr
+	}
 	if !data.ok {
 		return PatchFile{}, fmt.Errorf("unable to generate patch data")
 	}
@@ -410,8 +473,8 @@ func (c *Client) GeneratePatch(pathspec []string) ([]byte, *LFSChangedFilesMetad
 	}
 	defer cleanup()
 
-	data := c.generatePatchData(pathspec)
-	if !data.ok {
+	data, patchErr := c.generatePatchData(pathspec)
+	if patchErr != nil || !data.ok {
 		return nil, nil, nil
 	}
 
@@ -555,7 +618,7 @@ func (c *Client) HasCommit(sha string) bool {
 	return cmd.Run() == nil
 }
 
-func (c *Client) lfsFilesForPaths(files []string) (LFSChangedFilesMetadata, error) {
+func (c *Client) lfsFilesForPaths(files []string) (LFSChangedFilesMetadata, *PatchError) {
 	lfsChangedFiles := []string{}
 
 	for _, file := range files {
@@ -566,9 +629,11 @@ func (c *Client) lfsFilesForPaths(files []string) (LFSChangedFilesMetadata, erro
 		cmd := exec.Command(c.Binary, "check-attr", "filter", "--", file)
 		cmd.Dir = c.Dir
 
+		// CombinedOutput mixes stderr into attrs, so pass it as the fallback
+		// stderr for the PatchError (the *exec.ExitError won't carry .Stderr).
 		attrs, err := cmd.CombinedOutput()
 		if err != nil {
-			return LFSChangedFilesMetadata{}, err
+			return LFSChangedFilesMetadata{}, newPatchError("check_attr", "git check-attr filter", err, string(attrs))
 		}
 
 		if strings.Contains(string(attrs), "filter: lfs") {

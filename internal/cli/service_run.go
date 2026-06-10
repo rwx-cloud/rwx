@@ -201,7 +201,22 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		patchFile, patchErr = s.GitClient.GeneratePatchFile(patchDir, []string{".", ":!" + relativeRunDefinitionPath})
 		if patchErr != nil {
 			errorMessage = patchErr.Error()
-			fmt.Fprintf(s.Stderr, "Warning: failed to generate patch: %s\n\n", errorMessage)
+			fmt.Fprintf(s.Stderr, "Warning: %s\n\n", errorMessage)
+
+			// Telemetry gets a stable, PII-free classification — never raw git
+			// stderr, which embeds customer file paths, branch names, and layout.
+			telemetryProps := map[string]any{
+				"failed_command": "unknown",
+				"exit_code":      -1,
+				"reason":         "unknown",
+			}
+			var pe *git.PatchError
+			if errors.As(patchErr, &pe) {
+				telemetryProps["failed_command"] = pe.Command
+				telemetryProps["exit_code"] = pe.ExitCode
+				telemetryProps["reason"] = pe.Reason()
+			}
+			s.recordTelemetry("run.patch_error", telemetryProps)
 		}
 	}
 
