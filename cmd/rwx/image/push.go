@@ -37,7 +37,7 @@ func InitPush(requireAccessToken func() error, getService func() cli.Service, us
 			return err
 		},
 		Short: "Push an RWX task to an OCI reference",
-		Use:   "push <task-id> --to <reference> [--to <reference>] [--output json] [--open] [--no-wait]",
+		Use:   "push <task-id> --to <reference> [--to <reference>] [--format json] [--open] [--no-wait]",
 	}
 
 	PushCmd.Flags().StringArrayVar(&pushImageReferences, "to", []string{}, "the qualified OCI reference to push the image to (can be specified multiple times)")

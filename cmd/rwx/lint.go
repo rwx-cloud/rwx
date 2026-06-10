@@ -27,7 +27,7 @@ var (
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			outputFormat := LintOutputFormat
-			if Json {
+			if cmd.Flags().Changed("json") {
 				outputFormat = "json"
 			}
 
@@ -84,7 +84,11 @@ func LintShouldFail(result *cli.LintResult, warningsAsErrors bool) bool {
 func init() {
 	lintCmd.Flags().BoolVar(&LintWarningsAsErrors, "warnings-as-errors", false, "treat warnings as errors")
 	lintCmd.Flags().StringVarP(&LintRwxDirectory, "dir", "d", "", "the directory your RWX configuration files are located in, typically `.rwx`. By default, the CLI traverses up until it finds a `.rwx` directory.")
+	lintCmd.Flags().StringVar(&LintOutputFormat, "format", "multiline", "output format: text, multiline, oneline, json, none")
 	lintCmd.Flags().StringVarP(&LintOutputFormat, "output", "o", "multiline", "output format: text, multiline, oneline, json, none")
+	if err := lintCmd.Flags().MarkDeprecated("output", "use --format instead"); err != nil {
+		panic(err)
+	}
 	lintCmd.Flags().DurationVar(&LintTimeout, "timeout", 30*time.Second, "timeout for the LSP check operation")
 	lintCmd.Flags().BoolVar(&LintFix, "fix", false, "automatically apply available fixes")
 }
