@@ -469,7 +469,15 @@ func (c *Client) GeneratePatch(pathspec []string) ([]byte, *LFSChangedFilesMetad
 }
 
 func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
-	cleanup, err := c.AddUntrackedFilesForPatch(nil)
+	// Anchor the untracked-file lookup to the repository root with git's :(top)
+	// magic so the sandbox sync captures untracked files everywhere in the repo,
+	// not just under the current working directory. Falls back to the cwd-scoped
+	// lookup if the top level can't be resolved.
+	var untrackedPathspec []string
+	if c.GetTopLevel() != "" {
+		untrackedPathspec = []string{":(top)"}
+	}
+	cleanup, err := c.AddUntrackedFilesForPatch(untrackedPathspec)
 	if err != nil {
 		cleanup = func() {}
 	}

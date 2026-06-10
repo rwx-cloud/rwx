@@ -399,6 +399,36 @@ func TestGenerateDirtyPatches(t *testing.T) {
 	require.Equal(t, "staged.txt", cachedNames)
 }
 
+func TestGenerateDirtyPatchesFromSubdirectory(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+	mustGit(t, repo, "config", "user.name", "Test")
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("base\n"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(repo, "nested"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "nested", "nested-tracked.txt"), []byte("base\n"), 0o644))
+	mustGit(t, repo, "add", ".")
+	mustGit(t, repo, "commit", "-m", "base")
+
+	// Changes spread across the repo, with untracked files both at the root and in
+	// the nested subdirectory we'll invoke from.
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("base\nroot-change\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "root-untracked.txt"), []byte("root-untracked\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "nested", "nested-untracked.txt"), []byte("nested-untracked\n"), 0o644))
+
+	// Driving git from a subdirectory must not scope the untracked-file lookup to
+	// that subtree; the root untracked file has to be captured too.
+	client := &git.Client{Binary: "git", Dir: filepath.Join(repo, "nested")}
+	patches, err := client.GenerateDirtyPatches()
+	require.NoError(t, err)
+
+	require.Contains(t, string(patches.Unstaged), "tracked.txt")
+	require.Contains(t, string(patches.Unstaged), "root-untracked.txt")
+	require.Contains(t, string(patches.Unstaged), "nested-untracked.txt")
+	require.ElementsMatch(t, []string{"tracked.txt", "root-untracked.txt", "nested/nested-untracked.txt"}, patches.Files)
+	require.ElementsMatch(t, []string{"root-untracked.txt", "nested/nested-untracked.txt"}, patches.NewFiles)
+}
+
 func TestPushRef(t *testing.T) {
 	source := t.TempDir()
 	mustGit(t, source, "init")
