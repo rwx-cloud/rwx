@@ -34,7 +34,7 @@ func InitPull(requireAccessToken func() error, getService func() cli.Service, us
 			return err
 		},
 		Short: "Pull an existing RWX task as an OCI image",
-		Use:   "pull <taskId> [--output json]",
+		Use:   "pull <taskId> [--format json]",
 	}
 
 	PullCmd.Flags().StringArrayVar(&pullTags, "tag", []string{}, "tag the pulled image (can be specified multiple times)")

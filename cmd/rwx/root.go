@@ -26,7 +26,7 @@ import (
 var (
 	AccessToken string
 	Json        bool
-	Output      string
+	Format      string
 
 	rwxHost            string
 	docsHost           = "www.rwx.com"
@@ -152,7 +152,7 @@ func addRwxDirFlag(cmd *cobra.Command) {
 }
 
 func useJsonOutput() bool {
-	return Output == "json" || Json
+	return Format == "json" || Json
 }
 
 func init() {
@@ -176,7 +176,11 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&AccessToken, "access-token", "$RWX_ACCESS_TOKEN", "the access token for RWX")
 	rootCmd.PersistentFlags().BoolVar(&Json, "json", false, "output json data to stdout")
 	_ = rootCmd.PersistentFlags().MarkHidden("json")
-	rootCmd.PersistentFlags().StringVar(&Output, "output", "text", "output format: text or json")
+	rootCmd.PersistentFlags().StringVar(&Format, "format", "text", "output format: text or json")
+	rootCmd.PersistentFlags().StringVar(&Format, "output", "text", "output format: text or json")
+	if err := rootCmd.PersistentFlags().MarkDeprecated("output", "use --format instead"); err != nil {
+		panic(err)
+	}
 
 	// Define command groups for help output ordering
 	rootCmd.AddGroup(&cobra.Group{ID: "execution", Title: "Execution:"})

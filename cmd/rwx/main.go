@@ -73,7 +73,7 @@ func recordTelemetry(err error, start time.Time) {
 	telem.Record("cli.command", map[string]any{
 		"command":       commandName,
 		"flags":         flagNames,
-		"output_format": Output,
+		"output_format": Format,
 		"duration_ms":   time.Since(start).Milliseconds(),
 		"success":       err == nil && !unknownSubcommand,
 	})
