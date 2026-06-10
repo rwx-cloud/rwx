@@ -27,7 +27,7 @@ var (
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			outputFormat := LintOutputFormat
-			if Json {
+			if cmd.Flags().Changed("json") {
 				outputFormat = "json"
 			}
 

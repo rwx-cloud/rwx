@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/rwx-cloud/rwx/cmd/rwx/config"
 	"github.com/rwx-cloud/rwx/internal/accesstoken"
@@ -25,7 +26,6 @@ import (
 
 var (
 	AccessToken string
-	Json        bool
 	Format      string
 
 	rwxHost            string
@@ -44,6 +44,10 @@ var (
 		SilenceUsage:  true,
 		Version:       config.Version,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("format") && cmd.Flags().Changed("json") {
+				return errors.New("--format and --json cannot be used together")
+			}
+
 			fileBackend, err := internalconfig.NewFileBackend([]string{
 				filepath.Join("~", ".config", "rwx"),
 				filepath.Join("~", ".mint"),
@@ -152,7 +156,32 @@ func addRwxDirFlag(cmd *cobra.Command) {
 }
 
 func useJsonOutput() bool {
-	return Format == "json" || Json
+	return Format == "json"
+}
+
+// jsonFlagValue is a bool-shaped flag value that writes to the shared format
+// variable, so --json and --format have a single source of truth.
+type jsonFlagValue struct {
+	format *string
+}
+
+func (j *jsonFlagValue) String() string {
+	return strconv.FormatBool(*j.format == "json")
+}
+
+func (j *jsonFlagValue) Set(value string) error {
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return err
+	}
+	if enabled {
+		*j.format = "json"
+	}
+	return nil
+}
+
+func (j *jsonFlagValue) Type() string {
+	return "bool"
 }
 
 func init() {
@@ -174,13 +203,13 @@ func init() {
 	}
 
 	rootCmd.PersistentFlags().StringVar(&AccessToken, "access-token", "$RWX_ACCESS_TOKEN", "the access token for RWX")
-	rootCmd.PersistentFlags().BoolVar(&Json, "json", false, "output json data to stdout")
-	_ = rootCmd.PersistentFlags().MarkHidden("json")
 	rootCmd.PersistentFlags().StringVar(&Format, "format", "text", "output format: text or json")
 	rootCmd.PersistentFlags().StringVar(&Format, "output", "text", "output format: text or json")
 	if err := rootCmd.PersistentFlags().MarkDeprecated("output", "use --format instead"); err != nil {
 		panic(err)
 	}
+	jsonFlag := rootCmd.PersistentFlags().VarPF(&jsonFlagValue{format: &Format}, "json", "", "output json data to stdout")
+	jsonFlag.NoOptDefVal = "true"
 
 	// Define command groups for help output ordering
 	rootCmd.AddGroup(&cobra.Group{ID: "execution", Title: "Execution:"})
