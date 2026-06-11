@@ -1485,7 +1485,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
 			commandOrder = append(commandOrder, cmd)
 			switch {
-			case strings.Contains(cmd, "git ls-files --others"):
+			case strings.Contains(cmd, "git ls-files") && strings.Contains(cmd, "--others"):
 				return 0, "", nil
 			case isSandboxPullDiffCommand(cmd):
 				return 0, "", nil
@@ -2501,8 +2501,8 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
 			stdoutOnlyCommands = append(stdoutOnlyCommands, cmd)
-			if strings.Contains(cmd, "git ls-files --others") {
-				return 0, "untracked.txt\n", nil
+			if strings.Contains(cmd, "git ls-files") && strings.Contains(cmd, "--others") {
+				return 0, "untracked.txt\x00", nil
 			}
 			if isSandboxPullDiffCommand(cmd) {
 				pullDiffCommand = cmd
@@ -2538,7 +2538,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		foundDiffRef := false
 		foundReset := false
 		for _, cmd := range stdoutOnlyCommands {
-			if strings.Contains(cmd, "git ls-files --others") {
+			if strings.Contains(cmd, "git ls-files") && strings.Contains(cmd, "--others") {
 				foundLsFiles = true
 			}
 			if strings.Contains(cmd, "git add -N") {
@@ -2557,6 +2557,69 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		require.Contains(t, pullDiffCommand, "--binary")
 		require.Contains(t, pullDiffCommand, "--full-index")
 		require.True(t, foundReset, "git reset HEAD should use stdout-only output")
+	})
+
+	t.Run("pull stages untracked non-ASCII paths from NUL-delimited output", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-pull-nul-paths"
+		address := "192.168.1.1:22"
+		untrackedPath := "café.txt"
+		var addCommand string
+		var resetCommand string
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			return nil
+		}
+
+		sandboxPatch := "diff --git a/caf\\303\\251.txt b/caf\\303\\251.txt\nnew file mode 100644\nindex 0000000..abc1234\n--- /dev/null\n+++ b/caf\\303\\251.txt\n@@ -0,0 +1 @@\n+new file\n"
+
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			switch {
+			case strings.Contains(cmd, "git ls-files"):
+				require.Contains(t, cmd, "-z")
+				return 0, untrackedPath + "\x00", nil
+			case strings.Contains(cmd, "git add -N"):
+				addCommand = cmd
+				return 0, "", nil
+			case isSandboxPullDiffCommand(cmd):
+				return 0, sandboxPatch, nil
+			case strings.Contains(cmd, "git reset HEAD"):
+				resetCommand = cmd
+				return 0, "", nil
+			default:
+				return 0, "", nil
+			}
+		}
+
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			return 0, nil
+		}
+
+		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 0, result.ExitCode)
+		require.Contains(t, addCommand, "'"+untrackedPath+"'")
+		require.Contains(t, resetCommand, "'"+untrackedPath+"'")
 	})
 
 	t.Run("pull only includes sandbox exec-changed files", func(t *testing.T) {

@@ -383,6 +383,7 @@ func TestGenerateDirtyPatches(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "untracked.txt"), []byte("untracked\n"), 0o644))
 	require.NoError(t, os.Mkdir(filepath.Join(repo, "dir with space"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "dir with space", "quote'file.txt"), []byte("quoted\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "café.txt"), []byte("non-ascii\n"), 0o644))
 
 	client := &git.Client{Binary: "git", Dir: repo}
 	patches, err := client.GenerateDirtyPatches()
@@ -392,11 +393,36 @@ func TestGenerateDirtyPatches(t *testing.T) {
 	require.NotContains(t, string(patches.Staged), "untracked.txt")
 	require.Contains(t, string(patches.Unstaged), "tracked.txt")
 	require.Contains(t, string(patches.Unstaged), "untracked.txt")
-	require.ElementsMatch(t, []string{"staged.txt", "tracked.txt", "untracked.txt", "dir with space/quote'file.txt"}, patches.Files)
-	require.ElementsMatch(t, []string{"staged.txt", "untracked.txt", "dir with space/quote'file.txt"}, patches.NewFiles)
+	require.Contains(t, string(patches.Unstaged), "non-ascii")
+	require.ElementsMatch(t, []string{"staged.txt", "tracked.txt", "untracked.txt", "dir with space/quote'file.txt", "café.txt"}, patches.Files)
+	require.ElementsMatch(t, []string{"staged.txt", "untracked.txt", "dir with space/quote'file.txt", "café.txt"}, patches.NewFiles)
 
 	cachedNames := mustGit(t, repo, "diff", "--cached", "--name-only")
 	require.Equal(t, "staged.txt", cachedNames)
+}
+
+func TestGenerateDirtyPatches_LFSNonASCIIPath(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+	mustGit(t, repo, "config", "user.name", "Test")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".gitattributes"), []byte("*.bin filter=lfs\n"), 0o644))
+	lfsPath := "café.bin"
+	require.NoError(t, os.WriteFile(filepath.Join(repo, lfsPath), []byte("base\n"), 0o644))
+	mustGit(t, repo, "add", ".gitattributes", lfsPath)
+	mustGit(t, repo, "commit", "-m", "base")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, lfsPath), []byte("changed\n"), 0o644))
+
+	client := &git.Client{Binary: "git", Dir: repo}
+	patches, err := client.GenerateDirtyPatches()
+	require.NoError(t, err)
+
+	require.NotNil(t, patches.LFSChangedFiles)
+	require.Equal(t, 1, patches.LFSChangedFiles.Count)
+	require.Equal(t, []string{lfsPath}, patches.LFSChangedFiles.Files)
+	require.Equal(t, []string{lfsPath}, patches.Files)
 }
 
 func TestPushRef(t *testing.T) {
@@ -557,6 +583,38 @@ func TestGeneratePatchFile(t *testing.T) {
 			require.Equal(t, 0, patchFile.UntrackedFiles.Count)
 			require.Equal(t, "", mustGit(t, client.Dir, "diff", "--cached", "--name-only"))
 			require.Contains(t, strings.Split(mustGit(t, client.Dir, "ls-files", "--others", "--exclude-standard"), "\n"), "untracked.txt")
+		})
+
+		t.Run("including non-ASCII untracked files", func(t *testing.T) {
+			tempDir := t.TempDir()
+			origin := filepath.Join(tempDir, "origin")
+			require.NoError(t, os.Mkdir(origin, 0o755))
+			mustGit(t, origin, "init")
+			mustGit(t, origin, "config", "user.email", "test@example.com")
+			mustGit(t, origin, "config", "user.name", "Test")
+			mustGit(t, origin, "commit", "--allow-empty", "-m", "base")
+
+			repo := filepath.Join(tempDir, "repo")
+			cmd := exec.Command("git", "clone", origin, repo)
+			out, err := cmd.CombinedOutput()
+			require.NoError(t, err, string(out))
+			sha := mustGit(t, repo, "rev-parse", "HEAD")
+
+			untrackedPath := "café.txt"
+			require.NoError(t, os.WriteFile(filepath.Join(repo, untrackedPath), []byte("non-ascii\n"), 0o644))
+
+			client := &git.Client{Binary: "git", Dir: repo}
+			patchFile, err := client.GeneratePatchFile(repo, nil)
+			require.NoError(t, err)
+			require.True(t, patchFile.Written)
+			require.Equal(t, filepath.Join(repo, sha), patchFile.Path)
+
+			patch, err := os.ReadFile(patchFile.Path)
+			require.NoError(t, err)
+			require.Contains(t, string(patch), "non-ascii")
+			require.Equal(t, "", mustGit(t, repo, "diff", "--cached", "--name-only"))
+			_, err = os.Stat(filepath.Join(repo, untrackedPath))
+			require.NoError(t, err)
 		})
 
 		t.Run("excluding paths via pathspec", func(t *testing.T) {

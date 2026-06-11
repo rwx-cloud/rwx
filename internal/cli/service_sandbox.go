@@ -1264,7 +1264,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 
 	// Include untracked files in the diff by adding them with intent-to-add
 	// Get untracked files, add with -N, get diff, then reset
-	lsExitCode, untrackedOutput, lsErr := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git ls-files --others --exclude-standard")
+	lsExitCode, untrackedOutput, lsErr := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git ls-files -z --others --exclude-standard")
 	if lsErr != nil {
 		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 		return nil, 0, errors.Wrap(lsErr, "failed to list untracked files in sandbox")
@@ -1274,18 +1274,13 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 		return nil, 0, fmt.Errorf("failed to list untracked files in sandbox: git ls-files failed with exit code %d", lsExitCode)
 	}
 
-	untrackedFiles := []string{}
-	for _, f := range strings.Split(strings.TrimSpace(untrackedOutput), "\n") {
-		if f != "" {
-			untrackedFiles = append(untrackedFiles, f)
-		}
-	}
+	untrackedFiles := splitNULStrings(untrackedOutput)
 
 	// Add untracked files with intent-to-add
 	if len(untrackedFiles) > 0 {
 		quotedFiles := make([]string, len(untrackedFiles))
 		for i, f := range untrackedFiles {
-			quotedFiles[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(f, "'", "'\\''"))
+			quotedFiles[i] = quoteShellArg(f)
 		}
 		addCmd := fmt.Sprintf("/usr/bin/git add -N -- %s", strings.Join(quotedFiles, " "))
 		addExitCode, _, addErr := s.SSHClient.ExecuteCommandWithOutput(addCmd)
@@ -1308,7 +1303,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 	if len(untrackedFiles) > 0 {
 		quotedFiles := make([]string, len(untrackedFiles))
 		for i, f := range untrackedFiles {
-			quotedFiles[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(f, "'", "'\\''"))
+			quotedFiles[i] = quoteShellArg(f)
 		}
 		resetCmd := fmt.Sprintf("/usr/bin/git reset HEAD -- %s", strings.Join(quotedFiles, " "))
 		resetExitCode, _, resetErr := s.SSHClient.ExecuteCommandWithOutput(resetCmd)
@@ -1857,6 +1852,22 @@ func newFilePathsForDirtyPatches(patches git.DirtyPatches) []string {
 
 func quoteShellArg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func splitNULStrings(output string) []string {
+	if output == "" {
+		return []string{}
+	}
+
+	parts := strings.Split(output, "\x00")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		values = append(values, part)
+	}
+	return values
 }
 
 // parsePatchFiles extracts file paths from a git patch
