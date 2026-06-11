@@ -95,6 +95,19 @@ func isSandboxPullDiffCommand(cmd string) bool {
 	return strings.Contains(cmd, "git diff") && strings.Contains(cmd, "refs/rwx-sync")
 }
 
+func requireSandboxWorktreeRootCommand(t *testing.T, cmd string, operation string) {
+	t.Helper()
+	require.Contains(t, cmd, "repo_root=$(/usr/bin/git rev-parse --show-toplevel)")
+	require.Contains(t, cmd, "cd \"$repo_root\"")
+	require.Contains(t, cmd, operation)
+}
+
+func sandboxCommandIndex(commands []string, operation string) int {
+	return slices.IndexFunc(commands, func(cmd string) bool {
+		return strings.Contains(cmd, operation)
+	})
+}
+
 func TestService_LockWaitOutput(t *testing.T) {
 	t.Run("no output when lock is uncontended", func(t *testing.T) {
 		setup := setupTest(t)
@@ -1087,7 +1100,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		}
 
 		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
-			require.Equal(t, "/usr/bin/git apply --allow-empty -", command)
+			requireSandboxWorktreeRootCommand(t, command, "/usr/bin/git apply --allow-empty -")
 			appliedPatch, _ = io.ReadAll(stdin)
 			patchApplied = true
 			return 0, "", nil
@@ -1405,7 +1418,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Contains(t, commandOrder, "echo hello")
 		// git apply uses stdin method
 		require.GreaterOrEqual(t, len(stdinCommandOrder), 1)
-		require.Equal(t, "/usr/bin/git apply --allow-empty -", stdinCommandOrder[0])
+		requireSandboxWorktreeRootCommand(t, stdinCommandOrder[0], "/usr/bin/git apply --allow-empty -")
 		// Sandbox should be reverted back to local git state after pull.
 		revertIdx := -1
 		for i, cmd := range commandOrder {
@@ -1553,10 +1566,14 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Contains(t, pushOpts.Env[0], "StrictHostKeyChecking=yes")
 		require.Contains(t, pushOpts.Env[0], "-p 22")
 		require.Equal(t, "GIT_LFS_SKIP_PUSH=1", pushOpts.Env[1])
-		require.Contains(t, strings.Join(commandOrder, "\n"), "git fetch --prune origin")
-		require.Contains(t, strings.Join(commandOrder, "\n"), "git checkout -f -B 'feature/sync' '"+localHead+"'")
-		require.Contains(t, strings.Join(commandOrder, "\n"), "git write-tree")
-		require.Contains(t, strings.Join(commandOrder, "\n"), "git clean -fd")
+		commandText := strings.Join(commandOrder, "\n")
+		require.Contains(t, commandText, "repo_root=$(/usr/bin/git rev-parse --show-toplevel)")
+		require.Contains(t, commandText, "git fetch --prune origin")
+		require.Contains(t, commandText, "git checkout -f -B")
+		require.Contains(t, commandText, "feature/sync")
+		require.Contains(t, commandText, localHead)
+		require.Contains(t, commandText, "git write-tree")
+		require.Contains(t, commandText, "git clean -fd")
 		for i, cmd := range commandOrder {
 			if strings.Contains(cmd, "cat-file -e") {
 				requireCommandWrappedBySyncMarkers(t, commandOrder, i)
@@ -1604,9 +1621,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Equal(t, "__rwx_sandbox_sync_end__", commandOrder[finalProbeIndex+1])
 		require.NotContains(t, commandOrder[pushIndex+1:finalProbeIndex], "__rwx_sandbox_sync_start__")
 		require.NotContains(t, commandOrder[pushIndex+1:finalProbeIndex], "__rwx_sandbox_sync_end__")
-		require.Equal(t, "/usr/bin/git apply --index --allow-empty -", stdinCommands[0])
+		requireSandboxWorktreeRootCommand(t, stdinCommands[0], "/usr/bin/git apply --index --allow-empty -")
 		require.Equal(t, "staged-patch", stdinPayloads[0])
-		require.Equal(t, "/usr/bin/git apply --allow-empty -", stdinCommands[1])
+		requireSandboxWorktreeRootCommand(t, stdinCommands[1], "/usr/bin/git apply --allow-empty -")
 		require.Equal(t, "unstaged-patch", stdinPayloads[1])
 	})
 
@@ -1883,7 +1900,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		cleanIndex := slices.IndexFunc(order, func(cmd string) bool {
 			return strings.Contains(cmd, "git clean -f --") && strings.Contains(cmd, "dir with space/quote") && strings.Contains(cmd, "file.txt")
 		})
-		applyIndex := slices.Index(order, "/usr/bin/git apply --index --allow-empty -")
+		applyIndex := sandboxCommandIndex(order, "/usr/bin/git apply --index --allow-empty -")
 		snapshotIndex := slices.IndexFunc(order, func(cmd string) bool {
 			return strings.Contains(cmd, "update-ref refs/rwx-sync HEAD")
 		})
@@ -1973,7 +1990,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		cleanIndex := slices.IndexFunc(order, func(cmd string) bool {
 			return strings.Contains(cmd, "git clean -f --") && strings.Contains(cmd, newFilePath)
 		})
-		applyIndex := slices.Index(order, "/usr/bin/git apply --index --allow-empty -")
+		applyIndex := sandboxCommandIndex(order, "/usr/bin/git apply --index --allow-empty -")
 		snapshotIndex := slices.IndexFunc(order, func(cmd string) bool {
 			return strings.Contains(cmd, "update-ref refs/rwx-sync HEAD")
 		})
@@ -2187,7 +2204,10 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, runID, result.RunID)
-		require.Contains(t, strings.Join(commands, "\n"), "git checkout -f --detach '"+localHead+"'")
+		commandText := strings.Join(commands, "\n")
+		require.Contains(t, commandText, "repo_root=$(/usr/bin/git rev-parse --show-toplevel)")
+		require.Contains(t, commandText, "git checkout -f --detach")
+		require.Contains(t, commandText, localHead)
 	})
 
 	t.Run("fails when pushing missing commits fails", func(t *testing.T) {
@@ -2569,15 +2589,19 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		for _, cmd := range stdoutOnlyCommands {
 			if strings.Contains(cmd, "git ls-files") && strings.Contains(cmd, "--others") {
 				foundLsFiles = true
+				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git ls-files -z --others --exclude-standard")
 			}
 			if strings.Contains(cmd, "git add -N") {
 				foundAddN = true
+				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git add -N --")
 			}
 			if isSandboxPullDiffCommand(cmd) {
 				foundDiffRef = true
+				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git diff --binary --full-index refs/rwx-sync")
 			}
 			if strings.Contains(cmd, "git reset HEAD") {
 				foundReset = true
+				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git reset HEAD --")
 			}
 		}
 		require.True(t, foundLsFiles, "git ls-files should use stdout-only output")
