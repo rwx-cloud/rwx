@@ -191,13 +191,21 @@ func findRwxDirectoryPath(configuredDirectory string) (string, error) {
 			return filepath.Join(workingDirectory, ".mint"), nil
 		}
 
-		if workingDirectory == string(os.PathSeparator) {
+		parentDir, ok := nextParentDirectory(workingDirectory)
+		if !ok {
 			return "", nil
 		}
 
-		parentDir, _ := filepath.Split(workingDirectory)
-		workingDirectory = filepath.Clean(parentDir)
+		workingDirectory = parentDir
 	}
+}
+
+func nextParentDirectory(directory string) (string, bool) {
+	parentDir := filepath.Clean(filepath.Dir(directory))
+	if parentDir == directory {
+		return "", false
+	}
+	return parentDir, true
 }
 
 // getFileOrDirectoryYAMLEntries gets a RwxDirectoryEntry for every given YAML file, or all YAML files in rwxDir when no files are provided.
@@ -336,8 +344,9 @@ func rwxDirectoryEntry(path string, de os.DirEntry, makePathRelativeTo string) (
 		if err != nil {
 			return RwxDirectoryEntry{}, contentLength, fmt.Errorf("unable to determine relative path of %q: %w", path, err)
 		}
-		relPath = filepath.ToSlash(rel) // Mint only supports unix-style path separators
+		relPath = rel
 	}
+	relPath = filepath.ToSlash(relPath) // Mint only supports unix-style path separators
 
 	return RwxDirectoryEntry{
 		Type:         entryType,
