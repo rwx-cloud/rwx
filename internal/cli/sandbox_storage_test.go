@@ -342,6 +342,25 @@ func TestSandboxStorage_LoadAndSave(t *testing.T) {
 		require.Equal(t, "*\n", string(contents))
 	})
 
+	t.Run("does not leave temporary files after save", func(t *testing.T) {
+		tmpDir := setupTestStorageDir(t)
+
+		storage := &cli.SandboxStorage{
+			Sandboxes: make(map[string]cli.SandboxSession),
+		}
+		storage.SetSession("main", "/home/user/project/.rwx/sandbox.yml", cli.SandboxSession{
+			RunID:      "run-123",
+			ConfigFile: "/home/user/project/.rwx/sandbox.yml",
+		})
+
+		err := storage.Save()
+		require.NoError(t, err)
+
+		tempFiles, err := filepath.Glob(filepath.Join(tmpDir, ".rwx", "sandboxes", ".sandboxes-*.json.tmp"))
+		require.NoError(t, err)
+		require.Empty(t, tempFiles)
+	})
+
 	t.Run("creates directory structure if it does not exist", func(t *testing.T) {
 		tmpDir := setupTestStorageDir(t)
 

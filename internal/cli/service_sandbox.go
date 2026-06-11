@@ -154,8 +154,14 @@ func (s Service) CheckExistingSandbox(configFile string) (*CheckExistingSandboxR
 	}
 	branch := GetCurrentGitBranch(cwd)
 
+	lockFile, lockErr := s.lockSandboxStorageWithInfo(false)
+	if lockErr != nil {
+		return nil, errors.Wrap(lockErr, "unable to lock sandbox storage")
+	}
+
 	storage, err := LoadSandboxStorage()
 	if err != nil {
+		UnlockSandboxStorage(lockFile)
 		return &CheckExistingSandboxResult{Exists: false}, nil
 	}
 
@@ -167,6 +173,8 @@ func (s Service) CheckExistingSandbox(configFile string) (*CheckExistingSandboxR
 			_ = storage.Save()
 		}
 	}
+	UnlockSandboxStorage(lockFile)
+
 	if !found {
 		return &CheckExistingSandboxResult{Exists: false}, nil
 	}
