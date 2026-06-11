@@ -96,6 +96,7 @@ tasks:
 		result, err := ResolveCliParamsForFile(tmpFile.Name())
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
+		require.Equal(t, []string{"sha"}, result.GitParams)
 
 		fileContent, err := os.ReadFile(tmpFile.Name())
 		require.NoError(t, err)
@@ -127,6 +128,37 @@ tasks:
 		result, err := ResolveCliParamsForFile(tmpFile.Name())
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
+		require.Equal(t, []string{"commit-sha", "sha"}, result.GitParams)
+
+		fileContent, err := os.ReadFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.Equal(t, content, string(fileContent))
+	})
+
+	t.Run("returns git clone ref param when CLI trigger already has git init params", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
+		require.NoError(t, err)
+		defer tmpFile.Close()
+
+		content := `
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+tasks:
+  - key: clone
+    call: git/clone 1.8.1
+    with:
+      ref: ${{ init.ref }}
+`
+		_, err = tmpFile.WriteString(content)
+		require.NoError(t, err)
+
+		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.False(t, result.Rewritten)
+		require.Equal(t, []string{"ref"}, result.GitParams)
 
 		fileContent, err := os.ReadFile(tmpFile.Name())
 		require.NoError(t, err)
