@@ -244,6 +244,13 @@ func readRwxDirectoryEntries(paths []string, relativeTo string) ([]RwxDirectoryE
 
 	for _, path := range paths {
 		err := filepath.WalkDir(path, func(subpath string, de os.DirEntry, err error) error {
+			if err != nil {
+				if de == nil && os.IsNotExist(err) {
+					return os.ErrNotExist
+				}
+				return err
+			}
+
 			entry, entrySize, suberr := rwxDirectoryEntry(subpath, de, relativeTo)
 			if suberr != nil {
 				return suberr
