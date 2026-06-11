@@ -284,25 +284,31 @@ echo "$lfs_push_output" | grep -q "To recover, push your changes and reset the s
 echo "Restarting sandbox after expected LFS sync failure"
 start_git_state_sandbox
 
-echo "Scenario: dirty LFS files are reported and skipped by patch sync"
+echo "Scenario: dirty LFS files fail before sandbox patch sync"
 git switch -C "${TEST_ID}-lfs-patch" "$ORIGINAL_HEAD" >/dev/null
 git lfs track "integration-lfs-patch.bin" >/dev/null
 printf '%s\n' "dirty lfs content" > integration-lfs-patch.bin
+rm -f integration-lfs-command-ran.txt
 
 lfs_patch_output_file=$(mktemp)
 lfs_patch_exit=0
-run_and_capture_output "$lfs_patch_output_file" "${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sh -c 'test ! -e integration-lfs-patch.bin' || lfs_patch_exit=$?
+run_and_capture_output "$lfs_patch_output_file" "${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sh -c 'echo command ran > integration-lfs-command-ran.txt' || lfs_patch_exit=$?
 lfs_patch_output=$(cat "$lfs_patch_output_file")
 rm -f "$lfs_patch_output_file"
-if [ "$lfs_patch_exit" -ne 0 ]; then
-  fail "sandbox exec failed while checking dirty LFS patch skip: ${lfs_patch_output}"
+if [ "$lfs_patch_exit" -eq 0 ]; then
+  fail "sandbox exec succeeded with a dirty LFS file"
 fi
-echo "$lfs_patch_output" | grep -q "Warning: 1 LFS file(s) changed locally and cannot be synced." || fail "missing dirty LFS warning: ${lfs_patch_output}"
+echo "$lfs_patch_output" | grep -q "1 LFS file(s) changed locally and cannot be synced to the sandbox" || fail "missing dirty LFS error: ${lfs_patch_output}"
+echo "$lfs_patch_output" | grep -q "integration-lfs-patch.bin" || fail "missing dirty LFS file path in error: ${lfs_patch_output}"
+echo "$lfs_patch_output" | grep -q "To recover, push your changes and reset the sandbox." || fail "missing dirty LFS recovery guidance: ${lfs_patch_output}"
 if [ ! -f integration-lfs-patch.bin ]; then
-  fail "dirty LFS file was removed locally after patch sync"
+  fail "dirty LFS file was removed locally after failed patch sync"
+fi
+if [ -f integration-lfs-command-ran.txt ]; then
+  fail "sandbox command ran despite dirty LFS sync failure"
 fi
 git reset -- .gitattributes integration-lfs-patch.bin >/dev/null 2>&1 || true
-rm -f .gitattributes integration-lfs-patch.bin
+rm -f .gitattributes integration-lfs-patch.bin integration-lfs-command-ran.txt
 
 echo "Scenario: staged and unstaged local state keep their shape in sandbox"
 git switch -C "${TEST_ID}-dirty-state" "$ORIGINAL_HEAD" >/dev/null

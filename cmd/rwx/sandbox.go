@@ -149,7 +149,7 @@ FILE SYNCING
   automatically pulled back to the local working directory via git patch.
   This happens regardless of the command's exit code.
 
-  Note: Git LFS files cannot be synced and will generate a warning.
+  Note: Git LFS files cannot be synced and will produce an error.
 
 CONFIG FILE
   The sandbox configuration (default: .rwx/sandbox.yml) defines:

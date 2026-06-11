@@ -218,6 +218,9 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 			}
 			s.recordTelemetry("run.patch_error", telemetryProps)
 		}
+		if patchFile.LFSChangedFiles.Count > 0 {
+			return nil, runPatchLFSChangesError(patchFile.LFSChangedFiles)
+		}
 	}
 
 	// Load directory entries
