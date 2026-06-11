@@ -681,11 +681,18 @@ func (c *Client) IsAncestor(candidateSHA, headRef string) bool {
 	return cmd.Run() == nil
 }
 
+func (c *Client) applyDir() string {
+	if topLevel := c.GetTopLevel(); topLevel != "" {
+		return topLevel
+	}
+	return c.Dir
+}
+
 // ApplyPatch returns an exec.Cmd that applies a patch to the working directory.
 // The patch bytes should be provided to the command's stdin before running.
 func (c *Client) ApplyPatch(patch []byte) *exec.Cmd {
 	cmd := exec.Command(c.Binary, "apply", "--allow-empty", "-")
-	cmd.Dir = c.Dir
+	cmd.Dir = c.applyDir()
 	cmd.Stdin = bytes.NewReader(patch)
 	return cmd
 }
@@ -694,7 +701,7 @@ func (c *Client) ApplyPatch(patch []byte) *exec.Cmd {
 // which applies hunks that succeed and writes .rej files for hunks that fail.
 func (c *Client) ApplyPatchReject(patch []byte) *exec.Cmd {
 	cmd := exec.Command(c.Binary, "apply", "--reject", "--allow-empty", "-")
-	cmd.Dir = c.Dir
+	cmd.Dir = c.applyDir()
 	cmd.Stdin = bytes.NewReader(patch)
 	return cmd
 }

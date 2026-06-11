@@ -651,6 +651,43 @@ func TestIsAncestor(t *testing.T) {
 	})
 }
 
+func TestApplyPatch(t *testing.T) {
+	t.Run("applies root-relative patches from a subdirectory", func(t *testing.T) {
+		repo := t.TempDir()
+		var err error
+		repo, err = filepath.EvalSymlinks(repo)
+		require.NoError(t, err)
+		mustGit(t, repo, "init")
+		mustGit(t, repo, "config", "user.email", "test@example.com")
+		mustGit(t, repo, "config", "user.name", "Test")
+
+		rootFile := filepath.Join(repo, "root.txt")
+		subdir := filepath.Join(repo, "subdir")
+		require.NoError(t, os.MkdirAll(subdir, 0o755))
+		require.NoError(t, os.WriteFile(rootFile, []byte("old\n"), 0o644))
+		mustGit(t, repo, "add", "root.txt")
+		mustGit(t, repo, "commit", "-m", "initial")
+
+		require.NoError(t, os.WriteFile(rootFile, []byte("new\n"), 0o644))
+		diffCmd := exec.Command("git", "diff", "--binary")
+		diffCmd.Dir = repo
+		patch, err := diffCmd.Output()
+		require.NoError(t, err)
+		mustGit(t, repo, "reset", "--hard", "HEAD")
+
+		client := &git.Client{Binary: "git", Dir: subdir}
+		cmd := client.ApplyPatch(patch)
+		require.Equal(t, repo, cmd.Dir)
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+
+		content, err := os.ReadFile(rootFile)
+		require.NoError(t, err)
+		require.Equal(t, "new\n", string(content))
+		require.Equal(t, repo, client.ApplyPatchReject(patch).Dir)
+	})
+}
+
 func TestCommitMismatchNote(t *testing.T) {
 	t.Run("returns note with short SHAs when commits differ", func(t *testing.T) {
 		note := git.CommitMismatchNote(

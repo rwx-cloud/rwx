@@ -465,6 +465,8 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 				scopedToken = existingSession.ScopedToken
 				sessionRunURL = existingSession.RunURL
 				storedConfigHash = existingSession.ConfigHash
+				execCount = existingSession.ExecCount
+				resetNagShown = existingSession.ResetNagShown
 			}
 		}
 	} else {
@@ -764,7 +766,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	var syncPushMs int64
 	var syncPushPatchBytes int
 	syncPushStart := time.Now()
-	patchBytes, err := s.prepareSandboxForExec(cfg.Json, isNewSandbox, localHeadForSync, connInfo)
+	patchBytes, err := s.prepareSandboxForExec(cfg.Json, isNewSandbox, isNewSandbox || execCount == 0, localHeadForSync, connInfo)
 	syncPushMs = time.Since(syncPushStart).Milliseconds()
 	syncPushPatchBytes = patchBytes
 	if err != nil {
@@ -1423,7 +1425,7 @@ func (s Service) revertSandboxToGitState(localHead string) error {
 	return nil
 }
 
-func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
+func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, cleanPreAppliedNewFiles bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
 	if localHead == "" {
 		return 0, fmt.Errorf("sandbox sync requires a git repository with a valid HEAD")
 	}
@@ -1481,7 +1483,7 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 		return patchBytes, syncPushErr
 	}
 
-	if isNewSandbox {
+	if cleanPreAppliedNewFiles {
 		if err := s.removePreAppliedNewFilesFromSandbox(patches); err != nil {
 			syncPushErr = err
 			return patchBytes, syncPushErr
