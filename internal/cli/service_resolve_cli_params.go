@@ -115,36 +115,18 @@ func extractCliGitParamNames(doc *YAMLDoc) []string {
 		return nil
 	}
 
-	seen := map[string]bool{}
-	collectGitParamNamesFromInitNode(cliInit, seen)
-	return sortedKeys(seen)
-}
-
-func collectGitParamNamesFromInitNode(node ast.Node, seen map[string]bool) {
-	if sequenceNode, ok := node.(*ast.SequenceNode); ok {
-		for _, element := range sequenceNode.Values {
-			collectGitParamNamesFromInitNode(element, seen)
-		}
-		return
-	}
-
-	mappingNode, ok := node.(*ast.MappingNode)
+	mappingNode, ok := cliInit.(*ast.MappingNode)
 	if !ok {
-		return
+		return nil
 	}
 
+	seen := map[string]bool{}
 	for _, field := range mappingNode.Values {
-		if field.Key.String() == "init" {
-			collectGitParamNamesFromInitNode(field.Value, seen)
-			continue
-		}
-		if field.Key.String() == "if" {
-			continue
-		}
 		if strings.Contains(field.Value.String(), "event.git.sha") {
 			seen[field.Key.String()] = true
 		}
 	}
+	return sortedKeys(seen)
 }
 
 func mergeGitParamNames(names ...[]string) []string {

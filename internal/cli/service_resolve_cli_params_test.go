@@ -166,6 +166,34 @@ tasks:
 		require.Equal(t, content, string(fileContent))
 	})
 
+	t.Run("returns CLI git param named init", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
+		require.NoError(t, err)
+		defer tmpFile.Close()
+
+		content := `
+on:
+  cli:
+    init:
+      init: ${{ event.git.sha }}
+
+tasks:
+  - key: test
+    run: echo ${{ init.init }}
+`
+		_, err = tmpFile.WriteString(content)
+		require.NoError(t, err)
+
+		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.False(t, result.Rewritten)
+		require.Equal(t, []string{"init"}, result.GitParams)
+
+		fileContent, err := os.ReadFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.Equal(t, content, string(fileContent))
+	})
+
 	t.Run("adds CLI trigger when another trigger has git params", func(t *testing.T) {
 		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
 		require.NoError(t, err)
