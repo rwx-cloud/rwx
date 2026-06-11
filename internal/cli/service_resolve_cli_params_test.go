@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -369,6 +370,31 @@ tasks:
 		require.Contains(t, string(fileContent), "on:")
 		require.Contains(t, string(fileContent), "cli:")
 		require.Contains(t, string(fileContent), "sha: ${{ event.git.sha }}")
+	})
+
+	t.Run("adds CLI trigger after document separator", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
+		require.NoError(t, err)
+		defer tmpFile.Close()
+
+		content := `---
+tasks:
+  - key: clone
+    call: git/clone 1.8.1
+    with:
+      ref: ${{ init.sha }}
+`
+		_, err = tmpFile.WriteString(content)
+		require.NoError(t, err)
+
+		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.True(t, result.Rewritten)
+
+		fileContent, err := os.ReadFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.True(t, strings.HasPrefix(string(fileContent), "---\non:\n  cli:\n    init:\n      sha: ${{ event.git.sha }}\n"))
+		require.Contains(t, string(fileContent), "tasks:")
 	})
 
 	t.Run("adds CLI trigger when dispatch trigger has git params", func(t *testing.T) {

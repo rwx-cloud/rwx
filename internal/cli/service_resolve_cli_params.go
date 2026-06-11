@@ -183,6 +183,12 @@ func prependOnSection(yamlContent string, params map[string]any) string {
 		onSection.WriteString(fmt.Sprintf("      %s: %s\n", k, params[k]))
 	}
 
+	if strings.HasPrefix(yamlContent, "---\r\n") {
+		return "---\r\n" + onSection.String() + strings.TrimPrefix(yamlContent, "---\r\n")
+	}
+	if strings.HasPrefix(yamlContent, "---\n") {
+		return "---\n" + onSection.String() + strings.TrimPrefix(yamlContent, "---\n")
+	}
 	return onSection.String() + yamlContent
 }
 
