@@ -1224,6 +1224,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			}
 		}
 		require.NotEqual(t, -1, snapshotIdx, "sync snapshot command should be present")
+		require.Contains(t, commandOrder[snapshotIdx], "-c core.hooksPath=/dev/null")
+		require.Contains(t, commandOrder[snapshotIdx], "commit --allow-empty --no-verify")
 		require.Greater(t, snapshotIdx, 0, "sync snapshot should not be first command")
 		require.Equal(t, "__rwx_sandbox_sync_start__", commandOrder[snapshotIdx-1])
 		require.Less(t, snapshotIdx, len(commandOrder)-1, "sync snapshot should not be last command")

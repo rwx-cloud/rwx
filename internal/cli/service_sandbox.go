@@ -1830,7 +1830,7 @@ func (s Service) snapshotSandboxSyncRefForPaths(paths []string) error {
 	} else if paths == nil {
 		script += "/usr/bin/git add -A && "
 	}
-	script += `/usr/bin/git -c user.name=rwx -c user.email=rwx commit --allow-empty -m rwx-sync >/dev/null 2>&1 && /usr/bin/git update-ref refs/rwx-sync HEAD && /usr/bin/git reset --mixed HEAD~1 >/dev/null 2>&1 && /usr/bin/git read-tree "$index_tree"`
+	script += `/usr/bin/git -c user.name=rwx -c user.email=rwx -c core.hooksPath=/dev/null commit --allow-empty --no-verify -m rwx-sync >/dev/null 2>&1 && /usr/bin/git update-ref refs/rwx-sync HEAD && /usr/bin/git reset --mixed HEAD~1 >/dev/null 2>&1 && /usr/bin/git read-tree "$index_tree"`
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 	exitCode, err := s.SSHClient.ExecuteCommand("/bin/sh -lc " + quoteShellArg(script))
