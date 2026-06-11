@@ -259,6 +259,33 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 		require.Equal(t, "https://cloud.rwx.com/runs/run-remote", session.RunURL)
 	})
 
+	t.Run("normalizes relative remote config paths before saving", func(t *testing.T) {
+		setup := setupTest(t)
+		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{})
+
+		remoteCliState := cli.EncodeCliState("develop", ".rwx/sandbox.yml")
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{
+				Runs: []api.SandboxRunSummary{
+					{ID: "run-relative", RunURL: "https://cloud.rwx.com/runs/run-relative", CliState: remoteCliState},
+				},
+			}, nil
+		}
+
+		result, err := setup.service.ListSandboxes(cli.ListSandboxesConfig{Json: true})
+
+		require.NoError(t, err)
+		require.Len(t, result.Sandboxes, 1)
+		require.Equal(t, setup.absConfig(".rwx/sandbox.yml"), result.Sandboxes[0].ConfigFile)
+
+		storage, err := cli.LoadSandboxStorage()
+		require.NoError(t, err)
+		session, found := storage.GetSession("develop", setup.absConfig(".rwx/sandbox.yml"))
+		require.True(t, found)
+		require.Equal(t, "run-relative", session.RunID)
+		require.Equal(t, setup.absConfig(".rwx/sandbox.yml"), session.ConfigFile)
+	})
+
 	t.Run("skips remote runs without cli_state", func(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{})
@@ -3366,6 +3393,74 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		require.True(t, found)
 		require.Equal(t, "run-recovered", session.RunID)
 		require.Equal(t, "recovered-token", session.ScopedToken)
+	})
+
+	t.Run("reuses remote sandbox with relative cli_state config file", func(t *testing.T) {
+		setup := setupTest(t)
+
+		originalHome := os.Getenv("HOME")
+		os.Setenv("HOME", setup.tmp)
+		t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+
+		address := "192.168.1.1:22"
+		branch := "detached"
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		encodedState := cli.EncodeCliState(branch, ".rwx/sandbox.yml")
+
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{
+				Runs: []api.SandboxRunSummary{
+					{
+						ID:       "run-recovered-relative",
+						RunURL:   "https://cloud.rwx.com/runs/run-recovered-relative",
+						CliState: encodedState,
+					},
+				},
+			}, nil
+		}
+
+		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
+			require.Equal(t, "run-recovered-relative", cfg.RunID)
+			return &api.CreateSandboxTokenResult{Token: "relative-token"}, nil
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			require.Equal(t, "run-recovered-relative", id)
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			return nil
+		}
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			return 0, nil
+		}
+		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-recovered-relative", result.RunID)
+		require.Equal(t, "https://cloud.rwx.com/runs/run-recovered-relative", result.RunURL)
+
+		storage, err := cli.LoadSandboxStorage()
+		require.NoError(t, err)
+		session, found := storage.GetSession(branch, configFile)
+		require.True(t, found)
+		require.Equal(t, "run-recovered-relative", session.RunID)
+		require.Equal(t, "relative-token", session.ScopedToken)
+		require.Equal(t, configFile, session.ConfigFile)
 	})
 
 	t.Run("falls through to auto-create when no remote match", func(t *testing.T) {

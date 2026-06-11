@@ -181,6 +181,7 @@ func LoadSandboxStorage() (*SandboxStorage, error) {
 	fd, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			storage.Version = sandboxStorageVersion
 			return storage, nil
 		}
 		return nil, errors.Wrapf(err, "unable to open %q", path)
@@ -197,8 +198,9 @@ func LoadSandboxStorage() (*SandboxStorage, error) {
 
 	if storage.Version < sandboxStorageVersion {
 		storage.Sandboxes = migrateOldSessionKeys(storage.Sandboxes)
-		storage.Version = sandboxStorageVersion
 	}
+	storage.Sandboxes = normalizeSessionKeys(storage.Sandboxes)
+	storage.Version = sandboxStorageVersion
 
 	return storage, nil
 }
@@ -213,6 +215,9 @@ func (s *SandboxStorage) Save() error {
 	if err := ensureSandboxStorageDir(dir); err != nil {
 		return errors.Wrapf(err, "unable to create directory for %q", path)
 	}
+
+	s.Version = sandboxStorageVersion
+	s.Sandboxes = normalizeSessionKeys(s.Sandboxes)
 
 	fd, err := os.CreateTemp(dir, ".sandboxes-*.json.tmp")
 	if err != nil {
@@ -261,9 +266,7 @@ func SessionKey(branch, configFile string) string {
 	if branch == "" {
 		branch = "detached"
 	}
-	if configFile != "" && !filepath.IsAbs(configFile) {
-		panic(fmt.Sprintf("SessionKey called with relative configFile: %q", configFile))
-	}
+	configFile = AbsConfigFile(configFile)
 	return fmt.Sprintf("%s:%s", branch, configFile)
 }
 
@@ -320,6 +323,8 @@ func (s *SandboxStorage) GetSessionsForBranch(branch string) []SandboxSession {
 }
 
 func (s *SandboxStorage) SetSession(branch, configFile string, session SandboxSession) {
+	configFile = AbsConfigFile(configFile)
+	session.ConfigFile = normalizeSessionConfigFile(session.ConfigFile, configFile)
 	key := SessionKey(branch, configFile)
 	s.Sandboxes[key] = session
 }
@@ -381,9 +386,11 @@ func (s *SandboxStorage) GetSessionByAncestry(branch, configFile string, checker
 	if !IsDetachedBranch(branch) || DetachedShortSHA(branch) == "" {
 		return nil, false
 	}
+	configFile = AbsConfigFile(configFile)
 
 	for key, session := range s.Sandboxes {
 		storedBranch, storedConfig := ParseSessionKey(key)
+		storedConfig = AbsConfigFile(storedConfig)
 		if storedConfig != configFile {
 			continue
 		}
@@ -396,6 +403,7 @@ func (s *SandboxStorage) GetSessionByAncestry(branch, configFile string, checker
 		}
 		if checker.IsAncestor(storedSHA, "HEAD") {
 			delete(s.Sandboxes, key)
+			session.ConfigFile = normalizeSessionConfigFile(session.ConfigFile, configFile)
 			newKey := SessionKey(branch, configFile)
 			s.Sandboxes[newKey] = session
 			return &session, true
@@ -436,9 +444,12 @@ func (s *SandboxStorage) GetSessionsForBranchByAncestry(branch string, checker A
 	var sessions []SandboxSession
 	for _, r := range toRekey {
 		delete(s.Sandboxes, r.oldKey)
-		newKey := SessionKey(branch, r.config)
-		s.Sandboxes[newKey] = r.session
-		sessions = append(sessions, r.session)
+		configFile := AbsConfigFile(r.config)
+		session := r.session
+		session.ConfigFile = normalizeSessionConfigFile(session.ConfigFile, configFile)
+		newKey := SessionKey(branch, configFile)
+		s.Sandboxes[newKey] = session
+		sessions = append(sessions, session)
 	}
 
 	return sessions
@@ -470,6 +481,24 @@ func migrateOldSessionKeys(sandboxes map[string]SandboxSession) map[string]Sandb
 		migrated[newKey] = session
 	}
 	return migrated
+}
+
+func normalizeSessionKeys(sandboxes map[string]SandboxSession) map[string]SandboxSession {
+	normalized := make(map[string]SandboxSession, len(sandboxes))
+	for key, session := range sandboxes {
+		branch, configFile := ParseSessionKey(key)
+		configFile = AbsConfigFile(configFile)
+		session.ConfigFile = normalizeSessionConfigFile(session.ConfigFile, configFile)
+		normalized[SessionKey(branch, configFile)] = session
+	}
+	return normalized
+}
+
+func normalizeSessionConfigFile(sessionConfigFile, keyConfigFile string) string {
+	if sessionConfigFile == "" || (keyConfigFile != "" && !filepath.IsAbs(sessionConfigFile)) {
+		return keyConfigFile
+	}
+	return AbsConfigFile(sessionConfigFile)
 }
 
 func migrateSessionKey(key string) string {
