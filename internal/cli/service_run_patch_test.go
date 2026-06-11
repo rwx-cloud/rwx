@@ -1,7 +1,7 @@
 package cli_test
 
 import (
-	"errors"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
+	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/git"
 	"github.com/rwx-cloud/rwx/internal/mocks"
 	"github.com/stretchr/testify/require"
@@ -163,7 +164,7 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 		s := setupTest(t)
 		s.mockGit.MockIsInstalled = true
 		s.mockGit.MockIsInsideWorkTree = true
-		s.mockGit.MockGetCommitError = errors.New("no git remote named 'origin' is configured")
+		s.mockGit.MockGetCommitError = stderrors.New("no git remote named 'origin' is configured")
 
 		rwxDir := filepath.Join(s.tmp, ".rwx")
 		err := os.MkdirAll(rwxDir, 0o755)
@@ -206,7 +207,7 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 		s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
 		s.mockGit.MockGetBranch = "main"
 		s.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		s.mockGit.MockGeneratePatchFileError = errors.New("unable to generate patch data")
+		s.mockGit.MockGeneratePatchFileError = stderrors.New("unable to generate patch data")
 
 		rwxDir := filepath.Join(s.tmp, ".rwx")
 		err := os.MkdirAll(rwxDir, 0o755)
@@ -417,22 +418,41 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 		})
 
 		t.Run("by default", func(t *testing.T) {
-			expectedPatchMetadata := api.PatchMetadata{
-				Sent:     true,
-				LFSFiles: lfsChangedFiles.Files,
-				LFSCount: lfsChangedFiles.Count,
+			s := setupTest(t)
+			s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+			s.mockGit.MockGeneratePatchFile = patchFile
+
+			rwxDir := filepath.Join(s.tmp, ".rwx")
+			err := os.MkdirAll(rwxDir, 0o755)
+			require.NoError(t, err)
+
+			definitionsFile := filepath.Join(rwxDir, "rwx.yml")
+			definition := "on:\n  cli:\n    init:\n      sha: ${{ event.git.sha }}\n\nbase:\n  os: ubuntu 24.04\n  tag: 1.0\n\ntasks:\n  - key: foo\n    run: echo 'bar'\n"
+			err = os.WriteFile(definitionsFile, []byte(definition), 0o644)
+			require.NoError(t, err)
+
+			s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+				return &api.PackageVersionsResult{
+					LatestMajor: make(map[string]string),
+					LatestMinor: make(map[string]map[string]string),
+				}, nil
+			}
+			s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+				t.Fatalf("run should not be initiated when the patch contains LFS changes")
+				return nil, nil
 			}
 
-			result := initiateRun(t, patchFile, expectedPatchMetadata)
+			_, err = s.service.InitiateRun(cli.InitiateRunConfig{
+				RwxDirectory: rwxDir,
+				MintFilePath: definitionsFile,
+				Patchable:    true,
+			})
 
-			patched := false
-			for _, entry := range result.rwxDir {
-				if strings.Contains(entry.Path, ".patches/") {
-					patched = true
-				}
-			}
-
-			require.True(t, patched)
+			require.Error(t, err)
+			require.True(t, errors.Is(err, errors.ErrPatch))
+			require.Contains(t, err.Error(), "1 LFS file(s) changed locally and cannot be included in the RWX run patch:")
+			require.Contains(t, err.Error(), "  bar.txt")
+			require.Contains(t, err.Error(), "To recover, commit and push your changes, then retry rwx run.")
 		})
 
 		t.Run("when init params match git params", func(t *testing.T) {

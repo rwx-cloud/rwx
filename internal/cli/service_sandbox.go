@@ -1477,14 +1477,8 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 	patchBytes = patches.Size()
 	if patches.LFSChangedFiles != nil && patches.LFSChangedFiles.Count > 0 {
 		lfsSkippedCount = patches.LFSChangedFiles.Count
-		if !jsonMode {
-			fmt.Fprintf(s.Stderr, "Warning: %d LFS file(s) changed locally and cannot be synced.\n", patches.LFSChangedFiles.Count)
-		}
-		if err := s.snapshotSandboxSyncRefForExec(isNewSandbox, patches.Files); err != nil {
-			syncPushErr = err
-			return patchBytes, syncPushErr
-		}
-		return patchBytes, nil
+		syncPushErr = sandboxLFSChangesError(*patches.LFSChangedFiles)
+		return patchBytes, syncPushErr
 	}
 
 	if isNewSandbox {
@@ -1605,14 +1599,13 @@ func (s Service) checkSandboxLFSObjects(localHead string) (missing error, checkE
 func sandboxLFSFsckError(localHead, output string, exitCode int) error {
 	output = strings.TrimSpace(output)
 	files := sandboxLFSFilesFromFsckOutput(output)
-	recovery := "To recover, push your changes and reset the sandbox."
 	if len(files) > 0 {
-		return fmt.Errorf("%d LFS file(s) changed locally and cannot be synced to the sandbox:\n%s\n\n%s", len(files), indentLines(files), recovery)
+		return fmt.Errorf("%d LFS file(s) changed locally and cannot be synced to the sandbox:\n%s\n\n%s", len(files), indentLines(files), sandboxLFSRecovery)
 	}
 	if output == "" {
-		return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s (git lfs fsck exit code %d).\n\n%s", localHead, exitCode, recovery)
+		return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s (git lfs fsck exit code %d).\n\n%s", localHead, exitCode, sandboxLFSRecovery)
 	}
-	return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s.\n\n%s\n\nGit LFS check output:\n%s", localHead, recovery, output)
+	return fmt.Errorf("LFS file(s) changed locally and cannot be synced to the sandbox for commit %s.\n\n%s\n\nGit LFS check output:\n%s", localHead, sandboxLFSRecovery, output)
 }
 
 // lfsFsckObjectLineRe matches a per-object `git lfs fsck` line (group 1 is the

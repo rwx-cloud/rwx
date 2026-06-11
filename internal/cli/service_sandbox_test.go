@@ -1203,12 +1203,13 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Equal(t, "__rwx_sandbox_sync_end__", commandOrder[snapshotIdx+1])
 	})
 
-	t.Run("warns and skips sync for LFS files", func(t *testing.T) {
+	t.Run("returns error for LFS files without syncing non-LFS changes", func(t *testing.T) {
 		setup := setupTest(t)
 
 		runID := "run-lfs-123"
 		address := "192.168.1.1:22"
 		syncPatchApplied := false
+		commandExecuted := false
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
@@ -1225,18 +1226,22 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 
 		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
 			return git.DirtyPatches{
+				Staged:          []byte("diff --git a/non-lfs.txt b/non-lfs.txt\n"),
 				LFSChangedFiles: &git.LFSChangedFilesMetadata{Files: []string{"large.bin"}, Count: 1},
 			}, nil
 		}
 
-		setup.mockSSH.MockExecuteCommandWithStdin = func(command string, stdin io.Reader) (int, error) {
+		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
 			syncPatchApplied = true
-			return 0, nil
+			return 0, "", nil
 		}
 
 		var commands []string
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			commands = append(commands, cmd)
+			if cmd == "echo hello" {
+				commandExecuted = true
+			}
 			return 0, nil
 		}
 
@@ -1249,16 +1254,18 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
 			Command:    []string{"echo", "hello"},
 			RunID:      runID,
-			Json:       false, // Enable warning output
+			Json:       false,
 		})
 
-		require.NoError(t, err)
-		require.Equal(t, runID, result.RunID)
-		require.Equal(t, 0, result.ExitCode)
+		require.Nil(t, result)
+		require.Error(t, err)
+		require.True(t, errors.Is(err, errors.ErrPatch))
 		require.False(t, syncPatchApplied)
-		require.Contains(t, setup.mockStderr.String(), "LFS file(s) changed")
-		// The post-exec revert also runs `update-ref refs/rwx-sync HEAD`; match
-		// the snapshot's commit step to confirm the LFS-skip path took it.
+		require.False(t, commandExecuted)
+		require.Contains(t, err.Error(), "1 LFS file(s) changed locally and cannot be synced to the sandbox:")
+		require.Contains(t, err.Error(), "  large.bin")
+		require.Contains(t, err.Error(), "To recover, push your changes and reset the sandbox.")
+		require.NotContains(t, setup.mockStderr.String(), "Warning:")
 		snapshotTaken := false
 		for _, cmd := range commands {
 			if strings.Contains(cmd, "commit --allow-empty") && strings.Contains(cmd, "update-ref refs/rwx-sync HEAD") {
@@ -1266,7 +1273,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 				break
 			}
 		}
-		require.True(t, snapshotTaken, "LFS-skip path should snapshot refs/rwx-sync")
+		require.False(t, snapshotTaken, "LFS error path should not snapshot refs/rwx-sync")
 	})
 
 	t.Run("returns error when git apply fails", func(t *testing.T) {

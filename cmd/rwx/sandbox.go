@@ -21,7 +21,16 @@ var sandboxCmd = &cobra.Command{
 var sandboxStartCmd = &cobra.Command{
 	Use:   "start [config-file]",
 	Short: "Start a sandbox without executing a command",
-	Args:  cobra.MaximumNArgs(1),
+	Long: `Start a sandbox without executing a command.
+
+FILE PATCHING
+  When starting a new sandbox, RWX launches a run from the sandbox config and
+  includes a git patch for local uncommitted changes when possible.
+
+  Git LFS changes cannot be included in the initial sandbox patch and will
+  produce an error. Commit and push those changes before starting the sandbox.
+`,
+	Args: cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireAccessToken()
 	},
@@ -149,7 +158,8 @@ FILE SYNCING
   automatically pulled back to the local working directory via git patch.
   This happens regardless of the command's exit code.
 
-  Note: Git LFS files cannot be synced and will generate a warning.
+  If local changes include Git LFS files, syncing fails with an error before
+  the command runs.
 
 CONFIG FILE
   The sandbox configuration (default: .rwx/sandbox.yml) defines:
