@@ -422,9 +422,11 @@ func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (PatchFile
 // AddUntrackedFilesForPatch temporarily adds untracked files with intent-to-add
 // so they appear in git diff. Returns a cleanup function to undo the add.
 func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
+	dir := c.applyDir()
+
 	// Get untracked files
 	cmd := exec.Command(c.Binary, "ls-files", "-z", "--others", "--exclude-standard")
-	cmd.Dir = c.Dir
+	cmd.Dir = dir
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -439,7 +441,7 @@ func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
 	// Add with intent-to-add
 	args := append([]string{"add", "-N", "--"}, files...)
 	cmd = exec.Command(c.Binary, args...)
-	cmd.Dir = c.Dir
+	cmd.Dir = dir
 	if err := cmd.Run(); err != nil {
 		return nil, err
 	}
@@ -448,7 +450,7 @@ func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
 	cleanup = func() {
 		args := append([]string{"reset", "HEAD", "--"}, files...)
 		cmd := exec.Command(c.Binary, args...)
-		cmd.Dir = c.Dir
+		cmd.Dir = dir
 		_ = cmd.Run() // Best effort cleanup
 	}
 
@@ -499,9 +501,10 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 	}
 
 	lfsChangedFiles := []string{}
+	dir := c.applyDir()
 	for _, file := range files {
 		cmd := exec.Command(c.Binary, "check-attr", "filter", "--", file)
-		cmd.Dir = c.Dir
+		cmd.Dir = dir
 
 		attrs, err := cmd.CombinedOutput()
 		if err != nil {
@@ -627,6 +630,7 @@ func (c *Client) HasCommit(sha string) bool {
 
 func (c *Client) lfsFilesForPaths(files []string) (LFSChangedFilesMetadata, *PatchError) {
 	lfsChangedFiles := []string{}
+	dir := c.applyDir()
 
 	for _, file := range files {
 		if file == "" {
@@ -634,7 +638,7 @@ func (c *Client) lfsFilesForPaths(files []string) (LFSChangedFilesMetadata, *Pat
 		}
 
 		cmd := exec.Command(c.Binary, "check-attr", "filter", "--", file)
-		cmd.Dir = c.Dir
+		cmd.Dir = dir
 
 		// CombinedOutput mixes stderr into attrs, so pass it as the fallback
 		// stderr for the PatchError (the *exec.ExitError won't carry .Stderr).

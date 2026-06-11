@@ -12,11 +12,14 @@ type Git struct {
 	MockGetBranch              string
 	MockGetHead                string
 	MockGetHeadError           error
+	MockGetTopLevel            string
 	MockGetCommit              string
 	MockGetCommitError         error
 	MockGetOriginUrl           string
 	MockGeneratePatchFile      git.PatchFile
 	MockGeneratePatchFileError error
+	MockGeneratePatchFileFunc  func(destDir string, pathspec []string) (git.PatchFile, error)
+	MockGeneratePatchPathspec  []string
 	MockGeneratePatch          func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error)
 	MockGenerateDirtyPatches   func() (git.DirtyPatches, error)
 	MockHasCommit              func(sha string) bool
@@ -43,6 +46,10 @@ func (c *Git) GetHeadCommit() (string, error) {
 	return c.MockGetHead, c.MockGetHeadError
 }
 
+func (c *Git) GetTopLevel() string {
+	return c.MockGetTopLevel
+}
+
 func (c *Git) GetCommit() (string, error) {
 	return c.MockGetCommit, c.MockGetCommitError
 }
@@ -52,6 +59,11 @@ func (c *Git) GetOriginUrl() string {
 }
 
 func (c *Git) GeneratePatchFile(destDir string, pathspec []string) (git.PatchFile, error) {
+	c.MockGeneratePatchPathspec = append([]string(nil), pathspec...)
+	if c.MockGeneratePatchFileFunc != nil {
+		return c.MockGeneratePatchFileFunc(destDir, pathspec)
+	}
+
 	if c.MockGeneratePatchFileError != nil {
 		return git.PatchFile{}, c.MockGeneratePatchFileError
 	}

@@ -638,6 +638,30 @@ func TestGeneratePatchFile(t *testing.T) {
 			require.Equal(t, 0, patchFile.UntrackedFiles.Count)
 		})
 
+		t.Run("root pathspec includes changes outside current directory", func(t *testing.T) {
+			tempDir, sha := repoFixture(t, "testdata/GeneratePatchFile-diff-exclude")
+			repo := filepath.Join(tempDir, "repo")
+			subdir := filepath.Join(repo, "subdir")
+			require.NoError(t, os.Mkdir(subdir, 0o755))
+
+			client := &git.Client{Binary: "git", Dir: subdir}
+			patchFile, err := client.GeneratePatchFile(repo, []string{":/", ":(top,exclude).rwx"})
+			require.NoError(t, err)
+
+			require.Equal(t, true, patchFile.Written)
+			require.Equal(t, filepath.Join(repo, sha), patchFile.Path)
+
+			patch, err := os.ReadFile(patchFile.Path)
+			require.NoError(t, err)
+			require.Contains(t, string(patch), "included.txt")
+			require.Contains(t, string(patch), "untracked.txt")
+			require.NotContains(t, string(patch), "excluded.txt")
+			require.NotContains(t, string(patch), "untracked-excluded.txt")
+
+			require.Equal(t, []string{}, patchFile.UntrackedFiles.Files)
+			require.Equal(t, 0, patchFile.UntrackedFiles.Count)
+		})
+
 		t.Run("returns a PatchError identifying the failing git command", func(t *testing.T) {
 			tempDir, _ := repoFixture(t, "testdata/GeneratePatchFile-diff")
 			client := &git.Client{Binary: "git", Dir: filepath.Join(tempDir, "repo")}
