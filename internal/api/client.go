@@ -311,6 +311,10 @@ func (c Client) InitiateRun(cfg InitiateRunConfig) (*InitiateRunResult, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusAccepted {
+		return parseDeferredRunResponse(resp.Body)
+	}
+
 	if resp.StatusCode != 201 {
 		msg := extractErrorMessage(resp.Body)
 		if msg == "" {
@@ -354,6 +358,59 @@ func (c Client) InitiateRun(cfg InitiateRunConfig) (*InitiateRunResult, error) {
 			Message:          respBody.SnakeMessage,
 		}, nil
 	}
+}
+
+func parseDeferredRunResponse(body io.Reader) (*InitiateRunResult, error) {
+	respBody := struct {
+		Status      string `json:"status"`
+		DeferredRun struct {
+			ID             string `json:"id"`
+			PlaceholderURL string `json:"placeholderUrl"`
+			PollingURL     string `json:"pollingUrl"`
+			ExpiresAt      string `json:"expiresAt"`
+		} `json:"deferredRun"`
+	}{}
+
+	if err := json.NewDecoder(body).Decode(&respBody); err != nil {
+		return nil, errors.Wrap(err, "unable to parse deferred run response")
+	}
+
+	return &InitiateRunResult{
+		Deferred:       true,
+		DeferredRunID:  respBody.DeferredRun.ID,
+		PlaceholderURL: respBody.DeferredRun.PlaceholderURL,
+		PollingURL:     respBody.DeferredRun.PollingURL,
+		ExpiresAt:      respBody.DeferredRun.ExpiresAt,
+	}, nil
+}
+
+// DeferredRunStatus polls the deferred-run status endpoint whose URL the server
+// returned in the 202 response. The URL is absolute, so RoundTrip leaves its
+// scheme/host intact.
+func (c Client) DeferredRunStatus(pollingURL string) (DeferredRunStatusResult, error) {
+	result := DeferredRunStatusResult{}
+
+	if pollingURL == "" {
+		return result, errors.New("deferred run response did not include a polling URL")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, pollingURL, nil)
+	if err != nil {
+		return result, errors.Wrap(err, "unable to create new HTTP request")
+	}
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return result, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	if err = decodeResponseJSON(resp, &result); err != nil {
+		return result, err
+	}
+
+	return result, nil
 }
 
 func (c Client) InitiateDispatch(cfg InitiateDispatchConfig) (*InitiateDispatchResult, error) {

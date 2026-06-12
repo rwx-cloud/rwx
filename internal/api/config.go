@@ -64,6 +64,15 @@ type InitiateRunResult struct {
 	TargetedTaskKeys []string
 	DefinitionPath   string
 	Message          string
+
+	// Deferred and the fields below it are only populated when the API returns a
+	// 202 deferred response (an ephemeral org whose task servers are cold-starting).
+	// The run does not exist yet; PollingURL must be polled until it does.
+	Deferred       bool
+	DeferredRunID  string
+	PlaceholderURL string
+	PollingURL     string
+	ExpiresAt      string
 }
 
 func (c InitiateRunConfig) Validate() error {
@@ -299,6 +308,20 @@ const (
 type PollingResult struct {
 	Completed bool `json:"completed"`
 	BackoffMs *int `json:"backoff_ms,omitempty"`
+}
+
+const (
+	DeferredRunStatePending = "pending"
+	DeferredRunStateCreated = "created"
+	DeferredRunStateExpired = "expired"
+)
+
+type DeferredRunStatusResult struct {
+	State         string        `json:"state"`
+	RunID         string        `json:"run_id,omitempty"`
+	RunURL        string        `json:"run_url,omitempty"`
+	FailureReason string        `json:"failure_reason,omitempty"`
+	Polling       PollingResult `json:"polling"`
 }
 
 type TaskStatus struct {

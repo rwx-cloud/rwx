@@ -93,6 +93,99 @@ func TestAPIClient_InitiateRun(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "123", result.RunID)
 	})
+
+	t.Run("parses a 202 deferred response", func(t *testing.T) {
+		bodyBytes := []byte(`{
+			"status": "deferred",
+			"deferredRun": {
+				"id": "deferred-123",
+				"placeholderUrl": "https://cloud.rwx.com/mint/org/runs/pending/deferred-123",
+				"pollingUrl": "https://cloud.rwx.com/mint/api/deferred_runs/deferred-123",
+				"expiresAt": "2026-06-12T00:07:00Z"
+			}
+		}`)
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "202 Accepted",
+				StatusCode: 202,
+				Body:       io.NopCloser(bytes.NewReader(bodyBytes)),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		result, err := c.InitiateRun(api.InitiateRunConfig{
+			TaskDefinitions: []api.RwxDirectoryEntry{
+				{Path: "foo", FileContents: "echo 'bar'", Permissions: 0o644, Type: "file"},
+			},
+		})
+		require.NoError(t, err)
+		require.True(t, result.Deferred)
+		require.Equal(t, "deferred-123", result.DeferredRunID)
+		require.Equal(t, "https://cloud.rwx.com/mint/org/runs/pending/deferred-123", result.PlaceholderURL)
+		require.Equal(t, "https://cloud.rwx.com/mint/api/deferred_runs/deferred-123", result.PollingURL)
+		require.Equal(t, "2026-06-12T00:07:00Z", result.ExpiresAt)
+		require.Empty(t, result.RunID)
+	})
+
+}
+
+func TestAPIClient_DeferredRunStatus(t *testing.T) {
+	t.Run("returns an error when the polling URL is empty", func(t *testing.T) {
+		c := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			t.Fatal("should not make a request without a polling URL")
+			return nil, nil
+		})
+
+		_, err := c.DeferredRunStatus("")
+		require.Error(t, err)
+	})
+
+	t.Run("parses a pending response", func(t *testing.T) {
+		bodyBytes := []byte(`{"state": "pending", "polling": {"completed": false, "backoff_ms": 2000}}`)
+
+		c := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, "/mint/api/deferred_runs/deferred-123", req.URL.Path)
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(bodyBytes))}, nil
+		})
+
+		result, err := c.DeferredRunStatus("https://cloud.rwx.com/mint/api/deferred_runs/deferred-123")
+		require.NoError(t, err)
+		require.Equal(t, api.DeferredRunStatePending, result.State)
+		require.False(t, result.Polling.Completed)
+		require.NotNil(t, result.Polling.BackoffMs)
+		require.Equal(t, 2000, *result.Polling.BackoffMs)
+	})
+
+	t.Run("parses a created response", func(t *testing.T) {
+		bodyBytes := []byte(`{"state": "created", "run_id": "run-789", "run_url": "https://cloud.rwx.com/mint/org/runs/run-789", "polling": {"completed": true}}`)
+
+		c := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(bodyBytes))}, nil
+		})
+
+		result, err := c.DeferredRunStatus("https://cloud.rwx.com/mint/api/deferred_runs/deferred-123")
+		require.NoError(t, err)
+		require.Equal(t, api.DeferredRunStateCreated, result.State)
+		require.Equal(t, "run-789", result.RunID)
+		require.Equal(t, "https://cloud.rwx.com/mint/org/runs/run-789", result.RunURL)
+		require.True(t, result.Polling.Completed)
+	})
+
+	t.Run("parses an expired response", func(t *testing.T) {
+		bodyBytes := []byte(`{"state": "expired", "failure_reason": "no task server became available", "polling": {"completed": true}}`)
+
+		c := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(bodyBytes))}, nil
+		})
+
+		result, err := c.DeferredRunStatus("https://cloud.rwx.com/mint/api/deferred_runs/deferred-123")
+		require.NoError(t, err)
+		require.Equal(t, api.DeferredRunStateExpired, result.State)
+		require.Equal(t, "no task server became available", result.FailureReason)
+		require.True(t, result.Polling.Completed)
+	})
 }
 
 func TestAPIClient_ObtainAuthCode(t *testing.T) {
