@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/rwx-cloud/rwx/internal/api"
@@ -203,6 +205,16 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 	patchDir := filepath.Join(rwxDirectoryPath, ".patches")
 	defer os.RemoveAll(patchDir)
 
+	// Go's default SIGINT/SIGTERM handling terminates the process without
+	// unwinding deferred functions, so the os.RemoveAll cleanup above never runs
+	// on Ctrl+C. The deferred-run poll (awaitDeferredRun, reached from this
+	// function) is explicitly designed for the user to Ctrl+C mid-wait, which
+	// would otherwise strand the patch file written into patchDir. Mirror the
+	// deferred cleanup on signal so the patch (and any temp .rwx dir) is removed
+	// before the process exits.
+	stopSignalCleanup := removePathsOnSignal(tempRwxDir, patchDir)
+	defer stopSignalCleanup()
+
 	// Generate patches if enabled and git is available
 	patchable := cfg.Patchable && gitAvailable
 	if _, ok := os.LookupEnv("RWX_DISABLE_GIT_PATCH"); ok {
@@ -394,4 +406,36 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 	}
 
 	return runResult, nil
+}
+
+// removePathsOnSignal removes the given paths if the process receives SIGINT or
+// SIGTERM, then restores default signal handling and re-raises the signal so the
+// process still exits with its conventional status. It returns a stop function
+// that must be called (deferred) to tear down the handler on the normal,
+// non-signal return path.
+func removePathsOnSignal(paths ...string) func() {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	done := make(chan struct{})
+
+	go func() {
+		select {
+		case sig := <-sigCh:
+			for _, p := range paths {
+				if p != "" {
+					_ = os.RemoveAll(p)
+				}
+			}
+			// Restore default handling and re-send the signal to self so the
+			// process exits as it normally would (e.g. status 130 on SIGINT).
+			signal.Stop(sigCh)
+			if proc, err := os.FindProcess(os.Getpid()); err == nil {
+				_ = proc.Signal(sig)
+			}
+		case <-done:
+			signal.Stop(sigCh)
+		}
+	}()
+
+	return func() { close(done) }
 }
