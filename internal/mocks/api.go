@@ -9,6 +9,7 @@ type API struct {
 	MockGetSkillContent                         func() (string, error)
 	MockGetSkillLatestVersion                   func() (string, error)
 	MockInitiateRun                             func(api.InitiateRunConfig) (*api.InitiateRunResult, error)
+	MockDeferredRunStatus                       func(pollingURL string) (api.DeferredRunStatusResult, error)
 	MockGetDebugConnectionInfo                  func(runID string) (api.DebugConnectionInfo, error)
 	MockGetSandboxConnectionInfo                func(runID, scopedToken string) (api.SandboxConnectionInfo, error)
 	MockCreateSandboxToken                      func(api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error)
@@ -72,6 +73,14 @@ func (c *API) InitiateRun(cfg api.InitiateRunConfig) (*api.InitiateRunResult, er
 	}
 
 	return nil, errors.New("MockInitiateRun was not configured")
+}
+
+func (c *API) DeferredRunStatus(pollingURL string) (api.DeferredRunStatusResult, error) {
+	if c.MockDeferredRunStatus != nil {
+		return c.MockDeferredRunStatus(pollingURL)
+	}
+
+	return api.DeferredRunStatusResult{}, errors.New("MockDeferredRunStatus was not configured")
 }
 
 func (c *API) GetDebugConnectionInfo(runID string) (api.DebugConnectionInfo, error) {

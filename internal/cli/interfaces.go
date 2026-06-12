@@ -19,6 +19,7 @@ type APIClient interface {
 	CreateSandboxToken(api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error)
 	GetDispatch(api.GetDispatchConfig) (*api.GetDispatchResult, error)
 	InitiateRun(api.InitiateRunConfig) (*api.InitiateRunResult, error)
+	DeferredRunStatus(pollingURL string) (api.DeferredRunStatusResult, error)
 	InitiateDispatch(api.InitiateDispatchConfig) (*api.InitiateDispatchResult, error)
 	ObtainAuthCode(api.ObtainAuthCodeConfig) (*api.ObtainAuthCodeResult, error)
 	AcquireToken(tokenUrl string) (*api.AcquireTokenResult, error)
