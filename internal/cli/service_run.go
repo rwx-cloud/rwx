@@ -354,5 +354,9 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		return nil, errors.Wrap(err, "Failed to initiate run")
 	}
 
+	if runResult.Deferred {
+		return s.awaitDeferredRun(runResult, cfg)
+	}
+
 	return runResult, nil
 }
