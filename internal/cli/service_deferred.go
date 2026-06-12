@@ -18,7 +18,7 @@ const deferredRunDefaultBackoffMs = 2000
 // (print, --open, --wait, --debug) is unchanged.
 func (s Service) awaitDeferredRun(deferred *api.InitiateRunResult, cfg InitiateRunConfig) (*api.InitiateRunResult, error) {
 	if !cfg.Json {
-		fmt.Fprintf(s.Stdout, "Your organization's task servers are starting up. Your run will begin shortly.\nTrack it here: %s\n", deferred.PlaceholderURL)
+		fmt.Fprintf(s.Stdout, "Your run will begin shortly.\nTrack it here: %s\n", deferred.PlaceholderURL)
 	}
 
 	var stopSpinner func()
