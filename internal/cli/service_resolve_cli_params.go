@@ -43,16 +43,19 @@ func resolveCliParams(yamlContent string) (string, []string, error) {
 		return "", nil, errors.Wrap(err, "failed to parse YAML")
 	}
 
-	// Skip if CLI init already has git event references
-	if cliInit := doc.TryReadStringAtPath("$.on.cli.init"); strings.Contains(cliInit, "event.git.") {
-		return yamlContent, nil, nil
-	}
-
 	gitParamsMap, err := extractGitParams(doc)
 	gitParamNames := getGitParamNames(gitParamsMap)
 	if err != nil {
 		return "", gitParamNames, err
 	}
+	gitParamNames = mergeGitParamNames(gitParamNames, extractCliGitParamNames(doc))
+
+	// Skip rewriting if CLI init already has git event references, but still
+	// return the git param names so callers can suppress HEAD-based patches.
+	if cliInit := doc.TryReadStringAtPath("$.on.cli.init"); strings.Contains(cliInit, "event.git.") {
+		return yamlContent, gitParamNames, nil
+	}
+
 	if len(gitParamsMap) == 0 {
 		return yamlContent, gitParamNames, nil
 	}
@@ -106,6 +109,48 @@ func getGitParamNames(params map[string]any) []string {
 	return names
 }
 
+func extractCliGitParamNames(doc *YAMLDoc) []string {
+	cliInit, err := doc.getNodeAtPath("$.on.cli.init")
+	if err != nil {
+		return nil
+	}
+
+	mappingNode, ok := cliInit.(*ast.MappingNode)
+	if !ok {
+		return nil
+	}
+
+	seen := map[string]bool{}
+	for _, field := range mappingNode.Values {
+		if strings.Contains(field.Value.String(), "event.git.sha") {
+			seen[field.Key.String()] = true
+		}
+	}
+	return sortedKeys(seen)
+}
+
+func mergeGitParamNames(names ...[]string) []string {
+	seen := map[string]bool{}
+	for _, group := range names {
+		for _, name := range group {
+			seen[name] = true
+		}
+	}
+	return sortedKeys(seen)
+}
+
+func sortedKeys(values map[string]bool) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
 func prependOnSection(yamlContent string, params map[string]any) string {
 	var onSection strings.Builder
 	onSection.WriteString("on:\n  cli:\n    init:\n")
@@ -120,6 +165,12 @@ func prependOnSection(yamlContent string, params map[string]any) string {
 		onSection.WriteString(fmt.Sprintf("      %s: %s\n", k, params[k]))
 	}
 
+	if strings.HasPrefix(yamlContent, "---\r\n") {
+		return "---\r\n" + onSection.String() + strings.TrimPrefix(yamlContent, "---\r\n")
+	}
+	if strings.HasPrefix(yamlContent, "---\n") {
+		return "---\n" + onSection.String() + strings.TrimPrefix(yamlContent, "---\n")
+	}
 	return onSection.String() + yamlContent
 }
 

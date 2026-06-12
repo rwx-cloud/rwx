@@ -315,7 +315,7 @@ func (c *Client) generatePatchData(pathspec []string) (patchResult, *PatchError)
 		return patchResult{}, nil
 	}
 
-	diffArgs := []string{"diff", sha, "--name-only"}
+	diffArgs := []string{"diff", "-z", "--name-only", sha}
 	if len(pathspec) > 0 {
 		diffArgs = append(diffArgs, "--")
 		diffArgs = append(diffArgs, pathspec...)
@@ -328,7 +328,7 @@ func (c *Client) generatePatchData(pathspec []string) (patchResult, *PatchError)
 		return patchResult{}, newPatchError("diff_name_only", "git diff --name-only", err, "")
 	}
 
-	lfsChanged, lfsErr := c.lfsFilesForPaths(strings.Split(strings.TrimSpace(string(files)), "\n"))
+	lfsChanged, lfsErr := c.lfsFilesForPaths(splitNULPaths(files))
 	if lfsErr != nil {
 		return patchResult{}, lfsErr
 	}
@@ -341,7 +341,7 @@ func (c *Client) generatePatchData(pathspec []string) (patchResult, *PatchError)
 		}, nil
 	}
 
-	lsFilesArgs := []string{"ls-files", "--others", "--exclude-standard"}
+	lsFilesArgs := []string{"ls-files", "-z", "--others", "--exclude-standard"}
 	if len(pathspec) > 0 {
 		lsFilesArgs = append(lsFilesArgs, "--")
 		lsFilesArgs = append(lsFilesArgs, pathspec...)
@@ -354,7 +354,7 @@ func (c *Client) generatePatchData(pathspec []string) (patchResult, *PatchError)
 		return patchResult{}, newPatchError("ls_files", "git ls-files --others --exclude-standard", err, "")
 	}
 
-	untrackedFiles := strings.Fields(string(untracked))
+	untrackedFiles := splitNULPaths(untracked)
 
 	patchArgs := []string{"diff", sha, "-p", "--binary"}
 	if len(pathspec) > 0 {
@@ -422,22 +422,17 @@ func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (PatchFile
 // AddUntrackedFilesForPatch temporarily adds untracked files with intent-to-add
 // so they appear in git diff. Returns a cleanup function to undo the add.
 func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
+	dir := c.applyDir()
+
 	// Get untracked files
-	cmd := exec.Command(c.Binary, "ls-files", "--others", "--exclude-standard")
-	cmd.Dir = c.Dir
+	cmd := exec.Command(c.Binary, "ls-files", "-z", "--others", "--exclude-standard")
+	cmd.Dir = dir
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
 
-	// Split on newlines (not Fields) to handle filenames with spaces
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	var files []string
-	for _, line := range lines {
-		if line != "" {
-			files = append(files, line)
-		}
-	}
+	files := splitNULPaths(output)
 
 	if len(files) == 0 {
 		return func() {}, nil // No untracked files, no-op cleanup
@@ -446,7 +441,7 @@ func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
 	// Add with intent-to-add
 	args := append([]string{"add", "-N", "--"}, files...)
 	cmd = exec.Command(c.Binary, args...)
-	cmd.Dir = c.Dir
+	cmd.Dir = dir
 	if err := cmd.Run(); err != nil {
 		return nil, err
 	}
@@ -455,7 +450,7 @@ func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
 	cleanup = func() {
 		args := append([]string{"reset", "HEAD", "--"}, files...)
 		cmd := exec.Command(c.Binary, args...)
-		cmd.Dir = c.Dir
+		cmd.Dir = dir
 		_ = cmd.Run() // Best effort cleanup
 	}
 
@@ -506,9 +501,10 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 	}
 
 	lfsChangedFiles := []string{}
+	dir := c.applyDir()
 	for _, file := range files {
 		cmd := exec.Command(c.Binary, "check-attr", "filter", "--", file)
-		cmd.Dir = c.Dir
+		cmd.Dir = dir
 
 		attrs, err := cmd.CombinedOutput()
 		if err != nil {
@@ -516,9 +512,7 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 		}
 
 		if strings.Contains(string(attrs), "filter: lfs") {
-			parts := strings.SplitN(string(attrs), ":", 2)
-			lfsFile := strings.TrimSpace(parts[0])
-			lfsChangedFiles = append(lfsChangedFiles, lfsFile)
+			lfsChangedFiles = append(lfsChangedFiles, file)
 		}
 	}
 
@@ -550,8 +544,8 @@ func (c *Client) changedFilesForDirtyPatch() ([]string, error) {
 	var files []string
 
 	for _, args := range [][]string{
-		{"diff", "--cached", "--name-only"},
-		{"diff", "--name-only"},
+		{"diff", "--cached", "-z", "--name-only"},
+		{"diff", "-z", "--name-only"},
 	} {
 		cmd := exec.Command(c.Binary, args...)
 		cmd.Dir = c.Dir
@@ -560,7 +554,7 @@ func (c *Client) changedFilesForDirtyPatch() ([]string, error) {
 			return nil, err
 		}
 
-		for _, file := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		for _, file := range splitNULPaths(out) {
 			if file == "" || seen[file] {
 				continue
 			}
@@ -577,8 +571,8 @@ func (c *Client) newFilesForDirtyPatch() ([]string, error) {
 	var files []string
 
 	for _, args := range [][]string{
-		{"diff", "--cached", "--name-only", "--diff-filter=A"},
-		{"diff", "--name-only", "--diff-filter=A"},
+		{"diff", "--cached", "-z", "--name-only", "--diff-filter=A"},
+		{"diff", "-z", "--name-only", "--diff-filter=A"},
 	} {
 		cmd := exec.Command(c.Binary, args...)
 		cmd.Dir = c.Dir
@@ -587,7 +581,7 @@ func (c *Client) newFilesForDirtyPatch() ([]string, error) {
 			return nil, err
 		}
 
-		for _, file := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		for _, file := range splitNULPaths(out) {
 			if file == "" || seen[file] {
 				continue
 			}
@@ -597,6 +591,22 @@ func (c *Client) newFilesForDirtyPatch() ([]string, error) {
 	}
 
 	return files, nil
+}
+
+func splitNULPaths(output []byte) []string {
+	if len(output) == 0 {
+		return []string{}
+	}
+
+	parts := bytes.Split(output, []byte{0})
+	paths := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		paths = append(paths, string(part))
+	}
+	return paths
 }
 
 func (c *Client) diffBytes(args ...string) ([]byte, error) {
@@ -620,6 +630,7 @@ func (c *Client) HasCommit(sha string) bool {
 
 func (c *Client) lfsFilesForPaths(files []string) (LFSChangedFilesMetadata, *PatchError) {
 	lfsChangedFiles := []string{}
+	dir := c.applyDir()
 
 	for _, file := range files {
 		if file == "" {
@@ -627,7 +638,7 @@ func (c *Client) lfsFilesForPaths(files []string) (LFSChangedFilesMetadata, *Pat
 		}
 
 		cmd := exec.Command(c.Binary, "check-attr", "filter", "--", file)
-		cmd.Dir = c.Dir
+		cmd.Dir = dir
 
 		// CombinedOutput mixes stderr into attrs, so pass it as the fallback
 		// stderr for the PatchError (the *exec.ExitError won't carry .Stderr).
@@ -637,9 +648,7 @@ func (c *Client) lfsFilesForPaths(files []string) (LFSChangedFilesMetadata, *Pat
 		}
 
 		if strings.Contains(string(attrs), "filter: lfs") {
-			parts := strings.SplitN(string(attrs), ":", 2)
-			lfsFile := strings.TrimSpace(parts[0])
-			lfsChangedFiles = append(lfsChangedFiles, lfsFile)
+			lfsChangedFiles = append(lfsChangedFiles, file)
 		}
 	}
 
@@ -681,11 +690,18 @@ func (c *Client) IsAncestor(candidateSHA, headRef string) bool {
 	return cmd.Run() == nil
 }
 
+func (c *Client) applyDir() string {
+	if topLevel := c.GetTopLevel(); topLevel != "" {
+		return topLevel
+	}
+	return c.Dir
+}
+
 // ApplyPatch returns an exec.Cmd that applies a patch to the working directory.
 // The patch bytes should be provided to the command's stdin before running.
 func (c *Client) ApplyPatch(patch []byte) *exec.Cmd {
 	cmd := exec.Command(c.Binary, "apply", "--allow-empty", "-")
-	cmd.Dir = c.Dir
+	cmd.Dir = c.applyDir()
 	cmd.Stdin = bytes.NewReader(patch)
 	return cmd
 }
@@ -694,7 +710,7 @@ func (c *Client) ApplyPatch(patch []byte) *exec.Cmd {
 // which applies hunks that succeed and writes .rej files for hunks that fail.
 func (c *Client) ApplyPatchReject(patch []byte) *exec.Cmd {
 	cmd := exec.Command(c.Binary, "apply", "--reject", "--allow-empty", "-")
-	cmd.Dir = c.Dir
+	cmd.Dir = c.applyDir()
 	cmd.Stdin = bytes.NewReader(patch)
 	return cmd
 }

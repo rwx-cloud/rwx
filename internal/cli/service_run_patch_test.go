@@ -78,6 +78,44 @@ func initiateRun(t *testing.T, patchFile git.PatchFile, expectedPatchMetadata ap
 }
 
 func TestService_InitiatingRunPatch(t *testing.T) {
+	t.Run("uses repository root pathspec when run from subdirectory", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+		s.mockGit.MockGetTopLevel = s.tmp
+
+		rwxDir := filepath.Join(s.tmp, ".rwx")
+		definitionsFile := filepath.Join(rwxDir, "rwx.yml")
+		definition := "on:\n  cli:\n    init:\n      sha: ${{ event.git.sha }}\n\nbase:\n  os: ubuntu 24.04\n  tag: 1.0\n\ntasks:\n  - key: foo\n    run: echo 'bar'\n"
+		require.NoError(t, os.WriteFile(definitionsFile, []byte(definition), 0o644))
+
+		subdir := filepath.Join(s.tmp, "subdir")
+		require.NoError(t, os.Mkdir(subdir, 0o755))
+		require.NoError(t, os.Chdir(subdir))
+
+		s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{
+				LatestMajor: make(map[string]string),
+				LatestMinor: make(map[string]map[string]string),
+			}, nil
+		}
+		s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			return &api.InitiateRunResult{
+				RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
+				RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
+				TargetedTaskKeys: []string{},
+				DefinitionPath:   ".mint/mint.yml",
+			}, nil
+		}
+
+		_, err := s.service.InitiateRun(cli.InitiateRunConfig{
+			Patchable:    true,
+			RwxDirectory: rwxDir,
+			MintFilePath: definitionsFile,
+		})
+		require.NoError(t, err)
+		require.Equal(t, []string{":/", ":(top,exclude).rwx/rwx.yml"}, s.mockGit.MockGeneratePatchPathspec)
+	})
+
 	t.Run("when git is not installed", func(t *testing.T) {
 		s := setupTest(t)
 		s.mockGit.MockIsInstalled = false
@@ -502,6 +540,56 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 			require.NoError(t, err)
 
 			// Verify patch generation was skipped entirely — no .patches entries in the rwx directory
+			for _, entry := range receivedRwxDir {
+				require.False(t, strings.Contains(entry.Path, ".patches"), "expected no .patches entries when init params match git params, found: %s", entry.Path)
+			}
+		})
+
+		t.Run("when init params match existing CLI git clone params", func(t *testing.T) {
+			s := setupTest(t)
+			s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+			s.mockGit.MockGeneratePatchFile = patchFile
+
+			rwxDir := filepath.Join(s.tmp, ".rwx")
+			err := os.MkdirAll(rwxDir, 0o755)
+			require.NoError(t, err)
+
+			definitionsFile := filepath.Join(rwxDir, "rwx.yml")
+			definition := "on:\n  cli:\n    init:\n      ref: ${{ event.git.sha }}\n\nbase:\n  os: ubuntu 24.04\n  tag: 1.0\n\ntasks:\n  - key: clone\n    call: git/clone 1.8.1\n    with:\n      ref: ${{ init.ref }}\n"
+
+			err = os.WriteFile(definitionsFile, []byte(definition), 0o644)
+			require.NoError(t, err)
+
+			runConfig := cli.InitiateRunConfig{
+				RwxDirectory: rwxDir,
+				MintFilePath: definitionsFile,
+				Patchable:    true,
+				InitParameters: map[string]string{
+					"ref": "3e76c8295cd0ce4decbf7b56253c902ce296cb25",
+				},
+			}
+
+			var receivedRwxDir []api.RwxDirectoryEntry
+			s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+				return &api.PackageVersionsResult{
+					LatestMajor: make(map[string]string),
+					LatestMinor: make(map[string]map[string]string),
+				}, nil
+			}
+			s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+				require.False(t, cfg.Patch.Sent)
+				receivedRwxDir = cfg.RwxDirectory
+				return &api.InitiateRunResult{
+					RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
+					RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
+					TargetedTaskKeys: []string{},
+					DefinitionPath:   ".mint/mint.yml",
+				}, nil
+			}
+
+			_, err = s.service.InitiateRun(runConfig)
+			require.NoError(t, err)
+
 			for _, entry := range receivedRwxDir {
 				require.False(t, strings.Contains(entry.Path, ".patches"), "expected no .patches entries when init params match git params, found: %s", entry.Path)
 			}

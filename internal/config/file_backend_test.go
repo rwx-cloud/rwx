@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"runtime"
 	"testing"
 
 	"github.com/rwx-cloud/rwx/internal/config"
@@ -152,20 +153,21 @@ func TestFileBackend_Set(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { os.RemoveAll(primaryTmpDir) })
 
-		require.NoError(t, os.Chmod(primaryTmpDir, 0o400))
+		require.NoError(t, os.Mkdir(path.Join(primaryTmpDir, "testfile"), 0o700))
 
 		backend, err := config.NewFileBackend([]string{primaryTmpDir})
 		require.NoError(t, err)
 
 		err = backend.Set("testfile", "the-value")
-		require.Contains(t, err.Error(), "permission denied")
-		require.ErrorIs(t, err, fs.ErrPermission)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unable to create")
 	})
 
 	t.Run("when the file is created", func(t *testing.T) {
 		primaryTmpDir, err := os.MkdirTemp(os.TempDir(), "file-backend-primary")
 		require.NoError(t, err)
 		t.Cleanup(func() { os.RemoveAll(primaryTmpDir) })
+		require.NoError(t, os.Chmod(primaryTmpDir, 0o755))
 
 		backend, err := config.NewFileBackend([]string{primaryTmpDir})
 		require.NoError(t, err)
@@ -179,5 +181,36 @@ func TestFileBackend_Set(t *testing.T) {
 		bytes, err := io.ReadAll(file)
 		require.NoError(t, err)
 		require.Equal(t, "the-value", string(bytes))
+
+		requireMode(t, primaryTmpDir, 0o700)
+		requireMode(t, path.Join(primaryTmpDir, "testfile"), 0o600)
 	})
+
+	t.Run("when the file already exists with permissive mode", func(t *testing.T) {
+		primaryTmpDir, err := os.MkdirTemp(os.TempDir(), "file-backend-primary")
+		require.NoError(t, err)
+		t.Cleanup(func() { os.RemoveAll(primaryTmpDir) })
+
+		filePath := path.Join(primaryTmpDir, "testfile")
+		require.NoError(t, os.WriteFile(filePath, []byte("old-value"), 0o644))
+
+		backend, err := config.NewFileBackend([]string{primaryTmpDir})
+		require.NoError(t, err)
+
+		err = backend.Set("testfile", "the-value")
+		require.NoError(t, err)
+
+		requireMode(t, filePath, 0o600)
+	})
+}
+
+func requireMode(t *testing.T, file string, mode fs.FileMode) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	info, err := os.Stat(file)
+	require.NoError(t, err)
+	require.Equal(t, mode, info.Mode().Perm())
 }

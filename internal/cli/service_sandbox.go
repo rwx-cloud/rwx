@@ -154,8 +154,14 @@ func (s Service) CheckExistingSandbox(configFile string) (*CheckExistingSandboxR
 	}
 	branch := GetCurrentGitBranch(cwd)
 
+	lockFile, lockErr := s.lockSandboxStorageWithInfo(false)
+	if lockErr != nil {
+		return nil, errors.Wrap(lockErr, "unable to lock sandbox storage")
+	}
+
 	storage, err := LoadSandboxStorage()
 	if err != nil {
+		UnlockSandboxStorage(lockFile)
 		return &CheckExistingSandboxResult{Exists: false}, nil
 	}
 
@@ -167,6 +173,8 @@ func (s Service) CheckExistingSandbox(configFile string) (*CheckExistingSandboxR
 			_ = storage.Save()
 		}
 	}
+	UnlockSandboxStorage(lockFile)
+
 	if !found {
 		return &CheckExistingSandboxResult{Exists: false}, nil
 	}
@@ -465,6 +473,8 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 				scopedToken = existingSession.ScopedToken
 				sessionRunURL = existingSession.RunURL
 				storedConfigHash = existingSession.ConfigHash
+				execCount = existingSession.ExecCount
+				resetNagShown = existingSession.ResetNagShown
 			}
 		}
 	} else {
@@ -764,7 +774,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	var syncPushMs int64
 	var syncPushPatchBytes int
 	syncPushStart := time.Now()
-	patchBytes, err := s.prepareSandboxForExec(cfg.Json, isNewSandbox, localHeadForSync, connInfo)
+	patchBytes, err := s.prepareSandboxForExec(cfg.Json, isNewSandbox, isNewSandbox || execCount == 0, localHeadForSync, connInfo)
 	syncPushMs = time.Since(syncPushStart).Milliseconds()
 	syncPushPatchBytes = patchBytes
 	if err != nil {
@@ -1262,7 +1272,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 
 	// Include untracked files in the diff by adding them with intent-to-add
 	// Get untracked files, add with -N, get diff, then reset
-	lsExitCode, untrackedOutput, lsErr := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git ls-files --others --exclude-standard")
+	lsExitCode, untrackedOutput, lsErr := s.SSHClient.ExecuteCommandWithOutput(sandboxWorktreeRootCommand("/usr/bin/git ls-files -z --others --exclude-standard"))
 	if lsErr != nil {
 		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 		return nil, 0, errors.Wrap(lsErr, "failed to list untracked files in sandbox")
@@ -1272,20 +1282,15 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 		return nil, 0, fmt.Errorf("failed to list untracked files in sandbox: git ls-files failed with exit code %d", lsExitCode)
 	}
 
-	untrackedFiles := []string{}
-	for _, f := range strings.Split(strings.TrimSpace(untrackedOutput), "\n") {
-		if f != "" {
-			untrackedFiles = append(untrackedFiles, f)
-		}
-	}
+	untrackedFiles := splitNULStrings(untrackedOutput)
 
 	// Add untracked files with intent-to-add
 	if len(untrackedFiles) > 0 {
 		quotedFiles := make([]string, len(untrackedFiles))
 		for i, f := range untrackedFiles {
-			quotedFiles[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(f, "'", "'\\''"))
+			quotedFiles[i] = quoteShellArg(f)
 		}
-		addCmd := fmt.Sprintf("/usr/bin/git add -N -- %s", strings.Join(quotedFiles, " "))
+		addCmd := sandboxWorktreeRootCommand(fmt.Sprintf("/usr/bin/git add -N -- %s", strings.Join(quotedFiles, " ")))
 		addExitCode, _, addErr := s.SSHClient.ExecuteCommandWithOutput(addCmd)
 		if addErr != nil {
 			_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
@@ -1299,16 +1304,16 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 
 	// Get patch from sandbox (stdout only to avoid output capture issues after sync markers).
 	// Binary diffs need full indexes so local git apply can recreate new binary files.
-	exitCode, patch, err := s.SSHClient.ExecuteCommandWithOutput("/usr/bin/git diff --binary --full-index refs/rwx-sync")
+	exitCode, patch, err := s.SSHClient.ExecuteCommandWithOutput(sandboxWorktreeRootCommand("/usr/bin/git diff --binary --full-index refs/rwx-sync"))
 	patchBytes := len(patch)
 
 	// Reset the intent-to-add for untracked files
 	if len(untrackedFiles) > 0 {
 		quotedFiles := make([]string, len(untrackedFiles))
 		for i, f := range untrackedFiles {
-			quotedFiles[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(f, "'", "'\\''"))
+			quotedFiles[i] = quoteShellArg(f)
 		}
-		resetCmd := fmt.Sprintf("/usr/bin/git reset HEAD -- %s", strings.Join(quotedFiles, " "))
+		resetCmd := sandboxWorktreeRootCommand(fmt.Sprintf("/usr/bin/git reset HEAD -- %s", strings.Join(quotedFiles, " ")))
 		resetExitCode, _, resetErr := s.SSHClient.ExecuteCommandWithOutput(resetCmd)
 		if resetErr != nil {
 			fmt.Fprintf(s.Stderr, "Warning: failed to reset staged files in sandbox: %v\n", resetErr)
@@ -1390,7 +1395,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 func (s Service) revertSandbox() error {
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 
-	exitCode, err := s.SSHClient.ExecuteCommand("/usr/bin/git checkout . >/dev/null 2>&1; /usr/bin/git clean -fd >/dev/null 2>&1; /usr/bin/git update-ref refs/rwx-sync HEAD 2>/dev/null")
+	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand("/usr/bin/git checkout . >/dev/null 2>&1; /usr/bin/git clean -fd >/dev/null 2>&1; /usr/bin/git update-ref refs/rwx-sync HEAD 2>/dev/null"))
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 
@@ -1411,7 +1416,7 @@ func (s Service) revertSandboxToGitState(localHead string) error {
 		return err
 	}
 
-	exitCode, err := s.SSHClient.ExecuteCommand("/usr/bin/git clean -fd >/dev/null 2>&1; /usr/bin/git update-ref refs/rwx-sync HEAD 2>/dev/null")
+	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand("/usr/bin/git clean -fd >/dev/null 2>&1; /usr/bin/git update-ref refs/rwx-sync HEAD 2>/dev/null"))
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if err != nil {
 		return errors.Wrap(err, "failed to clean sandbox after reset")
@@ -1423,7 +1428,7 @@ func (s Service) revertSandboxToGitState(localHead string) error {
 	return nil
 }
 
-func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
+func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, cleanPreAppliedNewFiles bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
 	if localHead == "" {
 		return 0, fmt.Errorf("sandbox sync requires a git repository with a valid HEAD")
 	}
@@ -1481,7 +1486,7 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 		return patchBytes, syncPushErr
 	}
 
-	if isNewSandbox {
+	if cleanPreAppliedNewFiles {
 		if err := s.removePreAppliedNewFilesFromSandbox(patches); err != nil {
 			syncPushErr = err
 			return patchBytes, syncPushErr
@@ -1524,7 +1529,7 @@ func (s Service) warnUnresolvedRejectFiles() {
 
 func (s Service) ensureSandboxHasCommit(localHead string, connInfo *api.SandboxConnectionInfo) error {
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	gitDirExitCode, gitDirErr := s.SSHClient.ExecuteCommand("test -d .git || test -f .git")
+	gitDirExitCode, gitDirErr := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand("test -d .git || test -f .git"))
 	if gitDirErr != nil {
 		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 		return errors.Wrap(gitDirErr, "failed to check sandbox git directory")
@@ -1536,7 +1541,7 @@ func (s Service) ensureSandboxHasCommit(localHead string, connInfo *api.SandboxC
 
 	hasCommit := s.sandboxHasCommit(localHead)
 	if !hasCommit {
-		_, _ = s.SSHClient.ExecuteCommand("/usr/bin/git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1")
+		_, _ = s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand("/usr/bin/git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1"))
 		hasCommit = s.sandboxHasCommit(localHead)
 	}
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
@@ -1646,7 +1651,11 @@ func indentLines(lines []string) string {
 
 func sandboxLFSFsckCommand(localHead string) string {
 	script := fmt.Sprintf("if /usr/bin/git lfs version >/dev/null 2>&1; then /usr/bin/git lfs fsck --objects %s 2>&1; fi", quoteShellArg(localHead))
-	return "/bin/sh -lc " + quoteShellArg(script)
+	return sandboxWorktreeRootCommand(script)
+}
+
+func sandboxWorktreeRootCommand(script string) string {
+	return "/bin/sh -lc " + quoteShellArg("repo_root=$(/usr/bin/git rev-parse --show-toplevel) || exit 1; cd \"$repo_root\" || exit 1; "+script)
 }
 
 func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo) (git.PushRefOptions, func(), error) {
@@ -1712,7 +1721,7 @@ func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo
 }
 
 func (s Service) sandboxHasCommit(sha string) bool {
-	exitCode, err := s.SSHClient.ExecuteCommand(fmt.Sprintf("/usr/bin/git cat-file -e %s^{commit} >/dev/null 2>&1", quoteShellArg(sha)))
+	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand(fmt.Sprintf("/usr/bin/git cat-file -e %s^{commit} >/dev/null 2>&1", quoteShellArg(sha))))
 	return err == nil && exitCode == 0
 }
 
@@ -1727,7 +1736,7 @@ func (s Service) checkoutSandboxHead(localHead string) error {
 		cmd = fmt.Sprintf("%s checkout -f -B %s %s >/dev/null 2>&1 && %s reset --hard %s >/dev/null 2>&1", git, quoteShellArg(branch), head, git, head)
 	}
 
-	exitCode, err := s.SSHClient.ExecuteCommand(cmd)
+	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand(cmd))
 	if err != nil {
 		return errors.Wrap(err, "failed to reset sandbox to local git state")
 	}
@@ -1766,7 +1775,7 @@ func (s Service) removePreAppliedNewFilesFromSandbox(patches git.DirtyPatches) e
 	script := fmt.Sprintf("/usr/bin/git clean -f -- %s >/dev/null 2>&1", strings.Join(quoted, " "))
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	exitCode, err := s.SSHClient.ExecuteCommand("/bin/sh -lc " + quoteShellArg(script))
+	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand(script))
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if err != nil {
 		return errors.Wrap(err, "failed to prepare new sandbox files for sync")
@@ -1779,7 +1788,7 @@ func (s Service) removePreAppliedNewFilesFromSandbox(patches git.DirtyPatches) e
 
 func (s Service) applyPatchToSandbox(command string, patch []byte) error {
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	exitCode, output, err := s.SSHClient.ExecuteCommandWithStdinAndCombinedOutput(command, bytes.NewReader(patch))
+	exitCode, output, err := s.SSHClient.ExecuteCommandWithStdinAndCombinedOutput(sandboxWorktreeRootCommand(command), bytes.NewReader(patch))
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if err != nil {
 		return errors.WrapSentinel(errors.Wrap(err, "failed to apply patch on sandbox"), errors.ErrPatch)
@@ -1822,10 +1831,10 @@ func (s Service) snapshotSandboxSyncRefForPaths(paths []string) error {
 	} else if paths == nil {
 		script += "/usr/bin/git add -A && "
 	}
-	script += `/usr/bin/git -c user.name=rwx -c user.email=rwx commit --allow-empty -m rwx-sync >/dev/null 2>&1 && /usr/bin/git update-ref refs/rwx-sync HEAD && /usr/bin/git reset --mixed HEAD~1 >/dev/null 2>&1 && /usr/bin/git read-tree "$index_tree"`
+	script += `/usr/bin/git -c user.name=rwx -c user.email=rwx -c core.hooksPath=/dev/null commit --allow-empty --no-verify -m rwx-sync >/dev/null 2>&1 && /usr/bin/git update-ref refs/rwx-sync HEAD && /usr/bin/git reset --mixed HEAD~1 >/dev/null 2>&1 && /usr/bin/git read-tree "$index_tree"`
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	exitCode, err := s.SSHClient.ExecuteCommand("/bin/sh -lc " + quoteShellArg(script))
+	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand(script))
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if err != nil {
 		return errors.Wrap(err, "failed to create sync snapshot ref")
@@ -1855,6 +1864,22 @@ func newFilePathsForDirtyPatches(patches git.DirtyPatches) []string {
 
 func quoteShellArg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func splitNULStrings(output string) []string {
+	if output == "" {
+		return []string{}
+	}
+
+	parts := strings.Split(output, "\x00")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		values = append(values, part)
+	}
+	return values
 }
 
 // parsePatchFiles extracts file paths from a git patch

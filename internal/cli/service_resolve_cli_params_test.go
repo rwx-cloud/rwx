@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -96,6 +97,7 @@ tasks:
 		result, err := ResolveCliParamsForFile(tmpFile.Name())
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
+		require.Equal(t, []string{"sha"}, result.GitParams)
 
 		fileContent, err := os.ReadFile(tmpFile.Name())
 		require.NoError(t, err)
@@ -127,6 +129,65 @@ tasks:
 		result, err := ResolveCliParamsForFile(tmpFile.Name())
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
+		require.Equal(t, []string{"commit-sha", "sha"}, result.GitParams)
+
+		fileContent, err := os.ReadFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.Equal(t, content, string(fileContent))
+	})
+
+	t.Run("returns git clone ref param when CLI trigger already has git init params", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
+		require.NoError(t, err)
+		defer tmpFile.Close()
+
+		content := `
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+tasks:
+  - key: clone
+    call: git/clone 1.8.1
+    with:
+      ref: ${{ init.ref }}
+`
+		_, err = tmpFile.WriteString(content)
+		require.NoError(t, err)
+
+		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.False(t, result.Rewritten)
+		require.Equal(t, []string{"ref"}, result.GitParams)
+
+		fileContent, err := os.ReadFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.Equal(t, content, string(fileContent))
+	})
+
+	t.Run("returns CLI git param named init", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
+		require.NoError(t, err)
+		defer tmpFile.Close()
+
+		content := `
+on:
+  cli:
+    init:
+      init: ${{ event.git.sha }}
+
+tasks:
+  - key: test
+    run: echo ${{ init.init }}
+`
+		_, err = tmpFile.WriteString(content)
+		require.NoError(t, err)
+
+		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.False(t, result.Rewritten)
+		require.Equal(t, []string{"init"}, result.GitParams)
 
 		fileContent, err := os.ReadFile(tmpFile.Name())
 		require.NoError(t, err)
@@ -337,6 +398,31 @@ tasks:
 		require.Contains(t, string(fileContent), "on:")
 		require.Contains(t, string(fileContent), "cli:")
 		require.Contains(t, string(fileContent), "sha: ${{ event.git.sha }}")
+	})
+
+	t.Run("adds CLI trigger after document separator", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
+		require.NoError(t, err)
+		defer tmpFile.Close()
+
+		content := `---
+tasks:
+  - key: clone
+    call: git/clone 1.8.1
+    with:
+      ref: ${{ init.sha }}
+`
+		_, err = tmpFile.WriteString(content)
+		require.NoError(t, err)
+
+		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.True(t, result.Rewritten)
+
+		fileContent, err := os.ReadFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.True(t, strings.HasPrefix(string(fileContent), "---\non:\n  cli:\n    init:\n      sha: ${{ event.git.sha }}\n"))
+		require.Contains(t, string(fileContent), "tasks:")
 	})
 
 	t.Run("adds CLI trigger when dispatch trigger has git params", func(t *testing.T) {

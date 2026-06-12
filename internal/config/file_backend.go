@@ -17,6 +17,11 @@ type FileBackend struct {
 	FallbackDirectories []string
 }
 
+const (
+	fileBackendDirMode  fs.FileMode = 0o700
+	fileBackendFileMode fs.FileMode = 0o600
+)
+
 func NewFileBackend(dirs []string) (*FileBackend, error) {
 	if len(dirs) < 1 {
 		return nil, fmt.Errorf("at least one directory must be provided")
@@ -87,17 +92,23 @@ func (f FileBackend) getFrom(dir, filename string) (string, error) {
 }
 
 func (f FileBackend) Set(filename, value string) error {
-	err := os.MkdirAll(f.PrimaryDirectory, os.ModePerm)
+	err := os.MkdirAll(f.PrimaryDirectory, fileBackendDirMode)
 	if err != nil {
 		return errors.Wrapf(err, "unable to create %q", f.PrimaryDirectory)
 	}
+	if err := os.Chmod(f.PrimaryDirectory, fileBackendDirMode); err != nil {
+		return errors.Wrapf(err, "unable to chmod %q", f.PrimaryDirectory)
+	}
 
 	path := filepath.Join(f.PrimaryDirectory, filename)
-	fd, err := os.Create(path)
+	fd, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fileBackendFileMode)
 	if err != nil {
 		return errors.Wrapf(err, "unable to create %q", path)
 	}
 	defer fd.Close()
+	if err := fd.Chmod(fileBackendFileMode); err != nil {
+		return errors.Wrapf(err, "unable to chmod %q", path)
+	}
 
 	_, err = io.WriteString(fd, value)
 	if err != nil {

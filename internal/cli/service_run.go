@@ -90,6 +90,38 @@ func appendWorkflowUploadEntry(entries []RwxDirectoryEntry, runDef RwxDirectoryE
 	return entries
 }
 
+func runPatchPathspec(gitRoot, runDefinitionPath, fallbackRunDefinitionPath string) []string {
+	pathspec := []string{":/"}
+	if runDefinitionPathspec := runDefinitionGitPath(gitRoot, runDefinitionPath, fallbackRunDefinitionPath); runDefinitionPathspec != "" {
+		pathspec = append(pathspec, ":(top,exclude)"+runDefinitionPathspec)
+	}
+	return pathspec
+}
+
+func runDefinitionGitPath(gitRoot, runDefinitionPath, fallbackRunDefinitionPath string) string {
+	if gitRoot != "" {
+		if absGitRoot, err := filepath.Abs(gitRoot); err == nil {
+			if absRunDefinitionPath, err := filepath.Abs(runDefinitionPath); err == nil {
+				if rel, err := filepath.Rel(absGitRoot, absRunDefinitionPath); err == nil && isRepoRelativePath(rel) {
+					return filepath.ToSlash(rel)
+				}
+			}
+		}
+	}
+
+	if isRepoRelativePath(fallbackRunDefinitionPath) {
+		return filepath.ToSlash(fallbackRunDefinitionPath)
+	}
+	return ""
+}
+
+func isRepoRelativePath(path string) bool {
+	if path == "" || path == "." || path == ".." || filepath.IsAbs(path) {
+		return false
+	}
+	return !strings.HasPrefix(path, ".."+string(filepath.Separator))
+}
+
 type InitiateRunConfig struct {
 	InitParameters map[string]string
 	Json           bool
@@ -198,7 +230,10 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 
 	if patchable {
 		var patchErr error
-		patchFile, patchErr = s.GitClient.GeneratePatchFile(patchDir, []string{".", ":!" + relativeRunDefinitionPath})
+		patchFile, patchErr = s.GitClient.GeneratePatchFile(
+			patchDir,
+			runPatchPathspec(s.GitClient.GetTopLevel(), runDefinitionPath, relativeRunDefinitionPath),
+		)
 		if patchErr != nil {
 			errorMessage = patchErr.Error()
 			fmt.Fprintf(s.Stderr, "Warning: %s\n\n", errorMessage)

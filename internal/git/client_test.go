@@ -383,6 +383,7 @@ func TestGenerateDirtyPatches(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "untracked.txt"), []byte("untracked\n"), 0o644))
 	require.NoError(t, os.Mkdir(filepath.Join(repo, "dir with space"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(repo, "dir with space", "quote'file.txt"), []byte("quoted\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "café.txt"), []byte("non-ascii\n"), 0o644))
 
 	client := &git.Client{Binary: "git", Dir: repo}
 	patches, err := client.GenerateDirtyPatches()
@@ -392,11 +393,36 @@ func TestGenerateDirtyPatches(t *testing.T) {
 	require.NotContains(t, string(patches.Staged), "untracked.txt")
 	require.Contains(t, string(patches.Unstaged), "tracked.txt")
 	require.Contains(t, string(patches.Unstaged), "untracked.txt")
-	require.ElementsMatch(t, []string{"staged.txt", "tracked.txt", "untracked.txt", "dir with space/quote'file.txt"}, patches.Files)
-	require.ElementsMatch(t, []string{"staged.txt", "untracked.txt", "dir with space/quote'file.txt"}, patches.NewFiles)
+	require.Contains(t, string(patches.Unstaged), "non-ascii")
+	require.ElementsMatch(t, []string{"staged.txt", "tracked.txt", "untracked.txt", "dir with space/quote'file.txt", "café.txt"}, patches.Files)
+	require.ElementsMatch(t, []string{"staged.txt", "untracked.txt", "dir with space/quote'file.txt", "café.txt"}, patches.NewFiles)
 
 	cachedNames := mustGit(t, repo, "diff", "--cached", "--name-only")
 	require.Equal(t, "staged.txt", cachedNames)
+}
+
+func TestGenerateDirtyPatches_LFSNonASCIIPath(t *testing.T) {
+	repo := t.TempDir()
+	mustGit(t, repo, "init")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+	mustGit(t, repo, "config", "user.name", "Test")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, ".gitattributes"), []byte("*.bin filter=lfs\n"), 0o644))
+	lfsPath := "café.bin"
+	require.NoError(t, os.WriteFile(filepath.Join(repo, lfsPath), []byte("base\n"), 0o644))
+	mustGit(t, repo, "add", ".gitattributes", lfsPath)
+	mustGit(t, repo, "commit", "-m", "base")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, lfsPath), []byte("changed\n"), 0o644))
+
+	client := &git.Client{Binary: "git", Dir: repo}
+	patches, err := client.GenerateDirtyPatches()
+	require.NoError(t, err)
+
+	require.NotNil(t, patches.LFSChangedFiles)
+	require.Equal(t, 1, patches.LFSChangedFiles.Count)
+	require.Equal(t, []string{lfsPath}, patches.LFSChangedFiles.Files)
+	require.Equal(t, []string{lfsPath}, patches.Files)
 }
 
 func TestPushRef(t *testing.T) {
@@ -559,6 +585,38 @@ func TestGeneratePatchFile(t *testing.T) {
 			require.Contains(t, strings.Split(mustGit(t, client.Dir, "ls-files", "--others", "--exclude-standard"), "\n"), "untracked.txt")
 		})
 
+		t.Run("including non-ASCII untracked files", func(t *testing.T) {
+			tempDir := t.TempDir()
+			origin := filepath.Join(tempDir, "origin")
+			require.NoError(t, os.Mkdir(origin, 0o755))
+			mustGit(t, origin, "init")
+			mustGit(t, origin, "config", "user.email", "test@example.com")
+			mustGit(t, origin, "config", "user.name", "Test")
+			mustGit(t, origin, "commit", "--allow-empty", "-m", "base")
+
+			repo := filepath.Join(tempDir, "repo")
+			cmd := exec.Command("git", "clone", origin, repo)
+			out, err := cmd.CombinedOutput()
+			require.NoError(t, err, string(out))
+			sha := mustGit(t, repo, "rev-parse", "HEAD")
+
+			untrackedPath := "café.txt"
+			require.NoError(t, os.WriteFile(filepath.Join(repo, untrackedPath), []byte("non-ascii\n"), 0o644))
+
+			client := &git.Client{Binary: "git", Dir: repo}
+			patchFile, err := client.GeneratePatchFile(repo, nil)
+			require.NoError(t, err)
+			require.True(t, patchFile.Written)
+			require.Equal(t, filepath.Join(repo, sha), patchFile.Path)
+
+			patch, err := os.ReadFile(patchFile.Path)
+			require.NoError(t, err)
+			require.Contains(t, string(patch), "non-ascii")
+			require.Equal(t, "", mustGit(t, repo, "diff", "--cached", "--name-only"))
+			_, err = os.Stat(filepath.Join(repo, untrackedPath))
+			require.NoError(t, err)
+		})
+
 		t.Run("excluding paths via pathspec", func(t *testing.T) {
 			tempDir, sha := repoFixture(t, "testdata/GeneratePatchFile-diff-exclude")
 
@@ -568,6 +626,30 @@ func TestGeneratePatchFile(t *testing.T) {
 
 			require.Equal(t, true, patchFile.Written)
 			require.Equal(t, filepath.Join(client.Dir, sha), patchFile.Path)
+
+			patch, err := os.ReadFile(patchFile.Path)
+			require.NoError(t, err)
+			require.Contains(t, string(patch), "included.txt")
+			require.Contains(t, string(patch), "untracked.txt")
+			require.NotContains(t, string(patch), "excluded.txt")
+			require.NotContains(t, string(patch), "untracked-excluded.txt")
+
+			require.Equal(t, []string{}, patchFile.UntrackedFiles.Files)
+			require.Equal(t, 0, patchFile.UntrackedFiles.Count)
+		})
+
+		t.Run("root pathspec includes changes outside current directory", func(t *testing.T) {
+			tempDir, sha := repoFixture(t, "testdata/GeneratePatchFile-diff-exclude")
+			repo := filepath.Join(tempDir, "repo")
+			subdir := filepath.Join(repo, "subdir")
+			require.NoError(t, os.Mkdir(subdir, 0o755))
+
+			client := &git.Client{Binary: "git", Dir: subdir}
+			patchFile, err := client.GeneratePatchFile(repo, []string{":/", ":(top,exclude).rwx"})
+			require.NoError(t, err)
+
+			require.Equal(t, true, patchFile.Written)
+			require.Equal(t, filepath.Join(repo, sha), patchFile.Path)
 
 			patch, err := os.ReadFile(patchFile.Path)
 			require.NoError(t, err)
@@ -648,6 +730,43 @@ func TestIsAncestor(t *testing.T) {
 	t.Run("returns false when not in a git repo", func(t *testing.T) {
 		client := &git.Client{Binary: "git", Dir: t.TempDir()}
 		require.False(t, client.IsAncestor("abc", "HEAD"))
+	})
+}
+
+func TestApplyPatch(t *testing.T) {
+	t.Run("applies root-relative patches from a subdirectory", func(t *testing.T) {
+		repo := t.TempDir()
+		var err error
+		repo, err = filepath.EvalSymlinks(repo)
+		require.NoError(t, err)
+		mustGit(t, repo, "init")
+		mustGit(t, repo, "config", "user.email", "test@example.com")
+		mustGit(t, repo, "config", "user.name", "Test")
+
+		rootFile := filepath.Join(repo, "root.txt")
+		subdir := filepath.Join(repo, "subdir")
+		require.NoError(t, os.MkdirAll(subdir, 0o755))
+		require.NoError(t, os.WriteFile(rootFile, []byte("old\n"), 0o644))
+		mustGit(t, repo, "add", "root.txt")
+		mustGit(t, repo, "commit", "-m", "initial")
+
+		require.NoError(t, os.WriteFile(rootFile, []byte("new\n"), 0o644))
+		diffCmd := exec.Command("git", "diff", "--binary")
+		diffCmd.Dir = repo
+		patch, err := diffCmd.Output()
+		require.NoError(t, err)
+		mustGit(t, repo, "reset", "--hard", "HEAD")
+
+		client := &git.Client{Binary: "git", Dir: subdir}
+		cmd := client.ApplyPatch(patch)
+		require.Equal(t, repo, cmd.Dir)
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+
+		content, err := os.ReadFile(rootFile)
+		require.NoError(t, err)
+		require.Equal(t, "new\n", string(content))
+		require.Equal(t, repo, client.ApplyPatchReject(patch).Dir)
 	})
 }
 

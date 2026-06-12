@@ -95,6 +95,19 @@ func isSandboxPullDiffCommand(cmd string) bool {
 	return strings.Contains(cmd, "git diff") && strings.Contains(cmd, "refs/rwx-sync")
 }
 
+func requireSandboxWorktreeRootCommand(t *testing.T, cmd string, operation string) {
+	t.Helper()
+	require.Contains(t, cmd, "repo_root=$(/usr/bin/git rev-parse --show-toplevel)")
+	require.Contains(t, cmd, "cd \"$repo_root\"")
+	require.Contains(t, cmd, operation)
+}
+
+func sandboxCommandIndex(commands []string, operation string) int {
+	return slices.IndexFunc(commands, func(cmd string) bool {
+		return strings.Contains(cmd, operation)
+	})
+}
+
 func TestService_LockWaitOutput(t *testing.T) {
 	t.Run("no output when lock is uncontended", func(t *testing.T) {
 		setup := setupTest(t)
@@ -1060,7 +1073,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		}
 
 		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
-			require.Equal(t, "/usr/bin/git apply --allow-empty -", command)
+			requireSandboxWorktreeRootCommand(t, command, "/usr/bin/git apply --allow-empty -")
 			appliedPatch, _ = io.ReadAll(stdin)
 			patchApplied = true
 			return 0, "", nil
@@ -1197,6 +1210,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			}
 		}
 		require.NotEqual(t, -1, snapshotIdx, "sync snapshot command should be present")
+		require.Contains(t, commandOrder[snapshotIdx], "-c core.hooksPath=/dev/null")
+		require.Contains(t, commandOrder[snapshotIdx], "commit --allow-empty --no-verify")
 		require.Greater(t, snapshotIdx, 0, "sync snapshot should not be first command")
 		require.Equal(t, "__rwx_sandbox_sync_start__", commandOrder[snapshotIdx-1])
 		require.Less(t, snapshotIdx, len(commandOrder)-1, "sync snapshot should not be last command")
@@ -1376,7 +1391,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Contains(t, commandOrder, "echo hello")
 		// git apply uses stdin method
 		require.GreaterOrEqual(t, len(stdinCommandOrder), 1)
-		require.Equal(t, "/usr/bin/git apply --allow-empty -", stdinCommandOrder[0])
+		requireSandboxWorktreeRootCommand(t, stdinCommandOrder[0], "/usr/bin/git apply --allow-empty -")
 		// Sandbox should be reverted back to local git state after pull.
 		revertIdx := -1
 		for i, cmd := range commandOrder {
@@ -1485,7 +1500,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
 			commandOrder = append(commandOrder, cmd)
 			switch {
-			case strings.Contains(cmd, "git ls-files --others"):
+			case strings.Contains(cmd, "git ls-files") && strings.Contains(cmd, "--others"):
 				return 0, "", nil
 			case isSandboxPullDiffCommand(cmd):
 				return 0, "", nil
@@ -1524,10 +1539,14 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Contains(t, pushOpts.Env[0], "StrictHostKeyChecking=yes")
 		require.Contains(t, pushOpts.Env[0], "-p 22")
 		require.Equal(t, "GIT_LFS_SKIP_PUSH=1", pushOpts.Env[1])
-		require.Contains(t, strings.Join(commandOrder, "\n"), "git fetch --prune origin")
-		require.Contains(t, strings.Join(commandOrder, "\n"), "git checkout -f -B 'feature/sync' '"+localHead+"'")
-		require.Contains(t, strings.Join(commandOrder, "\n"), "git write-tree")
-		require.Contains(t, strings.Join(commandOrder, "\n"), "git clean -fd")
+		commandText := strings.Join(commandOrder, "\n")
+		require.Contains(t, commandText, "repo_root=$(/usr/bin/git rev-parse --show-toplevel)")
+		require.Contains(t, commandText, "git fetch --prune origin")
+		require.Contains(t, commandText, "git checkout -f -B")
+		require.Contains(t, commandText, "feature/sync")
+		require.Contains(t, commandText, localHead)
+		require.Contains(t, commandText, "git write-tree")
+		require.Contains(t, commandText, "git clean -fd")
 		for i, cmd := range commandOrder {
 			if strings.Contains(cmd, "cat-file -e") {
 				requireCommandWrappedBySyncMarkers(t, commandOrder, i)
@@ -1575,9 +1594,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Equal(t, "__rwx_sandbox_sync_end__", commandOrder[finalProbeIndex+1])
 		require.NotContains(t, commandOrder[pushIndex+1:finalProbeIndex], "__rwx_sandbox_sync_start__")
 		require.NotContains(t, commandOrder[pushIndex+1:finalProbeIndex], "__rwx_sandbox_sync_end__")
-		require.Equal(t, "/usr/bin/git apply --index --allow-empty -", stdinCommands[0])
+		requireSandboxWorktreeRootCommand(t, stdinCommands[0], "/usr/bin/git apply --index --allow-empty -")
 		require.Equal(t, "staged-patch", stdinPayloads[0])
-		require.Equal(t, "/usr/bin/git apply --allow-empty -", stdinCommands[1])
+		requireSandboxWorktreeRootCommand(t, stdinCommands[1], "/usr/bin/git apply --allow-empty -")
 		require.Equal(t, "unstaged-patch", stdinPayloads[1])
 	})
 
@@ -1854,7 +1873,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		cleanIndex := slices.IndexFunc(order, func(cmd string) bool {
 			return strings.Contains(cmd, "git clean -f --") && strings.Contains(cmd, "dir with space/quote") && strings.Contains(cmd, "file.txt")
 		})
-		applyIndex := slices.Index(order, "/usr/bin/git apply --index --allow-empty -")
+		applyIndex := sandboxCommandIndex(order, "/usr/bin/git apply --index --allow-empty -")
 		snapshotIndex := slices.IndexFunc(order, func(cmd string) bool {
 			return strings.Contains(cmd, "update-ref refs/rwx-sync HEAD")
 		})
@@ -1866,6 +1885,94 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Contains(t, order[snapshotIndex], "dir with space/quote")
 		require.Contains(t, order[snapshotIndex], "file.txt")
 		require.NotContains(t, order[snapshotIndex], "/usr/bin/git add -A &&")
+	})
+
+	t.Run("first exec after sandbox start removes pre-applied new files before sync", func(t *testing.T) {
+		setup := setupTest(t)
+
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		require.NoError(t, os.WriteFile(configFile, []byte("base:\n  image: ubuntu:24.04\ntasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		newFilePath := "new-from-start.txt"
+		newFilePatch := []byte("diff --git a/" + newFilePath + " b/" + newFilePath + "\nnew file mode 100644\nindex 0000000..c42fa8d\n--- /dev/null\n+++ b/" + newFilePath + "\n@@ -0,0 +1 @@\n+local-change-content\n")
+
+		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+			cli.SessionKey("detached", configFile): {
+				RunID:       "run-started",
+				ConfigFile:  configFile,
+				ScopedToken: "start-token",
+			},
+		})
+
+		setup.mockGit.MockGetBranch = "feature/start-first-exec"
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+			return git.DirtyPatches{
+				Staged:   newFilePatch,
+				Files:    []string{newFilePath},
+				NewFiles: []string{newFilePath},
+			}, nil
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			require.Equal(t, "run-started", runID)
+			require.Equal(t, "start-token", token)
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+
+		var order []string
+		cleaned := false
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			switch {
+			case strings.Contains(cmd, "cat-file -e"):
+				return 0, nil
+			case strings.Contains(cmd, "git clean -f --"):
+				cleaned = true
+			}
+			order = append(order, cmd)
+			return 0, nil
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			return 0, "", nil
+		}
+		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
+			order = append(order, command)
+			data, _ := io.ReadAll(stdin)
+			require.Equal(t, string(newFilePatch), string(data))
+			if !cleaned {
+				return 1, "new-from-start.txt already exists", nil
+			}
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"true"},
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-started", result.RunID)
+
+		cleanIndex := slices.IndexFunc(order, func(cmd string) bool {
+			return strings.Contains(cmd, "git clean -f --") && strings.Contains(cmd, newFilePath)
+		})
+		applyIndex := sandboxCommandIndex(order, "/usr/bin/git apply --index --allow-empty -")
+		snapshotIndex := slices.IndexFunc(order, func(cmd string) bool {
+			return strings.Contains(cmd, "update-ref refs/rwx-sync HEAD")
+		})
+		require.NotEqual(t, -1, cleanIndex)
+		require.NotEqual(t, -1, applyIndex)
+		require.NotEqual(t, -1, snapshotIndex)
+		require.Less(t, cleanIndex, applyIndex)
+		require.Contains(t, order[snapshotIndex], "/usr/bin/git add -A &&")
+		require.NotContains(t, order[snapshotIndex], "/usr/bin/git update-index --add --remove --")
 	})
 
 	t.Run("new sandbox sync snapshots staged deletions with unstaged edits", func(t *testing.T) {
@@ -2070,7 +2177,10 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, runID, result.RunID)
-		require.Contains(t, strings.Join(commands, "\n"), "git checkout -f --detach '"+localHead+"'")
+		commandText := strings.Join(commands, "\n")
+		require.Contains(t, commandText, "repo_root=$(/usr/bin/git rev-parse --show-toplevel)")
+		require.Contains(t, commandText, "git checkout -f --detach")
+		require.Contains(t, commandText, localHead)
 	})
 
 	t.Run("fails when pushing missing commits fails", func(t *testing.T) {
@@ -2413,8 +2523,8 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
 			stdoutOnlyCommands = append(stdoutOnlyCommands, cmd)
-			if strings.Contains(cmd, "git ls-files --others") {
-				return 0, "untracked.txt\n", nil
+			if strings.Contains(cmd, "git ls-files") && strings.Contains(cmd, "--others") {
+				return 0, "untracked.txt\x00", nil
 			}
 			if isSandboxPullDiffCommand(cmd) {
 				pullDiffCommand = cmd
@@ -2450,17 +2560,21 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		foundDiffRef := false
 		foundReset := false
 		for _, cmd := range stdoutOnlyCommands {
-			if strings.Contains(cmd, "git ls-files --others") {
+			if strings.Contains(cmd, "git ls-files") && strings.Contains(cmd, "--others") {
 				foundLsFiles = true
+				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git ls-files -z --others --exclude-standard")
 			}
 			if strings.Contains(cmd, "git add -N") {
 				foundAddN = true
+				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git add -N --")
 			}
 			if isSandboxPullDiffCommand(cmd) {
 				foundDiffRef = true
+				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git diff --binary --full-index refs/rwx-sync")
 			}
 			if strings.Contains(cmd, "git reset HEAD") {
 				foundReset = true
+				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git reset HEAD --")
 			}
 		}
 		require.True(t, foundLsFiles, "git ls-files should use stdout-only output")
@@ -2469,6 +2583,69 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		require.Contains(t, pullDiffCommand, "--binary")
 		require.Contains(t, pullDiffCommand, "--full-index")
 		require.True(t, foundReset, "git reset HEAD should use stdout-only output")
+	})
+
+	t.Run("pull stages untracked non-ASCII paths from NUL-delimited output", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-pull-nul-paths"
+		address := "192.168.1.1:22"
+		untrackedPath := "café.txt"
+		var addCommand string
+		var resetCommand string
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			return nil
+		}
+
+		sandboxPatch := "diff --git a/caf\\303\\251.txt b/caf\\303\\251.txt\nnew file mode 100644\nindex 0000000..abc1234\n--- /dev/null\n+++ b/caf\\303\\251.txt\n@@ -0,0 +1 @@\n+new file\n"
+
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			switch {
+			case strings.Contains(cmd, "git ls-files"):
+				require.Contains(t, cmd, "-z")
+				return 0, untrackedPath + "\x00", nil
+			case strings.Contains(cmd, "git add -N"):
+				addCommand = cmd
+				return 0, "", nil
+			case isSandboxPullDiffCommand(cmd):
+				return 0, sandboxPatch, nil
+			case strings.Contains(cmd, "git reset HEAD"):
+				resetCommand = cmd
+				return 0, "", nil
+			default:
+				return 0, "", nil
+			}
+		}
+
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			return 0, nil
+		}
+
+		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 0, result.ExitCode)
+		require.Contains(t, addCommand, "'"+untrackedPath+"'")
+		require.Contains(t, resetCommand, "'"+untrackedPath+"'")
 	})
 
 	t.Run("pull only includes sandbox exec-changed files", func(t *testing.T) {

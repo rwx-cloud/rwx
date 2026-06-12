@@ -181,6 +181,7 @@ func LoadSandboxStorage() (*SandboxStorage, error) {
 	fd, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			storage.Version = sandboxStorageVersion
 			return storage, nil
 		}
 		return nil, errors.Wrapf(err, "unable to open %q", path)
@@ -214,16 +215,32 @@ func (s *SandboxStorage) Save() error {
 		return errors.Wrapf(err, "unable to create directory for %q", path)
 	}
 
-	fd, err := os.Create(path)
+	// Stamp the version on every save; fresh storage would otherwise serialize
+	// without a version field (omitempty) and be treated as legacy on load.
+	s.Version = sandboxStorageVersion
+
+	fd, err := os.CreateTemp(dir, ".sandboxes-*.json.tmp")
 	if err != nil {
-		return errors.Wrapf(err, "unable to create %q", path)
+		return errors.Wrapf(err, "unable to create temporary sandbox storage file in %q", dir)
 	}
-	defer fd.Close()
+	tempPath := fd.Name()
+	defer os.Remove(tempPath)
 
 	encoder := json.NewEncoder(fd)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(s); err != nil {
-		return errors.Wrapf(err, "unable to write %q", path)
+		_ = fd.Close()
+		return errors.Wrapf(err, "unable to write %q", tempPath)
+	}
+	if err := fd.Sync(); err != nil {
+		_ = fd.Close()
+		return errors.Wrapf(err, "unable to sync %q", tempPath)
+	}
+	if err := fd.Close(); err != nil {
+		return errors.Wrapf(err, "unable to close %q", tempPath)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return errors.Wrapf(err, "unable to replace %q", path)
 	}
 
 	return nil
