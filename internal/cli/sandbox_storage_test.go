@@ -327,6 +327,21 @@ func TestSandboxStorage_LoadAndSave(t *testing.T) {
 		require.Equal(t, "run-123", session.RunID)
 	})
 
+	t.Run("stamps current version on load and save", func(t *testing.T) {
+		tmpDir := setupTestStorageDir(t)
+
+		storage, err := cli.LoadSandboxStorage()
+		require.NoError(t, err)
+		require.Equal(t, 1, storage.Version)
+
+		require.NoError(t, storage.Save())
+
+		localPath := filepath.Join(tmpDir, ".rwx", "sandboxes", "sandboxes.json")
+		contents, err := os.ReadFile(localPath)
+		require.NoError(t, err)
+		require.Contains(t, string(contents), `"version": 1`)
+	})
+
 	t.Run("creates .gitignore in sandboxes dir", func(t *testing.T) {
 		tmpDir := setupTestStorageDir(t)
 

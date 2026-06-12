@@ -181,6 +181,7 @@ func LoadSandboxStorage() (*SandboxStorage, error) {
 	fd, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			storage.Version = sandboxStorageVersion
 			return storage, nil
 		}
 		return nil, errors.Wrapf(err, "unable to open %q", path)
@@ -213,6 +214,10 @@ func (s *SandboxStorage) Save() error {
 	if err := ensureSandboxStorageDir(dir); err != nil {
 		return errors.Wrapf(err, "unable to create directory for %q", path)
 	}
+
+	// Stamp the version on every save; fresh storage would otherwise serialize
+	// without a version field (omitempty) and be treated as legacy on load.
+	s.Version = sandboxStorageVersion
 
 	fd, err := os.CreateTemp(dir, ".sandboxes-*.json.tmp")
 	if err != nil {
