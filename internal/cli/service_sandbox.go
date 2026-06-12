@@ -576,7 +576,6 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 		if cfgFile == "" {
 			cfgFile = FindDefaultSandboxConfigFile()
 		}
-		cfgFile = AbsConfigFile(cfgFile)
 
 		if !found {
 			// Check if a matching sandbox already exists remotely
@@ -598,8 +597,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 							branchMatch = gitClient.IsAncestor(storedSHA, "HEAD")
 						}
 					}
-					stateConfigFile := AbsConfigFile(state.ConfigFile)
-					if branchMatch && stateConfigFile == cfgFile {
+					if branchMatch && state.ConfigFile == cfgFile {
 						// Verify the remote sandbox is still alive before reusing.
 						// A ready sandbox reports Polling.Completed=true with Sandboxable=true;
 						// only skip when the run finished without becoming sandboxable.
@@ -921,14 +919,13 @@ func (s Service) ListSandboxes(cfg ListSandboxesConfig) (*ListSandboxesResult, e
 		if err != nil {
 			continue
 		}
-		stateConfigFile := AbsConfigFile(state.ConfigFile)
 		// Only create a local session if none exists for this key
-		if _, exists := storage.GetSession(state.Branch, stateConfigFile); exists {
+		if _, exists := storage.GetSession(state.Branch, state.ConfigFile); exists {
 			continue
 		}
-		storage.SetSession(state.Branch, stateConfigFile, SandboxSession{
+		storage.SetSession(state.Branch, state.ConfigFile, SandboxSession{
 			RunID:      run.ID,
-			ConfigFile: stateConfigFile,
+			ConfigFile: state.ConfigFile,
 			RunURL:     run.RunURL,
 		})
 		storageChanged = true

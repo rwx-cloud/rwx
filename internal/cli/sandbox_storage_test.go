@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,19 +23,6 @@ func TestSessionKey(t *testing.T) {
 	t.Run("preserves detached@sha format as-is", func(t *testing.T) {
 		key := cli.SessionKey("detached@abc1234", "/home/user/project/.rwx/sandbox.yml")
 		require.Equal(t, "detached@abc1234:/home/user/project/.rwx/sandbox.yml", key)
-	})
-
-	t.Run("normalizes relative config file", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		originalWd, err := os.Getwd()
-		require.NoError(t, err)
-		require.NoError(t, os.Chdir(tmpDir))
-		t.Cleanup(func() { _ = os.Chdir(originalWd) })
-
-		expectedConfig, err := filepath.Abs(".rwx/sandbox.yml")
-		require.NoError(t, err)
-		key := cli.SessionKey("main", ".rwx/sandbox.yml")
-		require.Equal(t, "main:"+expectedConfig, key)
 	})
 }
 
@@ -106,33 +92,6 @@ func TestSandboxStorage_SessionOperations(t *testing.T) {
 		require.True(t, found)
 		require.Equal(t, "run-123", retrieved.RunID)
 		require.Equal(t, "/home/user/project/.rwx/sandbox.yml", retrieved.ConfigFile)
-	})
-
-	t.Run("normalizes relative config files", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		originalWd, err := os.Getwd()
-		require.NoError(t, err)
-		require.NoError(t, os.Chdir(tmpDir))
-		t.Cleanup(func() { _ = os.Chdir(originalWd) })
-
-		storage := &cli.SandboxStorage{
-			Sandboxes: make(map[string]cli.SandboxSession),
-		}
-		storage.SetSession("main", ".rwx/sandbox.yml", cli.SandboxSession{
-			RunID:      "run-relative",
-			ConfigFile: ".rwx/sandbox.yml",
-		})
-
-		expectedConfig, err := filepath.Abs(".rwx/sandbox.yml")
-		require.NoError(t, err)
-		session, found := storage.GetSession("main", expectedConfig)
-		require.True(t, found)
-		require.Equal(t, "run-relative", session.RunID)
-		require.Equal(t, expectedConfig, session.ConfigFile)
-
-		session, found = storage.GetSession("main", ".rwx/sandbox.yml")
-		require.True(t, found)
-		require.Equal(t, expectedConfig, session.ConfigFile)
 	})
 
 	t.Run("SetSession and GetSession with ScopedToken", func(t *testing.T) {
@@ -462,48 +421,6 @@ func TestSandboxStorage_LoadAndSave(t *testing.T) {
 		session, found := storage.GetSession("main", "/home/user/project/.rwx/sandbox.yml")
 		require.True(t, found)
 		require.Equal(t, "run-old", session.RunID)
-	})
-
-	t.Run("migrates old-format relative config paths on load", func(t *testing.T) {
-		tmpDir := setupTestStorageDir(t)
-
-		sandboxesDir := filepath.Join(tmpDir, ".rwx", "sandboxes")
-		require.NoError(t, os.MkdirAll(sandboxesDir, 0o755))
-		storagePath := filepath.Join(sandboxesDir, "sandboxes.json")
-		oldKey := tmpDir + ":main:.rwx/sandbox.yml"
-		oldJSON := fmt.Sprintf(`{"sandboxes":{%q:{"runId":"run-old-relative","configFile":".rwx/sandbox.yml"}}}`, oldKey)
-		require.NoError(t, os.WriteFile(storagePath, []byte(oldJSON), 0o644))
-
-		storage, err := cli.LoadSandboxStorage()
-		require.NoError(t, err)
-		require.Len(t, storage.Sandboxes, 1)
-
-		expectedConfig := filepath.Join(tmpDir, ".rwx", "sandbox.yml")
-		session, found := storage.GetSession("main", expectedConfig)
-		require.True(t, found)
-		require.Equal(t, "run-old-relative", session.RunID)
-		require.Equal(t, expectedConfig, session.ConfigFile)
-	})
-
-	t.Run("normalizes current-version relative keys on load", func(t *testing.T) {
-		tmpDir := setupTestStorageDir(t)
-
-		sandboxesDir := filepath.Join(tmpDir, ".rwx", "sandboxes")
-		require.NoError(t, os.MkdirAll(sandboxesDir, 0o755))
-		storagePath := filepath.Join(sandboxesDir, "sandboxes.json")
-		currentJSON := `{"version":1,"sandboxes":{"main:.rwx/sandbox.yml":{"runId":"run-current-relative","configFile":".rwx/sandbox.yml"}}}`
-		require.NoError(t, os.WriteFile(storagePath, []byte(currentJSON), 0o644))
-
-		storage, err := cli.LoadSandboxStorage()
-		require.NoError(t, err)
-		require.Len(t, storage.Sandboxes, 1)
-
-		expectedConfig, err := filepath.Abs(".rwx/sandbox.yml")
-		require.NoError(t, err)
-		session, found := storage.GetSession("main", expectedConfig)
-		require.True(t, found)
-		require.Equal(t, "run-current-relative", session.RunID)
-		require.Equal(t, expectedConfig, session.ConfigFile)
 	})
 
 	t.Run("skips migration when version is current", func(t *testing.T) {
