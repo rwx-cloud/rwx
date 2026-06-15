@@ -32,6 +32,14 @@ func TestAPIClient_InitiateRun(t *testing.T) {
 
 		roundTrip := func(req *http.Request) (*http.Response, error) {
 			require.Equal(t, "/mint/api/runs", req.URL.Path)
+			var requestBody struct {
+				Run api.InitiateRunConfig `json:"run"`
+			}
+			require.NoError(t, json.NewDecoder(req.Body).Decode(&requestBody))
+			require.Equal(t, "cli", requestBody.Run.RepositoryName)
+			require.Equal(t, "rwx-cloud/cli", requestBody.Run.RepositorySlug)
+			require.Equal(t, "https://github.com/rwx-cloud/cli", requestBody.Run.RepositoryURL)
+			require.Equal(t, "github", requestBody.Run.VCSProvider)
 			return &http.Response{
 				Status:     "201 Created",
 				StatusCode: 201,
@@ -48,6 +56,10 @@ func TestAPIClient_InitiateRun(t *testing.T) {
 			},
 			TargetedTaskKeys: []string{},
 			UseCache:         false,
+			RepositoryName:   "cli",
+			RepositorySlug:   "rwx-cloud/cli",
+			RepositoryURL:    "https://github.com/rwx-cloud/cli",
+			VCSProvider:      "github",
 		}
 
 		result, err := c.InitiateRun(initRunConfig)

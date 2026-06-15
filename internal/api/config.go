@@ -32,6 +32,10 @@ type InitiateRunConfig struct {
 	Title                    string                    `json:"title,omitempty"`
 	UseCache                 bool                      `json:"use_cache"`
 	Git                      GitMetadata               `json:"git"`
+	RepositoryName           string                    `json:"repository_name,omitempty"`
+	RepositorySlug           string                    `json:"repository_slug,omitempty"`
+	RepositoryURL            string                    `json:"repository_url,omitempty"`
+	VCSProvider              string                    `json:"vcs_provider,omitempty"`
 	Patch                    PatchMetadata             `json:"patch"`
 	CliState                 string                    `json:"cli_state,omitempty"`
 }

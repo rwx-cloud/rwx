@@ -110,6 +110,10 @@ func TestService_InitiatingRun(t *testing.T) {
 					require.Equal(t, branch, cfg.Git.Branch)
 					require.Equal(t, sha, cfg.Git.Sha)
 					require.Equal(t, originUrl, cfg.Git.OriginUrl)
+					require.Equal(t, "rwx", cfg.RepositoryName)
+					require.Equal(t, "rwx-cloud/rwx", cfg.RepositorySlug)
+					require.Equal(t, "https://github.com/rwx-cloud/rwx", cfg.RepositoryURL)
+					require.Equal(t, "github", cfg.VCSProvider)
 					receivedSpecifiedFileContent = cfg.TaskDefinitions[0].FileContents
 					receivedRwxDir = cfg.RwxDirectory
 					return &api.InitiateRunResult{

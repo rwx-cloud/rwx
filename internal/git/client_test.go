@@ -709,3 +709,87 @@ func TestRepoNameFromOriginUrl(t *testing.T) {
 		})
 	}
 }
+
+func TestRepositoryMetadataFromOriginUrl(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected git.RepositoryMetadata
+	}{
+		{
+			name:  "GitHub SSH URL",
+			input: "git@github.com:rwx-cloud/cli.git",
+			expected: git.RepositoryMetadata{
+				Name:        "cli",
+				Slug:        "rwx-cloud/cli",
+				URL:         "https://github.com/rwx-cloud/cli",
+				VCSProvider: "github",
+			},
+		},
+		{
+			name:  "GitHub HTTPS URL",
+			input: "https://github.com/rwx-cloud/cli.git",
+			expected: git.RepositoryMetadata{
+				Name:        "cli",
+				Slug:        "rwx-cloud/cli",
+				URL:         "https://github.com/rwx-cloud/cli",
+				VCSProvider: "github",
+			},
+		},
+		{
+			name:  "GitLab nested HTTPS URL",
+			input: "https://gitlab.com/group/subgroup/repo.git",
+			expected: git.RepositoryMetadata{
+				Name:        "repo",
+				Slug:        "group/subgroup/repo",
+				URL:         "https://gitlab.com/group/subgroup/repo",
+				VCSProvider: "gitlab",
+			},
+		},
+		{
+			name:  "GitLab nested SSH URL",
+			input: "git@gitlab.com:group/subgroup/repo.git",
+			expected: git.RepositoryMetadata{
+				Name:        "repo",
+				Slug:        "group/subgroup/repo",
+				URL:         "https://gitlab.com/group/subgroup/repo",
+				VCSProvider: "gitlab",
+			},
+		},
+		{
+			name:  "SSH scheme URL",
+			input: "ssh://git@github.com/rwx-cloud/cli.git",
+			expected: git.RepositoryMetadata{
+				Name:        "cli",
+				Slug:        "rwx-cloud/cli",
+				URL:         "https://github.com/rwx-cloud/cli",
+				VCSProvider: "github",
+			},
+		},
+		{
+			name:  "unknown host",
+			input: "git@git.example.com:some-org/some-repo.git",
+			expected: git.RepositoryMetadata{
+				Name: "some-repo",
+				Slug: "some-org/some-repo",
+				URL:  "https://git.example.com/some-org/some-repo",
+			},
+		},
+		{
+			name:     "local path",
+			input:    "../some-repo",
+			expected: git.RepositoryMetadata{},
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: git.RepositoryMetadata{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expected, git.RepositoryMetadataFromOriginUrl(tt.input))
+		})
+	}
+}

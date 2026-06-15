@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -176,6 +177,13 @@ func (c *Client) GetOriginUrl() string {
 	return c.GetRemoteUrl(getRemote())
 }
 
+type RepositoryMetadata struct {
+	Name        string
+	Slug        string
+	URL         string
+	VCSProvider string
+}
+
 // RepoNameFromOriginUrl extracts the repository name from a git remote URL.
 // For example, "git@github.com:rwx-cloud/rwx.git" returns "rwx".
 func RepoNameFromOriginUrl(originUrl string) string {
@@ -190,6 +198,68 @@ func RepoNameFromOriginUrl(originUrl string) string {
 	}
 
 	return strings.TrimSuffix(originUrl, ".git")
+}
+
+func RepositoryMetadataFromOriginUrl(originUrl string) RepositoryMetadata {
+	host, path := remoteHostAndPath(originUrl)
+	if host == "" || path == "" {
+		return RepositoryMetadata{}
+	}
+
+	slug := strings.TrimSuffix(strings.Trim(path, "/"), ".git")
+	if slug == "" || slug == "." || strings.HasPrefix(slug, "..") {
+		return RepositoryMetadata{}
+	}
+
+	parts := strings.Split(slug, "/")
+	name := parts[len(parts)-1]
+	if name == "" {
+		return RepositoryMetadata{}
+	}
+
+	provider := vcsProviderFromHost(host)
+	return RepositoryMetadata{
+		Name:        name,
+		Slug:        slug,
+		URL:         "https://" + host + "/" + slug,
+		VCSProvider: provider,
+	}
+}
+
+func remoteHostAndPath(originUrl string) (string, string) {
+	originUrl = strings.TrimSpace(originUrl)
+	if originUrl == "" {
+		return "", ""
+	}
+
+	if idx := strings.LastIndex(originUrl, ":"); idx != -1 && !strings.Contains(originUrl[:idx], "://") && strings.Contains(originUrl[:idx], "@") {
+		userAndHost := originUrl[:idx]
+		host := userAndHost[strings.LastIndex(userAndHost, "@")+1:]
+		return normalizeRemoteHost(host), originUrl[idx+1:]
+	}
+
+	parsed, err := url.Parse(originUrl)
+	if err != nil || parsed.Host == "" {
+		return "", ""
+	}
+
+	return normalizeRemoteHost(parsed.Hostname()), parsed.Path
+}
+
+func normalizeRemoteHost(host string) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	return strings.TrimPrefix(host, "www.")
+}
+
+func vcsProviderFromHost(host string) string {
+	switch host {
+	case "github.com":
+		return "github"
+	case "gitlab.com":
+		return "gitlab"
+	default:
+		return ""
+	}
 }
 
 func (c *Client) GetRemoteUrl(remote string) string {

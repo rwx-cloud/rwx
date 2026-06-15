@@ -135,6 +135,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 	gitDirectory := s.GitClient.IsInsideWorkTree()
 	var errorMessage string
 	var sha, branch, originUrl string
+	var repository git.RepositoryMetadata
 
 	// Track whether we can generate patches (requires working git)
 	gitAvailable := gitInstalled && gitDirectory
@@ -148,6 +149,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		} else {
 			branch = s.GitClient.GetBranch()
 			originUrl = s.GitClient.GetOriginUrl()
+			repository = git.RepositoryMetadataFromOriginUrl(originUrl)
 		}
 	} else if !gitInstalled {
 		errorMessage = "Git is not installed"
@@ -331,6 +333,10 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 			Sha:       sha,
 			OriginUrl: originUrl,
 		},
+		RepositoryName: repository.Name,
+		RepositorySlug: repository.Slug,
+		RepositoryURL:  repository.URL,
+		VCSProvider:    repository.VCSProvider,
 		Patch: api.PatchMetadata{
 			Sent:           patchFile.Written,
 			UntrackedFiles: []string{},

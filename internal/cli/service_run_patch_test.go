@@ -232,6 +232,10 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 			require.Equal(t, "3e76c8295cd0ce4decbf7b56253c902ce296cb25", cfg.Git.Sha)
 			require.Equal(t, "main", cfg.Git.Branch)
 			require.Equal(t, "git@github.com:example/repo.git", cfg.Git.OriginUrl)
+			require.Equal(t, "repo", cfg.RepositoryName)
+			require.Equal(t, "example/repo", cfg.RepositorySlug)
+			require.Equal(t, "https://github.com/example/repo", cfg.RepositoryURL)
+			require.Equal(t, "github", cfg.VCSProvider)
 			return &api.InitiateRunResult{
 				RunID:  "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 				RunURL: "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
