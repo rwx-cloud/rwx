@@ -349,7 +349,7 @@ tasks:
       LINEAR_ACCESS_KEY: ${{ vaults.rwx_cli_development.secrets.linear-release-access-key }}
 
   - key: rwx-cli
-    call: rwx/install-cli 4.0.4
+    call: rwx/install-cli 4.0.5
 
   - key: homebrew-release
     use: rwx-cli

@@ -150,3 +150,80 @@ tasks:
     env:
       RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
       RUN_DEF: ${{ run.dir }}/integration/run-test/failing-def.yml
+
+  # `rwx runs start` is the noun-verb alias for `rwx run`; it must initiate a
+  # run equivalently. The remaining `rwx run` behaviors share the same RunE, so
+  # one equivalence check here is sufficient.
+  - key: test-runs-start
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      kickoff=$(rwx runs start "$RUN_DEF" --wait --json --no-cache)
+      status=$(echo "$kickoff" | jq -r '.ResultStatus')
+      run_url=$(echo "$kickoff" | jq -r '.RunURL // empty')
+      echo "$run_url" > "$RWX_LINKS/runs start run"
+
+      if [ "$status" != "succeeded" ]; then
+        echo "Expected 'succeeded' from 'rwx runs start', got '$status'"
+        echo "$kickoff"
+        exit 1
+      fi
+
+      if [ -z "$run_url" ]; then
+        echo "Expected 'rwx runs start' to return a RunURL"
+        echo "$kickoff"
+        exit 1
+      fi
+    env:
+      RUN_DEF: ${{ run.dir }}/integration/run-test/simple-def.yml
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+
+  # Bare `rwx runs` is a pure parent command: it prints help and must never
+  # initiate a run. No access token is required because help short-circuits
+  # before any API client setup.
+  - key: test-runs-bare-prints-help
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      output=$(rwx runs)
+
+      if ! echo "$output" | grep -q "Available Commands"; then
+        echo "Expected bare 'rwx runs' to print help with available commands"
+        echo "$output"
+        exit 1
+      fi
+
+      if ! echo "$output" | grep -q "start"; then
+        echo "Expected bare 'rwx runs' help to list the 'start' subcommand"
+        echo "$output"
+        exit 1
+      fi
+
+      if echo "$output" | grep -qiE "https?://[^ ]+/runs/"; then
+        echo "Bare 'rwx runs' should not initiate a run"
+        echo "$output"
+        exit 1
+      fi
+
+  # `rwx runs <id>` resolves to the parent group and prints help instead of
+  # looking up a run; it is not a `rwx results` alias.
+  - key: test-runs-bare-id-prints-help
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      output=$(rwx runs some-nonexistent-run-id)
+
+      if ! echo "$output" | grep -q "Available Commands"; then
+        echo "Expected 'rwx runs <id>' to print help"
+        echo "$output"
+        exit 1
+      fi
+
+      if echo "$output" | grep -qi "result status"; then
+        echo "'rwx runs <id>' should not alias 'rwx results'"
+        echo "$output"
+        exit 1
+      fi
