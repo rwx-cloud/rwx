@@ -36,6 +36,7 @@ type API struct {
 	MockTaskIDStatus                            func(api.TaskIDStatusConfig) (api.TaskStatusResult, error)
 	MockRunStatus                               func(api.RunStatusConfig) (api.RunStatusResult, error)
 	MockGetRunDetails                           func(api.RunDetailsConfig) (map[string]any, error)
+	MockListRuns                                func(api.ListRunsConfig) (*api.ListRunsResult, error)
 	MockGetLogDownloadRequest                   func(string) (api.LogDownloadRequestResult, error)
 	MockGetLogDownloadRequestByTaskKey          func(string, string) (api.LogDownloadRequestResult, error)
 	MockDownloadLogs                            func(api.LogDownloadRequestResult) ([]byte, error)
@@ -289,6 +290,14 @@ func (c *API) GetRunDetails(cfg api.RunDetailsConfig) (map[string]any, error) {
 	}
 
 	return nil, errors.New("MockGetRunDetails was not configured")
+}
+
+func (c *API) ListRuns(cfg api.ListRunsConfig) (*api.ListRunsResult, error) {
+	if c.MockListRuns != nil {
+		return c.MockListRuns(cfg)
+	}
+
+	return nil, errors.New("MockListRuns was not configured")
 }
 
 func (c *API) GetLogDownloadRequest(taskId string) (api.LogDownloadRequestResult, error) {
