@@ -415,15 +415,8 @@ type SandboxInitTemplateResult struct {
 	Template string `json:"template"`
 }
 
-type SandboxRunSummary struct {
-	ID       string `json:"id"`
-	RunURL   string `json:"run_url"`
-	Title    string `json:"title"`
-	CliState string `json:"cli_state"`
-}
-
 type ListSandboxRunsResult struct {
-	Runs []SandboxRunSummary `json:"runs"`
+	Runs []RunSummary `json:"runs"`
 }
 
 // RunStatus is the shared status object returned by both the runs index (under

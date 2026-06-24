@@ -50,7 +50,7 @@ func TestService_ListSandboxes(t *testing.T) {
 		setup := setupTest(t)
 
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 
 		result, err := setup.service.ListSandboxes(cli.ListSandboxesConfig{
@@ -113,7 +113,7 @@ func TestService_LockWaitOutput(t *testing.T) {
 		setup := setupTest(t)
 
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 
 		_, err := setup.service.ListSandboxes(cli.ListSandboxesConfig{Json: false})
@@ -125,7 +125,7 @@ func TestService_LockWaitOutput(t *testing.T) {
 		setup := setupTest(t)
 
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 
 		// Hold the lock to force contention
@@ -162,7 +162,7 @@ func TestService_LockWaitOutput(t *testing.T) {
 		setup := setupTest(t)
 
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 
 		// Hold the lock to force contention
@@ -202,7 +202,7 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
-				Runs: []api.SandboxRunSummary{
+				Runs: []api.RunSummary{
 					{ID: "run-active", RunURL: "https://cloud.rwx.com/runs/run-active"},
 				},
 			}, nil
@@ -244,9 +244,9 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 		remoteCliState := cli.EncodeCliState("develop", setup.absConfig(".rwx/sandbox.yml"))
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
-				Runs: []api.SandboxRunSummary{
+				Runs: []api.RunSummary{
 					{ID: "run-local", RunURL: "https://cloud.rwx.com/runs/run-local"},
-					{ID: "run-remote", RunURL: "https://cloud.rwx.com/runs/run-remote", CliState: remoteCliState},
+					{ID: "run-remote", RunURL: "https://cloud.rwx.com/runs/run-remote", CliState: &remoteCliState},
 				},
 			}, nil
 		}
@@ -278,7 +278,7 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
-				Runs: []api.SandboxRunSummary{
+				Runs: []api.RunSummary{
 					{ID: "run-no-state", RunURL: "https://cloud.rwx.com/runs/run-no-state"},
 				},
 			}, nil
@@ -304,9 +304,9 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 		remoteCliState := cli.EncodeCliState("main", setup.absConfig(".rwx/sandbox.yml"))
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
-				Runs: []api.SandboxRunSummary{
+				Runs: []api.RunSummary{
 					{ID: "run-local", RunURL: "https://cloud.rwx.com/runs/run-local"},
-					{ID: "run-remote-new", RunURL: "https://cloud.rwx.com/runs/run-remote-new", CliState: remoteCliState},
+					{ID: "run-remote-new", RunURL: "https://cloud.rwx.com/runs/run-remote-new", CliState: &remoteCliState},
 				},
 			}, nil
 		}
@@ -347,7 +347,7 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		// Bulk API only returns the active run
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
-				Runs: []api.SandboxRunSummary{
+				Runs: []api.RunSummary{
 					{ID: "run-active", RunURL: "https://cloud.rwx.com/runs/run-active"},
 				},
 			}, nil
@@ -401,7 +401,7 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		// Only run-active is returned by the API
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
-				Runs: []api.SandboxRunSummary{
+				Runs: []api.RunSummary{
 					{ID: "run-active", RunURL: "https://cloud.rwx.com/runs/run-active"},
 				},
 			}, nil
@@ -443,7 +443,7 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 
 		// Bulk API does not return the initializing run
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 
 		// Fallback check shows the run is still alive
@@ -477,7 +477,7 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		})
 
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 
 		// Fallback returns an error (e.g. 400 "run has been cancelled")
@@ -507,7 +507,7 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 
 		// Bulk API hasn't picked up the run yet, forcing the fallback path
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 
 		// Ready sandbox: Sandboxable=true, Polling.Completed=true
@@ -1816,7 +1816,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		}
 
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			return &api.InitiateRunResult{
@@ -2000,7 +2000,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		}
 
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			return &api.InitiateRunResult{
@@ -3247,7 +3247,7 @@ func TestService_ExecSandbox_ConcurrentAutoCreate(t *testing.T) {
 			return &api.CreateSandboxTokenResult{Token: "test-token"}, nil
 		}
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
@@ -3340,11 +3340,11 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		// No local session — ListSandboxRuns returns a matching run
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
-				Runs: []api.SandboxRunSummary{
+				Runs: []api.RunSummary{
 					{
 						ID:       "run-recovered",
 						RunURL:   "https://cloud.rwx.com/runs/run-recovered",
-						CliState: encodedState,
+						CliState: &encodedState,
 					},
 				},
 			}, nil
@@ -3411,7 +3411,7 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 
 		// ListSandboxRuns returns no matching runs
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 
 		// Mock the full auto-create path
@@ -3602,7 +3602,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 			return &api.PackageVersionsResult{LatestMajor: map[string]string{}, LatestMinor: map[string]map[string]string{}}, nil
 		}
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 		setup.mockAPI.MockInitiateRun = func(api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			return &api.InitiateRunResult{RunID: "run-fresh", RunURL: "https://cloud.rwx.com/mint/runs/run-fresh"}, nil
@@ -4960,7 +4960,7 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 
 		// No session in storage — ListSandboxRuns is called during remote recovery
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
@@ -5102,7 +5102,7 @@ func TestService_ExecSandbox_ReconnectionHint(t *testing.T) {
 		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
 		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.SandboxRunSummary{}}, nil
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
 		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			return &api.InitiateRunResult{RunID: "run-brand-new", RunURL: "https://cloud.rwx.com/runs/run-brand-new"}, nil
