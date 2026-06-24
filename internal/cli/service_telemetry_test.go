@@ -976,7 +976,7 @@ func TestTelemetry_SandboxList(t *testing.T) {
 
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
-				Runs: []api.SandboxRunSummary{
+				Runs: []api.RunSummary{
 					{ID: "run-list-active", RunURL: "url"},
 				},
 			}, nil

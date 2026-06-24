@@ -582,10 +582,10 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 			listResult, listErr := s.APIClient.ListSandboxRuns()
 			if listErr == nil {
 				for _, run := range listResult.Runs {
-					if run.CliState == "" {
+					if run.CliState == nil || *run.CliState == "" {
 						continue
 					}
-					state, decErr := DecodeCliState(run.CliState)
+					state, decErr := DecodeCliState(*run.CliState)
 					if decErr != nil {
 						continue
 					}
@@ -904,7 +904,7 @@ func (s Service) ListSandboxes(cfg ListSandboxesConfig) (*ListSandboxesResult, e
 	}
 
 	// Build set of active run IDs from API response
-	activeRuns := make(map[string]api.SandboxRunSummary, len(listResult.Runs))
+	activeRuns := make(map[string]api.RunSummary, len(listResult.Runs))
 	for _, run := range listResult.Runs {
 		activeRuns[run.ID] = run
 	}
@@ -912,10 +912,10 @@ func (s Service) ListSandboxes(cfg ListSandboxesConfig) (*ListSandboxesResult, e
 	// Merge remotely-discovered runs into local storage
 	storageChanged := false
 	for _, run := range listResult.Runs {
-		if run.CliState == "" {
+		if run.CliState == nil || *run.CliState == "" {
 			continue
 		}
-		state, err := DecodeCliState(run.CliState)
+		state, err := DecodeCliState(*run.CliState)
 		if err != nil {
 			continue
 		}
