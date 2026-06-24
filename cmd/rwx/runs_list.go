@@ -136,8 +136,8 @@ func runStatusLabel(status api.RunStatus) string {
 }
 
 func shortCommitSha(sha string) string {
-	if len(sha) > 8 {
-		return sha[:8]
+	if len(sha) > 7 {
+		return sha[:7]
 	}
 	return sha
 }
