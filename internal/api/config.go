@@ -365,19 +365,24 @@ type RunDetailsConfig struct {
 	TaskKey string
 }
 
-type RunStatus struct {
+// PollingRunStatus is the minimal status object returned by the results
+// status/latest polling endpoint (keyed `run_status`); the CLI reads only the
+// result from it. It is intentionally a separate type from the richer shared
+// RunStatus returned by the runs index and results details, whose status object
+// has a different shape.
+type PollingRunStatus struct {
 	Result string `json:"result"`
 }
 
 type RunStatusResult struct {
-	Status     *RunStatus    `json:"run_status,omitempty"`
-	TaskStatus *TaskStatus   `json:"task_status,omitempty"`
-	RunID      string        `json:"run_id,omitempty"`
-	RunURL     string        `json:"run_url,omitempty"`
-	TaskID     string        `json:"task_id,omitempty"`
-	TaskURL    string        `json:"task_url,omitempty"`
-	Commit     *string       `json:"commit_sha,omitempty"`
-	Polling    PollingResult `json:"polling"`
+	Status     *PollingRunStatus `json:"run_status,omitempty"`
+	TaskStatus *TaskStatus       `json:"task_status,omitempty"`
+	RunID      string            `json:"run_id,omitempty"`
+	RunURL     string            `json:"run_url,omitempty"`
+	TaskID     string            `json:"task_id,omitempty"`
+	TaskURL    string            `json:"task_url,omitempty"`
+	Commit     *string           `json:"commit_sha,omitempty"`
+	Polling    PollingResult     `json:"polling"`
 }
 
 type AmbiguousTaskKeyError struct {
@@ -419,6 +424,78 @@ type SandboxRunSummary struct {
 
 type ListSandboxRunsResult struct {
 	Runs []SandboxRunSummary `json:"runs"`
+}
+
+// RunStatus is the shared status object returned by both the runs index (under
+// `status`) and results details, where the two are kept identical. The CLI
+// prefers this nested object over the legacy flat status fields in the payload.
+type RunStatus struct {
+	Result            string `json:"result"`
+	Execution         string `json:"execution"`
+	WaitingSubStatus  string `json:"waiting_sub_status"`
+	AbortedSubStatus  string `json:"aborted_sub_status"`
+	FinishedSubStatus string `json:"finished_sub_status"`
+}
+
+// RunSummary is one entry of the runs index payload.
+type RunSummary struct {
+	ID                      string    `json:"id"`
+	Status                  RunStatus `json:"status"`
+	StartedAt               *string   `json:"started_at"`
+	CompletedAt             *string   `json:"completed_at"`
+	CreatedAt               *string   `json:"created_at"`
+	CompletedRuntimeSeconds *float64  `json:"completed_runtime_seconds"`
+	RepositoryName          string    `json:"repository_name"`
+	Branch                  string    `json:"branch"`
+	Tag                     *string   `json:"tag"`
+	CommitSha               string    `json:"commit_sha"`
+	DefinitionPath          string    `json:"definition_path"`
+	Trigger                 string    `json:"trigger"`
+	Title                   string    `json:"title"`
+	RunURL                  string    `json:"run_url"`
+	// CliState is only populated for requests made by the RWX CLI, so it is optional.
+	CliState *string `json:"cli_state,omitempty"`
+}
+
+// ListRunsPagination is the keyset-pagination envelope from the index. NextCursor
+// is nil on the final page; Limit echoes the server-applied page size.
+type ListRunsPagination struct {
+	NextCursor *string `json:"next_cursor"`
+	Limit      int     `json:"limit"`
+}
+
+// RunFilterSuggestion is a near-miss hint for an open-ended filter value on a
+// successful (200) response. Distinct from RunFilterValidationEntry (the 400
+// status-filter error leaf): `suggestions` here is a list, and there is no
+// `valid_values` because the filter dictionary is open-ended.
+type RunFilterSuggestion struct {
+	Value       string   `json:"value"`
+	Suggestions []string `json:"suggestions"`
+}
+
+// ListRunsResult is the decoded runs index response. Suggestions is keyed by the
+// plural filter name (e.g. "branch_names") and is omitted when there is no
+// near-miss; it is non-fatal and may appear even when Runs is non-empty.
+type ListRunsResult struct {
+	Runs        []RunSummary                     `json:"runs"`
+	Pagination  ListRunsPagination               `json:"pagination"`
+	Suggestions map[string][]RunFilterSuggestion `json:"suggestions,omitempty"`
+}
+
+// ListRunsConfig holds the runs index filters plus pagination. Status values are
+// intentionally not validated client-side: the server owns the enum and returns a
+// structured 400 (with the valid values and a suggested correction) on a bad
+// value, so the CLI keeps no copy of the set that could drift out of sync.
+type ListRunsConfig struct {
+	RepositoryNames   []string
+	Branches          []string
+	CommitShas        []string
+	DefinitionPaths   []string
+	ResultStatuses    []string
+	ExecutionStatuses []string
+	MyRuns            bool
+	Limit             int
+	Cursor            string
 }
 
 type CreateSandboxTokenConfig struct {

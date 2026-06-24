@@ -1,0 +1,139 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.1.1
+
+tasks:
+  - key: code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: test-runs-list
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      # Seed a run so the org has at least one to list, then exercise the listing.
+      kickoff=$(rwx run "$RUN_DEF" --json)
+      run_id=$(echo "$kickoff" | jq -r '.RunID')
+      run_url=$(echo "$kickoff" | jq -r '.RunURL // empty')
+      echo "$run_url" > "$RWX_LINKS/Run URL"
+
+      if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+        echo "Failed to get RunID from kickoff"
+        echo "$kickoff"
+        exit 1
+      fi
+
+      # JSON shape: PascalCase Runs array plus a Pagination envelope with the
+      # NextCursor and Limit keys (the convention rwx results --json shares).
+      list=$(rwx runs list --json)
+      if ! echo "$list" | jq -e '.Runs | type == "array"' >/dev/null; then
+        echo "Expected .Runs to be an array"
+        echo "$list"
+        exit 1
+      fi
+      if ! echo "$list" | jq -e '.Pagination | has("NextCursor") and has("Limit")' >/dev/null; then
+        echo "Expected .Pagination to have NextCursor and Limit"
+        echo "$list"
+        exit 1
+      fi
+
+      # The seeded run must show up in the listing.
+      if ! rwx runs list --limit 100 --json | jq -e --arg id "$run_id" '.Runs[].ID | select(. == $id)' >/dev/null; then
+        echo "Seeded run $run_id was not found in the listing"
+        rwx runs list --limit 100 --json
+        exit 1
+      fi
+
+      # --limit caps the page size and is echoed back in the pagination envelope.
+      page=$(rwx runs list --limit 1 --json)
+      count=$(echo "$page" | jq '.Runs | length')
+      limit=$(echo "$page" | jq '.Pagination.Limit')
+      if [ "$count" -gt 1 ]; then
+        echo "Expected at most 1 run with --limit 1, got $count"
+        echo "$page"
+        exit 1
+      fi
+      if [ "$limit" -ne 1 ]; then
+        echo "Expected Pagination.Limit 1, got $limit"
+        echo "$page"
+        exit 1
+      fi
+
+      # Cursor pagination: the next page must not repeat the first page's row.
+      cursor=$(echo "$page" | jq -r '.Pagination.NextCursor // empty')
+      if [ -n "$cursor" ]; then
+        first_id=$(echo "$page" | jq -r '.Runs[0].ID')
+        next_page=$(rwx runs list --limit 1 --cursor "$cursor" --json)
+        second_id=$(echo "$next_page" | jq -r '.Runs[0].ID // empty')
+        if [ -n "$second_id" ] && [ "$second_id" = "$first_id" ]; then
+          echo "Cursor page repeated the first row ($first_id)"
+          echo "$next_page"
+          exit 1
+        fi
+      fi
+
+      # Default (table) output carries the column header.
+      table=$(rwx runs list --limit 1)
+      if ! echo "$table" | grep -q "ID"; then
+        echo "Expected table output to include an ID column header"
+        echo "$table"
+        exit 1
+      fi
+      if ! echo "$table" | grep -q "STATUS"; then
+        echo "Expected table output to include a STATUS column header"
+        echo "$table"
+        exit 1
+      fi
+
+      # A malformed cursor surfaces a clean error and a non-zero exit.
+      exit_code=0
+      out=$(rwx runs list --cursor not-a-real-cursor 2>&1) || exit_code=$?
+      if [ "$exit_code" -eq 0 ]; then
+        echo "Expected a non-zero exit for a malformed cursor"
+        echo "$out"
+        exit 1
+      fi
+      if ! echo "$out" | grep -qi "Invalid cursor"; then
+        echo "Expected the malformed-cursor error to mention 'Invalid cursor'"
+        echo "$out"
+        exit 1
+      fi
+
+      # An invalid status filter is rejected by the server's structured 400.
+      exit_code=0
+      out=$(rwx runs list --result-status definitely-not-a-status 2>&1) || exit_code=$?
+      if [ "$exit_code" -eq 0 ]; then
+        echo "Expected a non-zero exit for an invalid --result-status"
+        echo "$out"
+        exit 1
+      fi
+      if ! echo "$out" | grep -q "result_status"; then
+        echo "Expected the invalid-status error to name the result_status filter"
+        echo "$out"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RUN_DEF: ${{ run.dir }}/integration/runs-list-test/passing.yml

@@ -1060,7 +1060,7 @@ func TestTelemetry_RunComplete(t *testing.T) {
 			return api.RunStatusResult{
 				RunID:  "run-complete-123",
 				RunURL: "https://cloud.rwx.com/runs/run-complete-123",
-				Status: &api.RunStatus{Result: "succeeded"},
+				Status: &api.PollingRunStatus{Result: "succeeded"},
 				Polling: api.PollingResult{
 					Completed: true,
 				},
@@ -1092,7 +1092,7 @@ func TestTelemetry_RunComplete(t *testing.T) {
 			return api.RunStatusResult{
 				RunID:  "run-pending-123",
 				RunURL: "https://cloud.rwx.com/runs/run-pending-123",
-				Status: &api.RunStatus{Result: "running"},
+				Status: &api.PollingRunStatus{Result: "running"},
 				Polling: api.PollingResult{
 					Completed: false,
 				},

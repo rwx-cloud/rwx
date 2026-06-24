@@ -975,11 +975,11 @@ func TestAPIClient_RunStatus(t *testing.T) {
 	t.Run("parses the response when run is in progress", func(t *testing.T) {
 		backoffMs := 2000
 		body := struct {
-			Status  *api.RunStatus    `json:"run_status"`
-			RunID   string            `json:"run_id"`
-			Polling api.PollingResult `json:"polling"`
+			Status  *api.PollingRunStatus `json:"run_status"`
+			RunID   string                `json:"run_id"`
+			Polling api.PollingResult     `json:"polling"`
 		}{
-			Status:  &api.RunStatus{Result: ""},
+			Status:  &api.PollingRunStatus{Result: ""},
 			RunID:   "run-123",
 			Polling: api.PollingResult{Completed: false, BackoffMs: &backoffMs},
 		}
@@ -1011,10 +1011,10 @@ func TestAPIClient_RunStatus(t *testing.T) {
 
 	t.Run("sends fail_fast as false by default", func(t *testing.T) {
 		body := struct {
-			Status  *api.RunStatus    `json:"run_status"`
-			Polling api.PollingResult `json:"polling"`
+			Status  *api.PollingRunStatus `json:"run_status"`
+			Polling api.PollingResult     `json:"polling"`
 		}{
-			Status:  &api.RunStatus{Result: "succeeded"},
+			Status:  &api.PollingRunStatus{Result: "succeeded"},
 			Polling: api.PollingResult{Completed: true},
 		}
 		bodyBytes, _ := json.Marshal(body)
@@ -1036,11 +1036,11 @@ func TestAPIClient_RunStatus(t *testing.T) {
 
 	t.Run("parses the response when run is completed", func(t *testing.T) {
 		body := struct {
-			Status  *api.RunStatus    `json:"run_status"`
-			RunID   string            `json:"run_id"`
-			Polling api.PollingResult `json:"polling"`
+			Status  *api.PollingRunStatus `json:"run_status"`
+			RunID   string                `json:"run_id"`
+			Polling api.PollingResult     `json:"polling"`
 		}{
-			Status:  &api.RunStatus{Result: "succeeded"},
+			Status:  &api.PollingRunStatus{Result: "succeeded"},
 			RunID:   "run-456",
 			Polling: api.PollingResult{Completed: true},
 		}
@@ -1070,8 +1070,8 @@ func TestAPIClient_RunStatus(t *testing.T) {
 
 	t.Run("parses the response when run is not found", func(t *testing.T) {
 		body := struct {
-			Status  *api.RunStatus    `json:"run_status"`
-			Polling api.PollingResult `json:"polling"`
+			Status  *api.PollingRunStatus `json:"run_status"`
+			Polling api.PollingResult     `json:"polling"`
 		}{
 			Status:  nil,
 			Polling: api.PollingResult{Completed: true},

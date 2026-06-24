@@ -15,7 +15,7 @@ func TestService_GetRunStatus(t *testing.T) {
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			require.Equal(t, "run-123", cfg.RunID)
 			return api.RunStatusResult{
-				Status:  &api.RunStatus{Result: "succeeded"},
+				Status:  &api.PollingRunStatus{Result: "succeeded"},
 				RunID:   "run-123",
 				Polling: api.PollingResult{Completed: true},
 			}, nil
@@ -39,7 +39,7 @@ func TestService_GetRunStatus(t *testing.T) {
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			require.True(t, cfg.FailFast)
 			return api.RunStatusResult{
-				Status:  &api.RunStatus{Result: "failed"},
+				Status:  &api.PollingRunStatus{Result: "failed"},
 				RunID:   "run-123",
 				Polling: api.PollingResult{Completed: true},
 			}, nil
@@ -65,13 +65,13 @@ func TestService_GetRunStatus(t *testing.T) {
 			callCount++
 			if callCount < 3 {
 				return api.RunStatusResult{
-					Status:  &api.RunStatus{Result: "in_progress"},
+					Status:  &api.PollingRunStatus{Result: "in_progress"},
 					RunID:   "run-456",
 					Polling: api.PollingResult{Completed: false, BackoffMs: &backoffMs},
 				}, nil
 			}
 			return api.RunStatusResult{
-				Status:  &api.RunStatus{Result: "failed"},
+				Status:  &api.PollingRunStatus{Result: "failed"},
 				RunID:   "run-456",
 				Polling: api.PollingResult{Completed: true},
 			}, nil
@@ -99,13 +99,13 @@ func TestService_GetRunStatus(t *testing.T) {
 			callCount++
 			if callCount < 2 {
 				return api.RunStatusResult{
-					Status:  &api.RunStatus{Result: "in_progress"},
+					Status:  &api.PollingRunStatus{Result: "in_progress"},
 					RunID:   "run-789",
 					Polling: api.PollingResult{Completed: false, BackoffMs: &backoffMs},
 				}, nil
 			}
 			return api.RunStatusResult{
-				Status:  &api.RunStatus{Result: "succeeded"},
+				Status:  &api.PollingRunStatus{Result: "succeeded"},
 				RunID:   "run-789",
 				Polling: api.PollingResult{Completed: true},
 			}, nil
@@ -129,7 +129,7 @@ func TestService_GetRunStatus(t *testing.T) {
 
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			return api.RunStatusResult{
-				Status:  &api.RunStatus{Result: "in_progress"},
+				Status:  &api.PollingRunStatus{Result: "in_progress"},
 				RunID:   "run-789",
 				Polling: api.PollingResult{Completed: false, BackoffMs: nil},
 			}, nil
@@ -191,7 +191,7 @@ func TestService_GetRunStatus(t *testing.T) {
 			require.Equal(t, "main", cfg.BranchName)
 			require.Equal(t, "cli", cfg.RepositoryName)
 			return api.RunStatusResult{
-				Status:  &api.RunStatus{Result: "succeeded"},
+				Status:  &api.PollingRunStatus{Result: "succeeded"},
 				RunID:   "resolved-run-id",
 				RunURL:  "https://cloud.rwx.com/mint/org/runs/resolved-run-id",
 				Polling: api.PollingResult{Completed: true},
@@ -263,13 +263,13 @@ func TestService_GetRunStatus(t *testing.T) {
 			callCount++
 			if callCount < 2 {
 				return api.RunStatusResult{
-					Status:  &api.RunStatus{Result: "no_result"},
+					Status:  &api.PollingRunStatus{Result: "no_result"},
 					RunID:   "resolved-run-id",
 					Polling: api.PollingResult{Completed: false, BackoffMs: &backoffMs},
 				}, nil
 			}
 			return api.RunStatusResult{
-				Status:  &api.RunStatus{Result: "succeeded"},
+				Status:  &api.PollingRunStatus{Result: "succeeded"},
 				RunID:   "resolved-run-id",
 				Polling: api.PollingResult{Completed: true},
 			}, nil
@@ -295,7 +295,7 @@ func TestService_GetRunStatus(t *testing.T) {
 		commitSHA := "abc123def456"
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			return api.RunStatusResult{
-				Status:  &api.RunStatus{Result: "succeeded"},
+				Status:  &api.PollingRunStatus{Result: "succeeded"},
 				RunID:   "run-123",
 				Commit:  &commitSHA,
 				Polling: api.PollingResult{Completed: true},
@@ -317,7 +317,7 @@ func TestService_GetRunStatus(t *testing.T) {
 
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			return api.RunStatusResult{
-				Status:  &api.RunStatus{Result: "succeeded"},
+				Status:  &api.PollingRunStatus{Result: "succeeded"},
 				RunID:   "run-123",
 				Commit:  nil,
 				Polling: api.PollingResult{Completed: true},
@@ -339,7 +339,7 @@ func TestService_GetRunStatus(t *testing.T) {
 
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			return api.RunStatusResult{
-				Status:  &api.RunStatus{Result: "succeeded"},
+				Status:  &api.PollingRunStatus{Result: "succeeded"},
 				RunID:   "run-123",
 				RunURL:  "https://cloud.rwx.com/mint/org/runs/run-123",
 				TaskID:  "task-456",
@@ -368,7 +368,7 @@ func TestService_GetRunStatus(t *testing.T) {
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			callCount++
 			return api.RunStatusResult{
-				Status:  &api.RunStatus{Result: "in_progress"},
+				Status:  &api.PollingRunStatus{Result: "in_progress"},
 				RunID:   "run-123",
 				Polling: api.PollingResult{Completed: false},
 			}, nil
