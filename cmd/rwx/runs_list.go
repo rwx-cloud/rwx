@@ -47,6 +47,14 @@ For a given run's full payload, run 'rwx results <id> --json'.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 
+			// Keep retry chatter off stdout under --json so the structured
+			// payload stays clean and parseable; in plain mode it rides along
+			// with the regular output.
+			retryProgress := io.Writer(os.Stdout)
+			if useJson {
+				retryProgress = os.Stderr
+			}
+
 			result, err := service.ListRuns(cli.ListRunsConfig{
 				RepositoryNames:   RunsListRepositories,
 				Branches:          RunsListBranches,
@@ -57,6 +65,7 @@ For a given run's full payload, run 'rwx results <id> --json'.`,
 				MyRuns:            RunsListMine,
 				Limit:             RunsListLimit,
 				Cursor:            RunsListCursor,
+				RetryProgress:     retryProgress,
 			})
 			if err != nil {
 				return err

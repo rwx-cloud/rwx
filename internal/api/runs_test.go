@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
@@ -222,6 +223,9 @@ func TestAPIClient_ListRuns(t *testing.T) {
 	})
 
 	t.Run("synthesizes an actionable message from a 429 with Retry-After", func(t *testing.T) {
+		// Persistent 429s exhaust the retries; stub the backoff so the test is fast.
+		defer api.StubListRunsRetrySleep(func(time.Duration) {})()
+
 		c := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
 			header := http.Header{}
 			header.Set("Retry-After", "60")

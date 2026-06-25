@@ -8,9 +8,15 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rwx-cloud/rwx/internal/errors"
+	"github.com/rwx-cloud/rwx/internal/retry"
 )
+
+// listRunsRetrySleep is indirected so tests can exercise the backoff loop
+// without real delays.
+var listRunsRetrySleep = time.Sleep
 
 // RunFilterValidationEntry is one leaf of the structured 400 returned when a
 // closed-enum status filter has an unknown value. SuggestedValue is the single
@@ -56,9 +62,9 @@ type RateLimitedError struct {
 
 func (e *RateLimitedError) Error() string {
 	if e.RetryAfterSeconds > 0 {
-		return fmt.Sprintf("rate limited by RWX (100 requests/min). Retry after %d seconds.", e.RetryAfterSeconds)
+		return fmt.Sprintf("rate limited by RWX. Retry after %d seconds.", e.RetryAfterSeconds)
 	}
-	return "rate limited by RWX (100 requests/min). Please retry shortly."
+	return "rate limited by RWX. Please retry shortly."
 }
 
 // queryParams maps the config onto the index's accepted parameters. Each filter
@@ -100,41 +106,103 @@ func setFilterParam(params url.Values, scalarKey, pluralKey string, values []str
 	}
 }
 
+// ListRuns fetches one page of the runs index. The index is rate limited
+// (100 req/min), so a 429 — along with transient 5xx, network, and empty /
+// non-JSON responses — is retried with bounded backoff (honoring Retry-After
+// when present) rather than failing the caller mid-page. Retries are announced
+// on cfg.RetryProgress when set so a multi-page paging loop does not look hung.
 func (c Client) ListRuns(cfg ListRunsConfig) (*ListRunsResult, error) {
 	endpoint := "/mint/api/runs?" + cfg.queryParams().Encode()
 
+	backoff := retry.NewBackoff()
+
+	for {
+		result, retryAfter, retryable, err := c.listRunsOnce(endpoint)
+		if err == nil {
+			return result, nil
+		}
+
+		// 4xx other than 429 (bad filter, bad cursor, auth) are caller errors;
+		// surface them immediately rather than burning retries.
+		if !retryable {
+			return nil, err
+		}
+
+		// Record the transient failure; once the bounded attempt cap is hit,
+		// surface the underlying error rather than retrying forever.
+		delay, capErr := backoff.Record()
+		if capErr != nil {
+			return nil, err
+		}
+
+		// Honor the server's Retry-After window when it gives one; otherwise
+		// fall back to the exponential backoff schedule.
+		if retryAfter > 0 {
+			delay = time.Duration(retryAfter) * time.Second
+		}
+
+		reportListRunsRetry(cfg.RetryProgress, err, delay, backoff)
+		listRunsRetrySleep(delay)
+	}
+}
+
+// listRunsOnce performs a single runs-index request. The retryable flag tells
+// ListRuns whether the error is worth backing off and retrying; retryAfter
+// carries the 429 Retry-After window (in seconds) when present.
+func (c Client) listRunsOnce(endpoint string) (result *ListRunsResult, retryAfter int, retryable bool, err error) {
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to create new HTTP request")
+		return nil, 0, false, errors.Wrap(err, "unable to create new HTTP request")
 	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.RoundTrip(req)
 	if err != nil {
-		return nil, errors.Wrap(err, "HTTP request failed")
+		// Only transient transport failures (resets, timeouts, EOF) are worth a
+		// retry; a fatal transport error (bad cert, etc.) surfaces immediately.
+		return nil, 0, retry.IsTransient(err), errors.Wrap(err, "HTTP request failed")
 	}
 	defer resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		result := ListRunsResult{}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			return nil, errors.Wrap(err, "unable to parse API response")
+		decoded := ListRunsResult{}
+		if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+			// An empty or truncated body on a 200 is transient; retry it.
+			return nil, 0, true, errors.Wrap(err, "unable to parse API response")
 		}
-		return &result, nil
+		return &decoded, 0, false, nil
 	case http.StatusBadRequest:
-		return nil, parseInvalidRunFilterError(resp.Body)
+		return nil, 0, false, parseInvalidRunFilterError(resp.Body)
 	case http.StatusTooManyRequests:
 		// The 429 body is empty; Retry-After carries the window in seconds.
 		retryAfter, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
-		return nil, &RateLimitedError{RetryAfterSeconds: retryAfter}
+		return nil, retryAfter, true, &RateLimitedError{RetryAfterSeconds: retryAfter}
 	default:
 		msg := extractErrorMessage(resp.Body)
 		if msg == "" {
 			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
 		}
-		return nil, classifyHTTPStatusError(resp.StatusCode, msg)
+		isTransient := resp.StatusCode >= 500 && resp.StatusCode < 600
+		return nil, 0, isTransient, classifyHTTPStatusError(resp.StatusCode, msg)
 	}
+}
+
+// reportListRunsRetry writes a one-line retry notice to w (when non-nil). The
+// attempt just failed; the displayed number is the upcoming attempt.
+func reportListRunsRetry(w io.Writer, err error, delay time.Duration, backoff *retry.Backoff) {
+	if w == nil {
+		return
+	}
+
+	reason := "RWX API request failed"
+	var rateErr *RateLimitedError
+	if errors.As(err, &rateErr) {
+		reason = "rate limited by RWX (100 requests/min)"
+	}
+
+	seconds := int(delay.Round(time.Second).Seconds())
+	fmt.Fprintf(w, "%s, retrying in %ds (attempt %d/%d)\n", reason, seconds, backoff.ConsecutiveFailures+1, backoff.MaxFailures)
 }
 
 // parseInvalidRunFilterError handles both 400 shapes from the index: the
