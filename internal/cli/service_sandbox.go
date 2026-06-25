@@ -1566,6 +1566,15 @@ func (s Service) pushLocalHeadToSandbox(localHead string, connInfo *api.SandboxC
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 	pushErr := s.GitClient.PushRef(opts)
+	if pushErr != nil && strings.Contains(pushErr.Error(), "shallow update not allowed") {
+		// A shallow sandbox clone can be missing the base commit that the local
+		// branch builds on (e.g. the default branch advanced after the sandbox
+		// started, so the sandbox cloned a newer tip and grafted the base away).
+		// git then rejects the push with "shallow update not allowed". Deepen the
+		// sandbox so it regains the base commit, then retry the push.
+		_, _ = s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand("/usr/bin/git fetch --unshallow origin >/dev/null 2>&1"))
+		pushErr = s.GitClient.PushRef(opts)
+	}
 	hasCommit := pushErr == nil && s.sandboxHasCommit(localHead)
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if pushErr != nil {

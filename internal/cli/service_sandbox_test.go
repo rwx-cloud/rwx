@@ -2280,6 +2280,67 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Contains(t, err.Error(), "sandbox still does not contain local commit "+localHead+" after git push")
 	})
 
+	t.Run("deepens shallow sandbox and retries when push is rejected as a shallow update", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-push-shallow"
+		address := "192.168.1.1:22"
+		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+		pushed := false
+		var pushCount int
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGetBranch = "feature/push-shallow"
+		setup.mockGit.MockPushRef = func(opts git.PushRefOptions) error {
+			pushCount++
+			if pushCount == 1 {
+				return fmt.Errorf("git push failed: ! [remote rejected] %s -> refs/rwx/sync-push (shallow update not allowed)", localHead)
+			}
+			pushed = true
+			return nil
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+		var commands []string
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			commands = append(commands, cmd)
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				if pushed {
+					return 0, nil
+				}
+				return 1, nil
+			default:
+				return 0, nil
+			}
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
+			Command:    []string{"echo", "hello"},
+			RunID:      runID,
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, runID, result.RunID)
+		require.Equal(t, 2, pushCount)
+		require.Contains(t, strings.Join(commands, "\n"), "git fetch --unshallow origin")
+	})
+
 	t.Run("returns helpful error when git is not installed", func(t *testing.T) {
 		setup := setupTest(t)
 
