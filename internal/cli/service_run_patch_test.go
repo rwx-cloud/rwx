@@ -497,6 +497,10 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 			s := setupTest(t)
 			s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
 			s.mockGit.MockGeneratePatchFile = patchFile
+			// Uncommitted changes are present, so the skip notice should be shown.
+			s.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+				return []byte("diff"), nil, nil
+			}
 
 			rwxDir := filepath.Join(s.tmp, ".rwx")
 			err := os.MkdirAll(rwxDir, 0o755)
@@ -543,12 +547,18 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 			for _, entry := range receivedRwxDir {
 				require.False(t, strings.Contains(entry.Path, ".patches"), "expected no .patches entries when init params match git params, found: %s", entry.Path)
 			}
+
+			require.Contains(t, s.mockStderr.String(), `Skipping the git patch for uncommitted changes because "sha" was explicitly specified`)
 		})
 
 		t.Run("when init params match existing CLI git clone params", func(t *testing.T) {
 			s := setupTest(t)
 			s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
 			s.mockGit.MockGeneratePatchFile = patchFile
+			// Uncommitted changes are present, so the skip notice should be shown.
+			s.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+				return []byte("diff"), nil, nil
+			}
 
 			rwxDir := filepath.Join(s.tmp, ".rwx")
 			err := os.MkdirAll(rwxDir, 0o755)
@@ -593,6 +603,58 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 			for _, entry := range receivedRwxDir {
 				require.False(t, strings.Contains(entry.Path, ".patches"), "expected no .patches entries when init params match git params, found: %s", entry.Path)
 			}
+
+			require.Contains(t, s.mockStderr.String(), `Skipping the git patch for uncommitted changes because "ref" was explicitly specified`)
+		})
+
+		t.Run("when init params match git params but there are no uncommitted changes", func(t *testing.T) {
+			s := setupTest(t)
+			s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+			s.mockGit.MockGeneratePatchFile = patchFile
+			// Clean tree: no patch would have been produced, so no notice.
+			s.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+				return nil, nil, nil
+			}
+
+			rwxDir := filepath.Join(s.tmp, ".rwx")
+			err := os.MkdirAll(rwxDir, 0o755)
+			require.NoError(t, err)
+
+			definitionsFile := filepath.Join(rwxDir, "rwx.yml")
+			definition := "on:\n  github:\n    push:\n      init:\n        sha: ${{ event.git.sha }}\n\nbase:\n  os: ubuntu 24.04\n  tag: 1.0\n\ntasks:\n  - key: foo\n    run: echo 'bar'\n"
+
+			err = os.WriteFile(definitionsFile, []byte(definition), 0o644)
+			require.NoError(t, err)
+
+			runConfig := cli.InitiateRunConfig{
+				RwxDirectory: rwxDir,
+				MintFilePath: definitionsFile,
+				Patchable:    true,
+				InitParameters: map[string]string{
+					"sha": "3e76c8295cd0ce4decbf7b56253c902ce296cb25",
+				},
+			}
+
+			s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+				return &api.PackageVersionsResult{
+					LatestMajor: make(map[string]string),
+					LatestMinor: make(map[string]map[string]string),
+				}, nil
+			}
+			s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+				require.False(t, cfg.Patch.Sent)
+				return &api.InitiateRunResult{
+					RunID:            "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
+					RunURL:           "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
+					TargetedTaskKeys: []string{},
+					DefinitionPath:   ".mint/mint.yml",
+				}, nil
+			}
+
+			_, err = s.service.InitiateRun(runConfig)
+			require.NoError(t, err)
+
+			require.NotContains(t, s.mockStderr.String(), "Skipping the git patch for uncommitted changes")
 		})
 	})
 }
