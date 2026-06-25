@@ -235,6 +235,14 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 
 	for _, gitParam := range resolveResult.GitParams {
 		if _, exists := cfg.InitParameters[gitParam]; exists {
+			if patchable {
+				patch, _, patchErr := s.GitClient.GeneratePatch(
+					runPatchPathspec(s.GitClient.GetTopLevel(), runDefinitionPath, relativeRunDefinitionPath),
+				)
+				if patchErr == nil && len(patch) > 0 {
+					fmt.Fprintf(s.Stderr, "Skipping the git patch for uncommitted changes because %q was explicitly specified\n\n", gitParam)
+				}
+			}
 			patchable = false
 			break
 		}
