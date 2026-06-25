@@ -11,7 +11,7 @@ base:
 
 tasks:
   - key: code
-    call: git/clone 2.0.7
+    call: git/clone 2.0.8
     with:
       repository: https://github.com/rwx-cloud/rwx.git
       ref: ${{ init.ref }}
@@ -52,7 +52,7 @@ tasks:
       node-version: 17.0.0
 
   - key: lsp-code
-    call: git/clone 2.0.7
+    call: git/clone 2.0.8
     with:
       repository: https://github.com/rwx-cloud/language-server.git
       ref: ${{ tasks.tool-versions.values.language-server-ref }}
