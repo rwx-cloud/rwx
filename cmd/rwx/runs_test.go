@@ -47,13 +47,23 @@ func TestRunsStartMirrorsRun(t *testing.T) {
 	}
 }
 
-func TestRunsResultAliasesStayHidden(t *testing.T) {
-	for _, name := range []string{"get", "show"} {
-		aliasCmd := findSubcommand(runsCmd, name)
-		require.NotNil(t, aliasCmd, "rwx runs %s should exist", name)
-		require.True(t, aliasCmd.Hidden, "rwx runs %s should remain hidden", name)
-		require.True(t, sameFunc(aliasCmd.RunE, resultsCmd.RunE), "rwx runs %s should alias results", name)
-	}
+func TestRunsShowIsVisibleAndAliasesResults(t *testing.T) {
+	// show is the visible single-run inspection command and reuses results'
+	// execution so the two stay in lockstep.
+	showCmd := findSubcommand(runsCmd, "show")
+	require.NotNil(t, showCmd, "rwx runs show should exist")
+	require.False(t, showCmd.Hidden, "rwx runs show should be visible for discoverability")
+	require.True(t, sameFunc(showCmd.RunE, resultsCmd.RunE), "rwx runs show should alias results")
+	require.Equal(t, resultsCmd.Short, showCmd.Short)
+}
+
+func TestRunsGetIsAnAliasOfShow(t *testing.T) {
+	// `get` resolves to show via a Cobra alias rather than its own command, so
+	// `rwx runs get` works without a second line under `rwx runs -h`.
+	require.Nil(t, findSubcommand(runsCmd, "get"), "rwx runs get should not be its own command")
+	showCmd := findSubcommand(runsCmd, "show")
+	require.NotNil(t, showCmd)
+	require.Contains(t, showCmd.Aliases, "get", "show should expose get as an alias")
 }
 
 // executeRoot runs the root command with the given args, capturing combined

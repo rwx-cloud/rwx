@@ -26,30 +26,22 @@ func init() {
 	}
 	runsStartCmd.Flags().AddFlagSet(runCmd.Flags())
 
-	aliasShort := "Alias for rwx results"
-
-	runsGetCmd := &cobra.Command{
-		Use:     "get [run-id]",
-		Short:   aliasShort,
-		Args:    resultsCmd.Args,
-		PreRunE: resultsCmd.PreRunE,
-		RunE:    resultsCmd.RunE,
-		Hidden:  true,
-	}
-	runsGetCmd.Flags().AddFlagSet(resultsCmd.Flags())
-
+	// `rwx runs show` is the noun-verb form of `rwx results`: the single-run
+	// inspection path, reusing results' execution so the two stay in lockstep.
+	// `get` is an alias so coding-agent guesses (`rwx runs get`) resolve to the
+	// same command without surfacing a second line under `rwx runs -h`.
 	runsShowCmd := &cobra.Command{
 		Use:     "show [run-id]",
-		Short:   aliasShort,
+		Aliases: []string{"get"},
+		Short:   resultsCmd.Short,
+		Long:    resultsCmd.Long,
 		Args:    resultsCmd.Args,
 		PreRunE: resultsCmd.PreRunE,
 		RunE:    resultsCmd.RunE,
-		Hidden:  true,
 	}
 	runsShowCmd.Flags().AddFlagSet(resultsCmd.Flags())
 
 	runsCmd.AddCommand(runsStartCmd)
-	runsCmd.AddCommand(runsGetCmd)
 	runsCmd.AddCommand(runsShowCmd)
 	runsCmd.AddCommand(runsListCmd)
 
