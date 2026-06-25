@@ -147,6 +147,26 @@ func TestListRuns_Retry(t *testing.T) {
 		require.Empty(t, *slept)
 	})
 
+	t.Run("ListSandboxRuns forwards the retry-progress writer", func(t *testing.T) {
+		stubRetrySleep(t)
+
+		attempts := 0
+		c := NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			attempts++
+			if attempts == 1 {
+				return rateLimitedResponse("1"), nil
+			}
+			return okRunsResponse(), nil
+		})
+
+		var progress bytes.Buffer
+		result, err := c.ListSandboxRuns(&progress)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, 2, attempts)
+		require.Contains(t, progress.String(), "rate limited by RWX")
+	})
+
 	t.Run("stays silent when no RetryProgress writer is set", func(t *testing.T) {
 		stubRetrySleep(t)
 

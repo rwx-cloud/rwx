@@ -53,7 +53,7 @@ type APIClient interface {
 	GetRunPrompt(runID string) (string, error)
 	GetRunPromptByTaskKey(runID, taskKey string) (string, error)
 	GetSandboxInitTemplate() (api.SandboxInitTemplateResult, error)
-	ListSandboxRuns() (*api.ListSandboxRunsResult, error)
+	ListSandboxRuns(retryProgress io.Writer) (*api.ListSandboxRunsResult, error)
 	CancelRun(runID, scopedToken string) error
 }
 

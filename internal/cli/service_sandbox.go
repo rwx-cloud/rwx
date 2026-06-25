@@ -579,7 +579,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 
 		if !found {
 			// Check if a matching sandbox already exists remotely
-			listResult, listErr := s.APIClient.ListSandboxRuns()
+			listResult, listErr := s.APIClient.ListSandboxRuns(s.Stderr)
 			if listErr == nil {
 				for _, run := range listResult.Runs {
 					if run.CliState == nil || *run.CliState == "" {
@@ -898,7 +898,7 @@ func (s Service) ListSandboxes(cfg ListSandboxesConfig) (*ListSandboxesResult, e
 		return nil, errors.Wrap(err, "unable to load sandbox sessions")
 	}
 
-	listResult, err := s.APIClient.ListSandboxRuns()
+	listResult, err := s.APIClient.ListSandboxRuns(s.Stderr)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to list sandbox runs")
 	}

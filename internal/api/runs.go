@@ -198,7 +198,7 @@ func reportListRunsRetry(w io.Writer, err error, delay time.Duration, backoff *r
 	reason := "RWX API request failed"
 	var rateErr *RateLimitedError
 	if errors.As(err, &rateErr) {
-		reason = "rate limited by RWX (100 requests/min)"
+		reason = "rate limited by RWX"
 	}
 
 	seconds := int(delay.Round(time.Second).Seconds())
