@@ -139,7 +139,30 @@ var (
 					if err == nil {
 						jsonOutput.ResultPrompt = promptResult.Prompt
 					}
-					waitResultJson, err := json.Marshal(jsonOutput)
+
+					baseJson, err := json.Marshal(jsonOutput)
+					if err != nil {
+						return err
+					}
+					var base map[string]any
+					if err := json.Unmarshal(baseJson, &base); err != nil {
+						return err
+					}
+
+					// Fold the enriched /details payload into the base output,
+					// mirroring `rwx results --json`. An empty object means
+					// enrichment is not enabled for the org, so the merge is a no-op.
+					details, err := service.GetRunDetails(cli.GetRunDetailsConfig{
+						RunID: runResult.RunID,
+					})
+					if err != nil {
+						return err
+					}
+					if len(details) > 0 {
+						base = MergeEnrichedResults(base, details)
+					}
+
+					waitResultJson, err := json.Marshal(base)
 					if err != nil {
 						return err
 					}
