@@ -9,7 +9,7 @@ base:
 
 tasks:
   - key: code
-    call: git/clone 2.0.7
+    call: git/clone 2.0.8
     with:
       preserve-git-dir: true
       repository: https://github.com/rwx-cloud/rwx.git
@@ -28,7 +28,7 @@ tasks:
       - language-server-ref
 
   - key: lsp-code
-    call: git/clone 2.0.7
+    call: git/clone 2.0.8
     with:
       repository: https://github.com/rwx-cloud/language-server.git
       ref: ${{ tasks.tool-versions.values.language-server-ref }}
