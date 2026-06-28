@@ -85,7 +85,7 @@ func (s Service) outputLatestVersionMessage() {
 }
 
 func (s Service) outputOutdatedSkillMessage() {
-	if os.Getenv("RWX_HIDE_SKILL_HINT") != "" {
+	if os.Getenv("RWX_HIDE_LATEST_SKILL_VERSION") != "" {
 		return
 	}
 
