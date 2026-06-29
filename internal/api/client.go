@@ -1161,14 +1161,12 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 }
 
 func (c Client) GetRunDetails(cfg RunDetailsConfig) (map[string]any, error) {
-	params := url.Values{}
+	endpoint := "/mint/api/results/" + url.PathEscape(cfg.RunID)
 	if cfg.TaskKey != "" {
-		params.Set("run_id", cfg.RunID)
+		params := url.Values{}
 		params.Set("task_key", cfg.TaskKey)
-	} else {
-		params.Set("id", cfg.RunID)
+		endpoint += "?" + params.Encode()
 	}
-	endpoint := "/mint/api/results/details?" + params.Encode()
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
