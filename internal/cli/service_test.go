@@ -128,6 +128,18 @@ func TestOutputOutdatedSkillMessage(t *testing.T) {
 		s := setupSkillTest(t)
 		seedSkillFile(t, s.tmp, "1.0.0")
 		_ = versions.SetSkillLatestVersion("2.0.0")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+		require.Empty(t, s.mockStderr.String())
+	})
+
+	t.Run("suppressed by legacy env var", func(t *testing.T) {
+		s := setupSkillTest(t)
+		seedSkillFile(t, s.tmp, "1.0.0")
+		_ = versions.SetSkillLatestVersion("2.0.0")
 		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
 
 		var err error
@@ -163,7 +175,7 @@ func TestSkillStatus(t *testing.T) {
 		}
 
 		// Suppress the nag from NewService so it does not interfere.
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -189,7 +201,7 @@ func TestSkillStatus(t *testing.T) {
 			return "", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -213,7 +225,7 @@ func TestSkillStatus(t *testing.T) {
 			return "2.0.0", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -232,7 +244,7 @@ func TestSkillStatus(t *testing.T) {
 			return "", fmt.Errorf("network error")
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -251,7 +263,7 @@ func TestSkillStatus(t *testing.T) {
 			return "2.0.0", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -271,7 +283,7 @@ func TestSkillUpdate(t *testing.T) {
 		_ = backend.Set("2.0.0")
 		s.config.SkillVersionsBackend = backend
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -290,7 +302,7 @@ func TestSkillUpdate(t *testing.T) {
 		_ = backend.Set("2.0.0")
 		s.config.SkillVersionsBackend = backend
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -314,7 +326,7 @@ func TestSkillUpdate(t *testing.T) {
 			return newContent, nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -344,7 +356,7 @@ func TestSkillUpdate(t *testing.T) {
 			return "2.0.0", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -365,7 +377,7 @@ func TestSkillUpdate(t *testing.T) {
 			return "dev", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -386,7 +398,7 @@ func TestSkillInstall(t *testing.T) {
 			return skillContent, nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -410,7 +422,7 @@ func TestSkillInstall(t *testing.T) {
 			return "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -432,7 +444,7 @@ func TestSkillInstall(t *testing.T) {
 			return "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -455,7 +467,7 @@ func TestSkillInstall(t *testing.T) {
 			return "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -480,7 +492,7 @@ func TestSkillInstall(t *testing.T) {
 			return "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -502,7 +514,7 @@ func TestSkillInstall(t *testing.T) {
 			return "", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -530,7 +542,7 @@ func TestSkillInstall(t *testing.T) {
 			return "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -552,7 +564,7 @@ func TestSkillInstall(t *testing.T) {
 			return "", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -572,7 +584,7 @@ func TestSkillInstall(t *testing.T) {
 			return "---\nmetadata:\n  version: 2.0.0\n---\nSkill content\n", nil
 		}
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
@@ -594,7 +606,7 @@ func TestSkillInstall(t *testing.T) {
 		s.mockStdin = bytes.NewBufferString("nope\n")
 		s.config.Stdin = s.mockStdin
 
-		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
