@@ -136,6 +136,18 @@ func TestOutputOutdatedSkillMessage(t *testing.T) {
 		require.Empty(t, s.mockStderr.String())
 	})
 
+	t.Run("suppressed by legacy env var", func(t *testing.T) {
+		s := setupSkillTest(t)
+		seedSkillFile(t, s.tmp, "1.0.0")
+		_ = versions.SetSkillLatestVersion("2.0.0")
+		t.Setenv("RWX_HIDE_SKILL_HINT", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+		require.Empty(t, s.mockStderr.String())
+	})
+
 	t.Run("prints upgrade instructions including installations with no version", func(t *testing.T) {
 		s := setupSkillTest(t)
 		seedSkillFile(t, s.tmp, "")
