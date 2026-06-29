@@ -2570,7 +2570,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			}
 			if isSandboxPullDiffCommand(cmd) {
 				foundDiffRef = true
-				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git diff --binary --full-index refs/rwx-sync")
+				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git diff --binary --full-index --no-renames refs/rwx-sync")
 			}
 			if strings.Contains(cmd, "git reset HEAD") {
 				foundReset = true

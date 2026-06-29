@@ -527,11 +527,11 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 		}, nil
 	}
 
-	staged, err := c.diffBytes("diff", "--cached", "-p", "--binary")
+	staged, err := c.diffBytes("diff", "--cached", "-p", "--binary", "--no-renames")
 	if err != nil {
 		return DirtyPatches{}, err
 	}
-	unstaged, err := c.diffBytes("diff", "-p", "--binary")
+	unstaged, err := c.diffBytes("diff", "-p", "--binary", "--no-renames")
 	if err != nil {
 		return DirtyPatches{}, err
 	}
@@ -544,8 +544,8 @@ func (c *Client) changedFilesForDirtyPatch() ([]string, error) {
 	var files []string
 
 	for _, args := range [][]string{
-		{"diff", "--cached", "-z", "--name-only"},
-		{"diff", "-z", "--name-only"},
+		{"diff", "--cached", "-z", "--name-only", "--no-renames"},
+		{"diff", "-z", "--name-only", "--no-renames"},
 	} {
 		cmd := exec.Command(c.Binary, args...)
 		cmd.Dir = c.Dir
@@ -571,8 +571,8 @@ func (c *Client) newFilesForDirtyPatch() ([]string, error) {
 	var files []string
 
 	for _, args := range [][]string{
-		{"diff", "--cached", "-z", "--name-only", "--diff-filter=A"},
-		{"diff", "-z", "--name-only", "--diff-filter=A"},
+		{"diff", "--cached", "-z", "--name-only", "--diff-filter=A", "--no-renames"},
+		{"diff", "-z", "--name-only", "--diff-filter=A", "--no-renames"},
 	} {
 		cmd := exec.Command(c.Binary, args...)
 		cmd.Dir = c.Dir
