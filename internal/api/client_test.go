@@ -1532,6 +1532,45 @@ func TestAPIClient_CreateSandboxToken(t *testing.T) {
 	})
 }
 
+func TestAPIClient_GetRunDetails(t *testing.T) {
+	t.Run("requests the RESTful results path with the id in the path", func(t *testing.T) {
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, "/mint/api/results/run-123", req.URL.Path)
+			require.Empty(t, req.URL.RawQuery)
+			require.Equal(t, http.MethodGet, req.Method)
+			return &http.Response{
+				Status:     "200 OK",
+				StatusCode: 200,
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"run":{}}`))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetRunDetails(api.RunDetailsConfig{RunID: "run-123"})
+		require.NoError(t, err)
+	})
+
+	t.Run("scopes to a task via the task_key query param on the run path", func(t *testing.T) {
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, "/mint/api/results/run-123", req.URL.Path)
+			require.Equal(t, "build", req.URL.Query().Get("task_key"))
+			require.Empty(t, req.URL.Query().Get("run_id"))
+			require.Empty(t, req.URL.Query().Get("id"))
+			return &http.Response{
+				Status:     "200 OK",
+				StatusCode: 200,
+				Body:       io.NopCloser(bytes.NewReader([]byte(`{"run":{}}`))),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetRunDetails(api.RunDetailsConfig{RunID: "run-123", TaskKey: "build"})
+		require.NoError(t, err)
+	})
+}
+
 func TestAPIClient_GetRunPrompt(t *testing.T) {
 	t.Run("builds the request and returns the prompt text", func(t *testing.T) {
 		roundTrip := func(req *http.Request) (*http.Response, error) {
