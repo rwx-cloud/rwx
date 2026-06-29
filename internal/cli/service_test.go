@@ -136,11 +136,24 @@ func TestOutputOutdatedSkillMessage(t *testing.T) {
 		require.Empty(t, s.mockStderr.String())
 	})
 
+	t.Run("suppressed when stderr is not a tty", func(t *testing.T) {
+		s := setupSkillTest(t)
+		seedSkillFile(t, s.tmp, "1.0.0")
+		_ = versions.SetSkillLatestVersion("2.0.0")
+		s.config.StderrIsTTY = false
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+		require.Empty(t, s.mockStderr.String())
+	})
+
 	t.Run("prints upgrade instructions including installations with no version", func(t *testing.T) {
 		s := setupSkillTest(t)
 		seedSkillFile(t, s.tmp, "")
 		seedMarketplaceSkillFile(t, s.tmp, "1.1.0")
 		_ = versions.SetSkillLatestVersion("2.0.0")
+		s.config.StderrIsTTY = true
 
 		var err error
 		s.service, err = cli.NewService(s.config)

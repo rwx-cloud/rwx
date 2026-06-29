@@ -70,7 +70,7 @@ func (s Service) outputLatestVersionMessage() {
 
 	showLatestVersion := os.Getenv("MINT_HIDE_LATEST_VERSION") == "" && os.Getenv("RWX_HIDE_LATEST_VERSION") == ""
 
-	if !showLatestVersion {
+	if !showLatestVersion || !s.StderrIsTTY {
 		return
 	}
 
@@ -85,7 +85,7 @@ func (s Service) outputLatestVersionMessage() {
 }
 
 func (s Service) outputOutdatedSkillMessage() {
-	if os.Getenv("RWX_HIDE_SKILL_HINT") != "" {
+	if os.Getenv("RWX_HIDE_SKILL_HINT") != "" || !s.StderrIsTTY {
 		return
 	}
 
