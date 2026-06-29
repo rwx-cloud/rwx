@@ -217,7 +217,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 
 	// Generate patches if enabled and git is available
 	patchable := cfg.Patchable && gitAvailable
-	if _, ok := os.LookupEnv("RWX_DISABLE_GIT_PATCH"); ok {
+	if os.Getenv("RWX_DISABLE_GIT_PATCH") != "" {
 		patchable = false
 	}
 
