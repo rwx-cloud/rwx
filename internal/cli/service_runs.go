@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"io"
+
 	"github.com/rwx-cloud/rwx/internal/api"
 )
 
@@ -14,6 +16,11 @@ type ListRunsConfig struct {
 	MyRuns            bool
 	Limit             int
 	Cursor            string
+
+	// RetryProgress, when non-nil, receives a notice each time a rate-limited
+	// or transient request is retried. The command routes it to stderr under
+	// --json so structured stdout stays clean.
+	RetryProgress io.Writer
 }
 
 func (s Service) ListRuns(cfg ListRunsConfig) (*api.ListRunsResult, error) {
@@ -27,5 +34,6 @@ func (s Service) ListRuns(cfg ListRunsConfig) (*api.ListRunsResult, error) {
 		MyRuns:            cfg.MyRuns,
 		Limit:             cfg.Limit,
 		Cursor:            cfg.Cursor,
+		RetryProgress:     cfg.RetryProgress,
 	})
 }

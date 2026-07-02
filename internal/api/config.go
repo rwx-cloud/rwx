@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 
 	"github.com/rwx-cloud/rwx/internal/accesstoken"
 	"github.com/rwx-cloud/rwx/internal/errors"
@@ -489,6 +490,12 @@ type ListRunsConfig struct {
 	MyRuns            bool
 	Limit             int
 	Cursor            string
+
+	// RetryProgress, when non-nil, receives a one-line notice before each
+	// backoff sleep so a caller paging many pages can show that a rate-limited
+	// or transient retry is underway rather than appearing hung. It is not part
+	// of the request and is ignored by queryParams.
+	RetryProgress io.Writer
 }
 
 type CreateSandboxTokenConfig struct {

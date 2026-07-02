@@ -1617,11 +1617,12 @@ func (c Client) CancelRun(runID, scopedToken string) error {
 	return nil
 }
 
-func (c Client) ListSandboxRuns() (*ListSandboxRunsResult, error) {
+func (c Client) ListSandboxRuns(retryProgress io.Writer) (*ListSandboxRunsResult, error) {
 	result, err := c.ListRuns(ListRunsConfig{
 		ResultStatuses:    []string{"sandboxed"},
 		ExecutionStatuses: []string{"in_progress"},
 		MyRuns:            true,
+		RetryProgress:     retryProgress,
 	})
 	if err != nil {
 		return nil, err

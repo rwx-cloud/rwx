@@ -1,6 +1,8 @@
 package mocks
 
 import (
+	"io"
+
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
 )
@@ -377,7 +379,9 @@ func (c *API) GetRunPromptByTaskKey(runID, taskKey string) (string, error) {
 	return "", errors.New("MockGetRunPromptByTaskKey was not configured")
 }
 
-func (c *API) ListSandboxRuns() (*api.ListSandboxRunsResult, error) {
+// retryProgress is part of the production signature for surfacing retry chatter;
+// the mock ignores it since tests don't exercise the live backoff loop.
+func (c *API) ListSandboxRuns(_ io.Writer) (*api.ListSandboxRunsResult, error) {
 	if c.MockListSandboxRuns != nil {
 		return c.MockListSandboxRuns()
 	}
