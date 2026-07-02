@@ -450,6 +450,27 @@ func TestPushRef(t *testing.T) {
 	require.Equal(t, head, pushed)
 }
 
+// TestPushRefUsesNoThin guards the fix for RWX-1195: the sandbox repo is a
+// shallow/partial clone that lacks the delta bases a thin pack references, so
+// the push must be self-contained (--no-thin) or the remote fails with
+// "unresolved deltas left after unpacking".
+func TestPushRefUsesNoThin(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args")
+	fakeGit := filepath.Join(dir, "git")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\nexit 0\n"
+	require.NoError(t, os.WriteFile(fakeGit, []byte(script), 0o755))
+
+	client := &git.Client{Binary: fakeGit, Dir: dir}
+	err := client.PushRef(git.PushRefOptions{Remote: "sandbox", Refspec: "abc:refs/rwx/sync-push"})
+	require.NoError(t, err)
+
+	recorded, err := os.ReadFile(argsFile)
+	require.NoError(t, err)
+	args := strings.Fields(string(recorded))
+	require.Equal(t, []string{"push", "--no-thin", "sandbox", "abc:refs/rwx/sync-push"}, args)
+}
+
 func TestGeneratePatchFile(t *testing.T) {
 	t.Run("does not write a patch file", func(t *testing.T) {
 		t.Run("when git is not installed", func(t *testing.T) {

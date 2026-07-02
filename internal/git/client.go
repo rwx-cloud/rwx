@@ -666,7 +666,10 @@ func (c *Client) PushRef(opts PushRefOptions) error {
 		return fmt.Errorf("no refspec provided")
 	}
 
-	cmd := exec.Command(c.Binary, "push", opts.Remote, opts.Refspec)
+	// --no-thin sends a self-contained pack: the sandbox repo is a shallow/partial
+	// clone that lacks the delta base objects a thin pack would reference, which
+	// otherwise fails with "unresolved deltas left after unpacking".
+	cmd := exec.Command(c.Binary, "push", "--no-thin", opts.Remote, opts.Refspec)
 	cmd.Dir = c.Dir
 	if len(opts.Env) > 0 {
 		cmd.Env = append(os.Environ(), opts.Env...)
