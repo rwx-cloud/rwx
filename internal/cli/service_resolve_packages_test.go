@@ -24,8 +24,7 @@ func TestService_ResolvingPackages(t *testing.T) {
 
 		originalContents := `
 base:
-  os: ubuntu 24.04
-  tag: 1.1
+  image: ubuntu:24.04
   config: rwx/base 1.2.3
 tasks:
   - key: embedded
