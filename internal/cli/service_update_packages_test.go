@@ -142,7 +142,11 @@ tasks:
 				return nil, errors.New("cannot get package versions")
 			}
 
-			err := os.WriteFile(filepath.Join(s.tmp, "foo.yaml"), []byte(""), 0o644)
+			err := os.WriteFile(filepath.Join(s.tmp, "foo.yaml"), []byte(`
+tasks:
+  - key: foo
+    call: nodejs/install 1.0.0
+`), 0o644)
 			require.NoError(t, err)
 
 			_, err = s.service.UpdatePackages(cli.UpdatePackagesConfig{

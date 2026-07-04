@@ -194,6 +194,54 @@ func (s Service) parsePackageVersion(str string) PackageVersion {
 	}
 }
 
+// packageReferenceNeedsResolution reports whether a package reference could be
+// rewritten by updatePackageReferenceAtPath: expressions and (outside of update
+// mode) already-versioned references never need the package index.
+func (s Service) packageReferenceNeedsResolution(original string, update bool) bool {
+	// Expressions can't be statically resolved, so skip them
+	if strings.Contains(original, "${{") {
+		return false
+	}
+
+	packageVersion := s.parsePackageVersion(original)
+	if packageVersion.Name == "" {
+		return false
+	} else if !update && packageVersion.MajorVersion != "" {
+		return false
+	}
+
+	return true
+}
+
+// forEachPackageReference visits every node in the file that may hold a package
+// reference: each task's `call`, plus `base.config` in run definitions.
+func forEachPackageReference(file *MintYAMLFile, fn func(yamlPath string, original string) error) error {
+	var nodePath string
+	if file.Doc.IsRunDefinition() {
+		nodePath = "$.tasks[*].call"
+	} else if file.Doc.IsListOfTasks() {
+		nodePath = "$[*].call"
+	} else {
+		return nil
+	}
+
+	err := file.Doc.ForEachNode(nodePath, func(node ast.Node) error {
+		return fn(node.GetPath(), node.String())
+	})
+	if err != nil {
+		return err
+	}
+
+	if file.Doc.IsRunDefinition() {
+		baseConfig := file.Doc.TryReadStringAtPath("$.base.config")
+		if baseConfig != "" && baseConfig != "none" {
+			return fn("$.base.config", baseConfig)
+		}
+	}
+
+	return nil
+}
+
 func (s Service) updatePackageReferenceAtPath(
 	doc *YAMLDoc,
 	yamlPath string,
@@ -203,17 +251,11 @@ func (s Service) updatePackageReferenceAtPath(
 	versionPicker func(versions api.PackageVersionsResult, rwxPackage string, major string) (string, error),
 	replacements map[string]string,
 ) (bool, error) {
-	// Expressions can't be statically resolved, so skip them
-	if strings.Contains(original, "${{") {
+	if !s.packageReferenceNeedsResolution(original, update) {
 		return false, nil
 	}
 
 	packageVersion := s.parsePackageVersion(original)
-	if packageVersion.Name == "" {
-		return false, nil
-	} else if !update && packageVersion.MajorVersion != "" {
-		return false, nil
-	}
 
 	newName := packageVersions.Renames[packageVersion.Name]
 	if newName == "" {
@@ -245,6 +287,27 @@ func (s Service) updatePackageReferenceAtPath(
 }
 
 func (s Service) resolveOrUpdatePackagesForFiles(mintFiles []*MintYAMLFile, update bool, versionPicker func(versions api.PackageVersionsResult, rwxPackage string, major string) (string, error)) (map[string]string, error) {
+	// Skip fetching the package index entirely when every reference is already
+	// pinned (the common case after the first run resolves them).
+	needsResolution := false
+	for _, file := range mintFiles {
+		err := forEachPackageReference(file, func(_ string, original string) error {
+			if s.packageReferenceNeedsResolution(original, update) {
+				needsResolution = true
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to scan package references")
+		}
+		if needsResolution {
+			break
+		}
+	}
+	if !needsResolution {
+		return map[string]string{}, nil
+	}
+
 	packageVersions, err := s.APIClient.GetPackageVersions()
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to fetch package versions")
@@ -256,17 +319,8 @@ func (s Service) resolveOrUpdatePackagesForFiles(mintFiles []*MintYAMLFile, upda
 	for _, file := range mintFiles {
 		hasChange := false
 
-		var nodePath string
-		if file.Doc.IsRunDefinition() {
-			nodePath = "$.tasks[*].call"
-		} else if file.Doc.IsListOfTasks() {
-			nodePath = "$[*].call"
-		} else {
-			continue
-		}
-
-		err = file.Doc.ForEachNode(nodePath, func(node ast.Node) error {
-			changed, err := s.updatePackageReferenceAtPath(file.Doc, node.GetPath(), node.String(), update, packageVersions, versionPicker, replacements)
+		err = forEachPackageReference(file, func(yamlPath string, original string) error {
+			changed, err := s.updatePackageReferenceAtPath(file.Doc, yamlPath, original, update, packageVersions, versionPicker, replacements)
 			if err != nil {
 				return err
 			}
@@ -277,19 +331,6 @@ func (s Service) resolveOrUpdatePackagesForFiles(mintFiles []*MintYAMLFile, upda
 		})
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to replace package references")
-		}
-
-		if file.Doc.IsRunDefinition() {
-			baseConfig := file.Doc.TryReadStringAtPath("$.base.config")
-			if baseConfig != "" && baseConfig != "none" {
-				changed, err := s.updatePackageReferenceAtPath(file.Doc, "$.base.config", baseConfig, update, packageVersions, versionPicker, replacements)
-				if err != nil {
-					return nil, errors.Wrap(err, "unable to replace base.config package reference")
-				}
-				if changed {
-					hasChange = true
-				}
-			}
 		}
 
 		if hasChange {

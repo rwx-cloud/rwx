@@ -13,6 +13,75 @@ import (
 )
 
 func TestService_ResolvingPackages(t *testing.T) {
+	t.Run("does not fetch package versions when every reference is already pinned", func(t *testing.T) {
+		s := setupTest(t)
+
+		called := false
+		s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			called = true
+			return nil, errors.New("package versions should not be fetched")
+		}
+
+		originalContents := `
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.2.3
+tasks:
+  - key: embedded
+    call: ${{ run.dir }}/integration/run-test.yml
+  - key: dynamic
+    call: ${{ tasks.export.values.package-name }}
+  - key: package
+    call: nodejs/install 1.2.3
+  - key: script
+    run: echo hello
+`
+		err := os.WriteFile(filepath.Join(s.tmp, "foo.yaml"), []byte(originalContents), 0o644)
+		require.NoError(t, err)
+
+		_, err = s.service.ResolvePackages(cli.ResolvePackagesConfig{
+			RwxDirectory:        s.tmp,
+			LatestVersionPicker: cli.PickLatestMajorVersion,
+		})
+		require.NoError(t, err)
+		require.False(t, called)
+
+		contents, err := os.ReadFile(filepath.Join(s.tmp, "foo.yaml"))
+		require.NoError(t, err)
+		require.Equal(t, originalContents, string(contents))
+	})
+
+	t.Run("fetches package versions when base.config is unversioned", func(t *testing.T) {
+		s := setupTest(t)
+
+		s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{
+				LatestMajor: map[string]string{"rwx/base": "2.0.1"},
+			}, nil
+		}
+
+		err := os.WriteFile(filepath.Join(s.tmp, "foo.yaml"), []byte(`
+base:
+  os: ubuntu 24.04
+  tag: 1.1
+  config: rwx/base
+tasks:
+  - key: script
+    run: echo hello
+`), 0o644)
+		require.NoError(t, err)
+
+		_, err = s.service.ResolvePackages(cli.ResolvePackagesConfig{
+			RwxDirectory:        s.tmp,
+			LatestVersionPicker: cli.PickLatestMajorVersion,
+		})
+		require.NoError(t, err)
+
+		contents, err := os.ReadFile(filepath.Join(s.tmp, "foo.yaml"))
+		require.NoError(t, err)
+		require.Contains(t, string(contents), "config: rwx/base 2.0.1")
+	})
+
 	t.Run("skips call values containing expressions", func(t *testing.T) {
 		s := setupTest(t)
 
@@ -140,7 +209,11 @@ tasks:
 				return nil, errors.New("cannot get package versions")
 			}
 
-			err := os.WriteFile(filepath.Join(s.tmp, "foo.yaml"), []byte(""), 0o644)
+			err := os.WriteFile(filepath.Join(s.tmp, "foo.yaml"), []byte(`
+tasks:
+  - key: foo
+    call: nodejs/install
+`), 0o644)
 			require.NoError(t, err)
 
 			_, err = s.service.ResolvePackages(cli.ResolvePackagesConfig{
