@@ -3,26 +3,34 @@ on:
     pull_request:
       init:
         commit-sha: ${{ event.git.sha }}
-        ref: ${{ event.git.ref }}
+        pr-number: ${{ event.github.pull_request.number }}
   cli:
     init:
       commit-sha: ${{ event.git.sha }}
-      ref: ${{ event.git.sha }}
+      pr-number: 0
 
 concurrency-pools:
-  - id: rwx-cloud/rwx:pull-request-${{ init.ref }}
+  - id: rwx-cloud/rwx:pull-request-${{ init.pr-number }}
     capacity: 1
     on-overflow: cancel-running
 
 tasks:
+  - key: test-build
+    call: ${{ run.dir }}/build.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
   - key: ci
     call: ${{ run.dir }}/ci.yml
     init:
       commit-sha: ${{ init.commit-sha }}
-      ref: ${{ init.ref }}
 
   - key: integration
     call: ${{ run.dir }}/integration.yml
     init:
       commit-sha: ${{ init.commit-sha }}
-      ref: ${{ init.ref }}
+
+  - key: integration-sandbox
+    call: ${{ run.dir }}/integration-sandbox.yml
+    init:
+      commit-sha: ${{ init.commit-sha }}

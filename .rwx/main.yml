@@ -4,11 +4,9 @@ on:
       if: ${{event.git.branch == 'main' }}
       init:
         commit-sha: ${{ event.git.sha }}
-        ref: ${{ event.git.ref }}
   cli:
     init:
       commit-sha: ${{ event.git.sha }}
-      ref: ${{ event.git.sha }}
 
 concurrency-pools:
   - id: rwx-cloud/rwx:main
@@ -20,16 +18,19 @@ tasks:
     call: ${{ run.dir }}/ci.yml
     init:
       commit-sha: ${{ init.commit-sha }}
-      ref: ${{ init.ref }}
 
   - key: integration
     call: ${{ run.dir }}/integration.yml
     init:
       commit-sha: ${{ init.commit-sha }}
-      ref: ${{ init.ref }}
+
+  - key: integration-sandbox
+    call: ${{ run.dir }}/integration-sandbox.yml
+    init:
+      commit-sha: ${{ init.commit-sha }}
 
   - key: release-unstable
-    after: [ci, integration]
+    after: [ci, integration, integration-sandbox]
     call: ${{ run.dir }}/release.yml
     init:
       kind: unstable
