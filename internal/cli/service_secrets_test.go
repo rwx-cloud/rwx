@@ -54,7 +54,7 @@ func TestService_SettingSecrets(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, []string{"ABC", "DEF"}, result.SetSecrets)
-		require.Equal(t, "\nSuccessfully set the following secrets: ABC, DEF", s.mockStdout.String())
+		require.Equal(t, "Successfully set the following secrets: ABC, DEF\n", s.mockStdout.String())
 	})
 
 	t.Run("when reading secrets from a file", func(t *testing.T) {
@@ -90,7 +90,7 @@ func TestService_SettingSecrets(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, []string{"A", "B", "C", "D"}, result.SetSecrets)
-		require.Equal(t, "\nSuccessfully set the following secrets: A, B, C, D", s.mockStdout.String())
+		require.Equal(t, "Successfully set the following secrets: A, B, C, D\n", s.mockStdout.String())
 	})
 }
 

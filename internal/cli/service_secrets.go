@@ -156,8 +156,7 @@ func (s Service) SetSecretsInVault(cfg SetSecretsInVaultConfig) (*api.SetSecrets
 			return nil, errors.Wrap(err, "unable to encode JSON output")
 		}
 	} else if result != nil && len(result.SetSecrets) > 0 {
-		fmt.Fprintln(s.Stdout)
-		fmt.Fprintf(s.Stdout, "Successfully set the following secrets: %s", strings.Join(result.SetSecrets, ", "))
+		fmt.Fprintf(s.Stdout, "Successfully set the following secrets: %s\n", strings.Join(result.SetSecrets, ", "))
 	}
 
 	return result, nil
