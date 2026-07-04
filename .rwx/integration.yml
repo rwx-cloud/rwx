@@ -5,7 +5,7 @@ on:
       ref: ${{ event.git.sha }}
 
 concurrency-pools:
-  - id: rwx-cloud/rwx:ci-${{ init.ref }}
+  - id: rwx-cloud/rwx:integration-${{ init.ref }}
     capacity: 1
     on-overflow: cancel-running
 
@@ -42,21 +42,12 @@ tasks:
     use: go-installation
     run: echo "$(go env GOPATH)/bin" > "${MINT_ENV}/PATH"
 
-  - key: golangci-lint
-    use: go
-    run: |
-      curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sudo sh -s -- -b /usr/local/bin v${{ tasks.tool-versions.values.golangci-lint }}
-
   - key: go-deps
     use: [go, code]
     call: golang/mod-download 1.0.2
     filter: [go.mod, go.sum]
     with:
       tool-cache: cli-go-deps
-
-  - key: gotestsum
-    use: go
-    run: go install gotest.tools/gotestsum@latest
 
   - key: git
     run: |
@@ -90,51 +81,85 @@ tasks:
     use: code
     run: cp ${{ tasks.lsp-build.tasks.build.artifacts.bundle }} internal/lsp/bundle/server.js
 
-  - key: unit-tests
-    use: [go-deps, rwx-cli, gotestsum, git]
-    run: |
-      gotestsum \
-        --jsonfile tmp/go-test.json \
-        -- \
-        -ldflags "-w -s -X github.com/rwx-cloud/rwx/cmd/rwx/config.Version=testing-${{ init.commit-sha }}" \
-        -parallel 4 \
-        ./internal/... ./cmd/... ./test/...
-    outputs:
-      test-results:
-        - path: tmp/go-test.json
-
   - key: rwx-cli
     use: [go-deps, lsp-server]
     run: |
       go build -a -ldflags "-w -s -X github.com/rwx-cloud/rwx/cmd/rwx/config.Version=testing-${{ init.commit-sha }}" ./cmd/rwx
 
-  - key: lint
-    use: [golangci-lint, go-deps, lsp-server]
-    run: golangci-lint run ./...
+  - key: run-rwx-run-test
+    call: ${{ run.dir }}/integration/run-test.yml
+    init:
+      cli: ${{ init.commit-sha }}
 
-  - key: go-mod-tidy
-    use: go-deps
-    run: |
-      before=$(git diff)
-      go mod tidy
-      after=$(git diff)
-      if [ "$before" != "$after" ]; then
-        echo "go mod tidy produced changes"
-        exit 1
-      fi
-
-  - key: go-fmt
-    use: go-deps
-    run: |
-      before=$(git diff)
-      go fmt ./...
-      after=$(git diff)
-      if [ "$before" != "$after" ]; then
-        echo "go fmt produced changes"
-        exit 1
-      fi
-
-  - key: test-build
-    call: ${{ run.dir }}/build.yml
+  - key: run-rwx-image-test
+    call: ${{ run.dir }}/integration/image-test.yml
     init:
       ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-results-test
+    call: ${{ run.dir }}/integration/results-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-runs-list-test
+    call: ${{ run.dir }}/integration/runs-list-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-dispatch-test
+    call: ${{ run.dir }}/integration/dispatch-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-logs-test
+    call: ${{ run.dir }}/integration/logs-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-artifacts-test
+    call: ${{ run.dir }}/integration/artifacts-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-lint-test
+    call: ${{ run.dir }}/integration/lint-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-resolve-update-test
+    call: ${{ run.dir }}/integration/resolve-update-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-skill-test
+    call: ${{ run.dir }}/integration/skill-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-whoami-test
+    call: ${{ run.dir }}/integration/whoami-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: generate-sandbox-tests
+    use: code
+    run: |
+      for script in test/integration/sandbox-*.sh; do
+        key=$(basename "$script" .sh)
+        if [ "$key" = "sandbox-helpers" ]; then
+          continue
+        fi
+        printf '%s\n' \
+          "- key: ${key}" \
+          "  use: [rwx-cli, git]" \
+          "  run: ./${script}" \
+          "  env:" \
+          "    RWX_ACCESS_TOKEN: ${RWX_ACCESS_TOKEN}" \
+          "    COMMIT_SHA: ${COMMIT_SHA}" \
+          >> "$RWX_DYNAMIC_TASKS/sandbox-tests.yml"
+      done
+    env:
+      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      COMMIT_SHA: ${{ init.commit-sha }}
+    filter:
+      - test/integration/sandbox-*.sh

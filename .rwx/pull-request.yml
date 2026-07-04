@@ -1,7 +1,6 @@
 on:
   github:
-    push:
-      if: ${{event.git.branch == 'main' }}
+    pull_request:
       init:
         commit-sha: ${{ event.git.sha }}
         ref: ${{ event.git.ref }}
@@ -11,9 +10,9 @@ on:
       ref: ${{ event.git.sha }}
 
 concurrency-pools:
-  - id: rwx-cloud/rwx:main
+  - id: rwx-cloud/rwx:pull-request-${{ init.ref }}
     capacity: 1
-    on-overflow: cancel-waiting
+    on-overflow: cancel-running
 
 tasks:
   - key: ci
@@ -27,11 +26,3 @@ tasks:
     init:
       commit-sha: ${{ init.commit-sha }}
       ref: ${{ init.ref }}
-
-  - key: release-unstable
-    after: [ci, integration]
-    call: ${{ run.dir }}/release.yml
-    init:
-      kind: unstable
-      commit: ${{ init.commit-sha }}
-      version: UNSTABLE
