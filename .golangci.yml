@@ -1,0 +1,12 @@
+version: "2"
+
+linters:
+  settings:
+    staticcheck:
+      checks:
+        - all
+        - -ST1*
+        - -QF1*
+  exclusions:
+    presets:
+      - std-error-handling
