@@ -1,0 +1,64 @@
+on:
+  cli:
+    init:
+      commit-sha: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.1.1
+
+tasks:
+  - key: run-rwx-run-test
+    call: ${{ run.dir }}/integration/run-test.yml
+    init:
+      cli: ${{ init.commit-sha }}
+
+  - key: run-rwx-image-test
+    call: ${{ run.dir }}/integration/image-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-results-test
+    call: ${{ run.dir }}/integration/results-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-runs-list-test
+    call: ${{ run.dir }}/integration/runs-list-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-dispatch-test
+    call: ${{ run.dir }}/integration/dispatch-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-logs-test
+    call: ${{ run.dir }}/integration/logs-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-artifacts-test
+    call: ${{ run.dir }}/integration/artifacts-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-lint-test
+    call: ${{ run.dir }}/integration/lint-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-resolve-update-test
+    call: ${{ run.dir }}/integration/resolve-update-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-skill-test
+    call: ${{ run.dir }}/integration/skill-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-whoami-test
+    call: ${{ run.dir }}/integration/whoami-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
