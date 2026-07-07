@@ -44,6 +44,10 @@ type API struct {
 	MockDownloadLogs                            func(api.LogDownloadRequestResult) ([]byte, error)
 	MockGetAllArtifactDownloadRequests          func(string) ([]api.ArtifactDownloadRequestResult, error)
 	MockGetAllArtifactDownloadRequestsByTaskKey func(string, string) ([]api.ArtifactDownloadRequestResult, error)
+	// The *Result variants let tests return the full envelope (including a polling retry hint).
+	// When unset, the slice-returning variants above are wrapped into an envelope.
+	MockGetAllArtifactDownloadRequestsResult          func(string) (api.ArtifactDownloadsResult, error)
+	MockGetAllArtifactDownloadRequestsByTaskKeyResult func(string, string) (api.ArtifactDownloadsResult, error)
 	MockGetArtifactDownloadRequest              func(string, string) (api.ArtifactDownloadRequestResult, error)
 	MockGetArtifactDownloadRequestByTaskKey     func(string, string, string) (api.ArtifactDownloadRequestResult, error)
 	MockDownloadArtifact                        func(api.ArtifactDownloadRequestResult) ([]byte, error)
@@ -325,19 +329,27 @@ func (c *API) DownloadLogs(request api.LogDownloadRequestResult, maxRetryDuratio
 	return nil, errors.New("MockDownloadLogs was not configured")
 }
 
-func (c *API) GetAllArtifactDownloadRequests(taskId string) ([]api.ArtifactDownloadRequestResult, error) {
+func (c *API) GetAllArtifactDownloadRequests(taskId string) (api.ArtifactDownloadsResult, error) {
+	if c.MockGetAllArtifactDownloadRequestsResult != nil {
+		return c.MockGetAllArtifactDownloadRequestsResult(taskId)
+	}
 	if c.MockGetAllArtifactDownloadRequests != nil {
-		return c.MockGetAllArtifactDownloadRequests(taskId)
+		results, err := c.MockGetAllArtifactDownloadRequests(taskId)
+		return api.ArtifactDownloadsResult{ArtifactDownloads: results}, err
 	}
 
-	return nil, errors.New("MockGetAllArtifactDownloadRequests was not configured")
+	return api.ArtifactDownloadsResult{}, errors.New("MockGetAllArtifactDownloadRequests was not configured")
 }
 
-func (c *API) GetAllArtifactDownloadRequestsByTaskKey(runID, taskKey string) ([]api.ArtifactDownloadRequestResult, error) {
-	if c.MockGetAllArtifactDownloadRequestsByTaskKey != nil {
-		return c.MockGetAllArtifactDownloadRequestsByTaskKey(runID, taskKey)
+func (c *API) GetAllArtifactDownloadRequestsByTaskKey(runID, taskKey string) (api.ArtifactDownloadsResult, error) {
+	if c.MockGetAllArtifactDownloadRequestsByTaskKeyResult != nil {
+		return c.MockGetAllArtifactDownloadRequestsByTaskKeyResult(runID, taskKey)
 	}
-	return nil, errors.New("MockGetAllArtifactDownloadRequestsByTaskKey was not configured")
+	if c.MockGetAllArtifactDownloadRequestsByTaskKey != nil {
+		results, err := c.MockGetAllArtifactDownloadRequestsByTaskKey(runID, taskKey)
+		return api.ArtifactDownloadsResult{ArtifactDownloads: results}, err
+	}
+	return api.ArtifactDownloadsResult{}, errors.New("MockGetAllArtifactDownloadRequestsByTaskKey was not configured")
 }
 
 func (c *API) GetArtifactDownloadRequest(taskId, artifactKey string) (api.ArtifactDownloadRequestResult, error) {

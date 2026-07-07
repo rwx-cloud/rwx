@@ -344,11 +344,20 @@ type LogDownloadRequestResult struct {
 }
 
 type ArtifactDownloadRequestResult struct {
-	URL         string `json:"url"`
-	Filename    string `json:"filename"`
-	SizeInBytes int64  `json:"size_in_bytes"`
-	Kind        string `json:"kind"`
-	Key         string `json:"key"`
+	URL         string         `json:"url"`
+	Filename    string         `json:"filename"`
+	SizeInBytes int64          `json:"size_in_bytes"`
+	Kind        string         `json:"kind"`
+	Key         string         `json:"key"`
+	Polling     *PollingResult `json:"polling,omitempty"`
+}
+
+// ArtifactDownloadsResult is the envelope Cloud returns from the artifact_downloads (list)
+// endpoint for clients that support polling. Older Cloud returns a bare array, which is decoded
+// into ArtifactDownloads with a nil Polling.
+type ArtifactDownloadsResult struct {
+	ArtifactDownloads []ArtifactDownloadRequestResult `json:"artifact_downloads"`
+	Polling           *PollingResult                  `json:"polling,omitempty"`
 }
 
 type RunStatusConfig struct {

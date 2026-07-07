@@ -1414,21 +1414,44 @@ func (c Client) DownloadLogs(request LogDownloadRequestResult, maxRetryDurationS
 	}
 }
 
-func (c Client) GetAllArtifactDownloadRequests(taskId string) ([]ArtifactDownloadRequestResult, error) {
+// decodeArtifactDownloadsResult parses the artifact_downloads (list) response, tolerating both
+// the legacy bare JSON array and the newer envelope object carrying a polling retry hint.
+func decodeArtifactDownloadsResult(r io.Reader) (ArtifactDownloadsResult, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return ArtifactDownloadsResult{}, errors.Wrap(err, "unable to read API response")
+	}
+
+	if trimmed := bytes.TrimLeft(body, " \t\r\n"); len(trimmed) > 0 && trimmed[0] == '[' {
+		var results []ArtifactDownloadRequestResult
+		if err := json.Unmarshal(body, &results); err != nil {
+			return ArtifactDownloadsResult{}, errors.Wrap(err, "unable to parse API response")
+		}
+		return ArtifactDownloadsResult{ArtifactDownloads: results}, nil
+	}
+
+	var result ArtifactDownloadsResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return ArtifactDownloadsResult{}, errors.Wrap(err, "unable to parse API response")
+	}
+	return result, nil
+}
+
+func (c Client) GetAllArtifactDownloadRequests(taskId string) (ArtifactDownloadsResult, error) {
 	params := url.Values{}
 	params.Set("task_id", taskId)
 	endpoint := "/mint/api/artifact_downloads?" + params.Encode()
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to create new HTTP request")
+		return ArtifactDownloadsResult{}, errors.Wrap(err, "unable to create new HTTP request")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.RoundTrip(req)
 	if err != nil {
-		return nil, errors.Wrap(err, "HTTP request failed")
+		return ArtifactDownloadsResult{}, errors.Wrap(err, "HTTP request failed")
 	}
 	defer resp.Body.Close()
 
@@ -1438,20 +1461,15 @@ func (c Client) GetAllArtifactDownloadRequests(taskId string) ([]ArtifactDownloa
 			errMsg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
 		}
 		if resp.StatusCode == http.StatusNotFound {
-			return nil, errors.Wrap(ErrNotFound, errMsg)
+			return ArtifactDownloadsResult{}, errors.Wrap(ErrNotFound, errMsg)
 		}
-		return nil, errors.New(errMsg)
+		return ArtifactDownloadsResult{}, errors.New(errMsg)
 	}
 
-	var results []ArtifactDownloadRequestResult
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
-		return nil, errors.Wrap(err, "unable to parse API response")
-	}
-
-	return results, nil
+	return decodeArtifactDownloadsResult(resp.Body)
 }
 
-func (c Client) GetAllArtifactDownloadRequestsByTaskKey(runID, taskKey string) ([]ArtifactDownloadRequestResult, error) {
+func (c Client) GetAllArtifactDownloadRequestsByTaskKey(runID, taskKey string) (ArtifactDownloadsResult, error) {
 	params := url.Values{}
 	params.Set("run_id", runID)
 	params.Set("task_key", taskKey)
@@ -1459,24 +1477,24 @@ func (c Client) GetAllArtifactDownloadRequestsByTaskKey(runID, taskKey string) (
 
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to create new HTTP request")
+		return ArtifactDownloadsResult{}, errors.Wrap(err, "unable to create new HTTP request")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.RoundTrip(req)
 	if err != nil {
-		return nil, errors.Wrap(err, "HTTP request failed")
+		return ArtifactDownloadsResult{}, errors.Wrap(err, "HTTP request failed")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnprocessableEntity {
 		bodyBytes, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			return nil, errors.New("Unable to call RWX API - 422 Unprocessable Entity")
+			return ArtifactDownloadsResult{}, errors.New("Unable to call RWX API - 422 Unprocessable Entity")
 		}
 		if ambiguousErr := parseAmbiguousTaskKeyError(bytes.NewReader(bodyBytes), taskKey); ambiguousErr != nil {
-			return nil, ambiguousErr
+			return ArtifactDownloadsResult{}, ambiguousErr
 		}
 		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
@@ -1487,17 +1505,12 @@ func (c Client) GetAllArtifactDownloadRequestsByTaskKey(runID, taskKey string) (
 			errMsg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
 		}
 		if resp.StatusCode == http.StatusNotFound {
-			return nil, errors.Wrap(ErrNotFound, errMsg)
+			return ArtifactDownloadsResult{}, errors.Wrap(ErrNotFound, errMsg)
 		}
-		return nil, errors.New(errMsg)
+		return ArtifactDownloadsResult{}, errors.New(errMsg)
 	}
 
-	var results []ArtifactDownloadRequestResult
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
-		return nil, errors.Wrap(err, "unable to parse API response")
-	}
-
-	return results, nil
+	return decodeArtifactDownloadsResult(resp.Body)
 }
 
 func (c Client) GetArtifactDownloadRequest(taskId, artifactKey string) (ArtifactDownloadRequestResult, error) {

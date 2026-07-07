@@ -761,6 +761,32 @@ func TestAPIClient_GetArtifactDownloadRequest(t *testing.T) {
 		require.Equal(t, int64(1024), result.SizeInBytes)
 		require.Equal(t, "file", result.Kind)
 		require.Equal(t, "my-artifact", result.Key)
+		require.Nil(t, result.Polling)
+	})
+
+	t.Run("parses a polling retry hint", func(t *testing.T) {
+		backoffMs := 1000
+		body := api.ArtifactDownloadRequestResult{
+			Polling: &api.PollingResult{Completed: false, BackoffMs: &backoffMs},
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "200 OK",
+				StatusCode: 200,
+				Body:       io.NopCloser(bytes.NewReader(bodyBytes)),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		result, err := c.GetArtifactDownloadRequest("task-123", "my-artifact")
+		require.NoError(t, err)
+		require.Empty(t, result.URL)
+		require.NotNil(t, result.Polling)
+		require.False(t, result.Polling.Completed)
+		require.Equal(t, 1000, *result.Polling.BackoffMs)
 	})
 
 	t.Run("builds the request with directory kind", func(t *testing.T) {
@@ -929,11 +955,12 @@ func TestAPIClient_GetAllArtifactDownloadRequests(t *testing.T) {
 
 		results, err := c.GetAllArtifactDownloadRequests("task-123")
 		require.NoError(t, err)
-		require.Len(t, results, 2)
-		require.Equal(t, "artifact-a", results[0].Key)
-		require.Equal(t, "file", results[0].Kind)
-		require.Equal(t, "artifact-b", results[1].Key)
-		require.Equal(t, "directory", results[1].Kind)
+		require.Nil(t, results.Polling)
+		require.Len(t, results.ArtifactDownloads, 2)
+		require.Equal(t, "artifact-a", results.ArtifactDownloads[0].Key)
+		require.Equal(t, "file", results.ArtifactDownloads[0].Kind)
+		require.Equal(t, "artifact-b", results.ArtifactDownloads[1].Key)
+		require.Equal(t, "directory", results.ArtifactDownloads[1].Kind)
 	})
 
 	t.Run("handles 404 not found", func(t *testing.T) {
@@ -967,7 +994,34 @@ func TestAPIClient_GetAllArtifactDownloadRequests(t *testing.T) {
 
 		results, err := c.GetAllArtifactDownloadRequests("task-123")
 		require.NoError(t, err)
-		require.Empty(t, results)
+		require.Empty(t, results.ArtifactDownloads)
+	})
+
+	t.Run("parses envelope response with polling hint", func(t *testing.T) {
+		backoffMs := 1000
+		body := api.ArtifactDownloadsResult{
+			ArtifactDownloads: []api.ArtifactDownloadRequestResult{},
+			Polling:           &api.PollingResult{Completed: false, BackoffMs: &backoffMs},
+		}
+		bodyBytes, _ := json.Marshal(body)
+
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "200 OK",
+				StatusCode: 200,
+				Body:       io.NopCloser(bytes.NewReader(bodyBytes)),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		results, err := c.GetAllArtifactDownloadRequests("task-123")
+		require.NoError(t, err)
+		require.Empty(t, results.ArtifactDownloads)
+		require.NotNil(t, results.Polling)
+		require.False(t, results.Polling.Completed)
+		require.NotNil(t, results.Polling.BackoffMs)
+		require.Equal(t, 1000, *results.Polling.BackoffMs)
 	})
 }
 
