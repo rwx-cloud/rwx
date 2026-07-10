@@ -28,7 +28,7 @@ tasks:
       - language-server-ref
 
   - key: go-installation
-    call: golang/install 1.2.1
+    call: golang/install 1.2.2
     with:
       go-version: ${{ tasks.tool-versions.values.golang }}
 
@@ -37,17 +37,17 @@ tasks:
     run: echo "$(go env GOPATH)/bin" > "${MINT_ENV}/PATH"
 
   - key: node
-    call: nodejs/install 1.1.14
+    call: nodejs/install 1.1.15
     with:
       node-version: ${{ tasks.tool-versions.values.nodejs }}
 
   - key: min-supported-node
-    call: nodejs/install 1.1.14
+    call: nodejs/install 1.1.15
     with:
       node-version: 18.0.0
 
   - key: unsupported-node
-    call: nodejs/install 1.1.14
+    call: nodejs/install 1.1.15
     with:
       node-version: 17.0.0
 

@@ -16,7 +16,7 @@ tasks:
       preserve-git-dir: true
 
   - key: gh-cli
-    call: github/install-cli 1.0.10
+    call: github/install-cli 1.0.11
 
   - key: update-ref
     use: [code, gh-cli]
