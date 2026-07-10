@@ -28,7 +28,7 @@ tasks:
       - language-server-ref
 
   - key: go-installation
-    call: golang/install 1.2.1
+    call: golang/install 1.2.2
     with:
       go-version: ${{ tasks.tool-versions.values.golang }}
 
