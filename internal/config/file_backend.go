@@ -5,7 +5,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strings"
 
@@ -121,16 +120,18 @@ func (f FileBackend) Set(filename, value string) error {
 var tildeSlash = fmt.Sprintf("~%v", string(os.PathSeparator))
 
 func expandTilde(dir string) (string, error) {
-	user, err := user.Current()
+	if dir != "~" && !strings.HasPrefix(dir, tildeSlash) {
+		return dir, nil
+	}
+
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 
-	if strings.HasPrefix(dir, tildeSlash) {
-		return filepath.Join(user.HomeDir, strings.TrimPrefix(dir, tildeSlash)), nil
-	} else if dir == "~" {
-		return user.HomeDir, nil
-	} else {
-		return dir, nil
+	if dir == "~" {
+		return homeDir, nil
 	}
+
+	return filepath.Join(homeDir, strings.TrimPrefix(dir, tildeSlash)), nil
 }
