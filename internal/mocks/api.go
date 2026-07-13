@@ -48,14 +48,14 @@ type API struct {
 	// When unset, the slice-returning variants above are wrapped into an envelope.
 	MockGetAllArtifactDownloadRequestsResult          func(string) (api.ArtifactDownloadsResult, error)
 	MockGetAllArtifactDownloadRequestsByTaskKeyResult func(string, string) (api.ArtifactDownloadsResult, error)
-	MockGetArtifactDownloadRequest              func(string, string) (api.ArtifactDownloadRequestResult, error)
-	MockGetArtifactDownloadRequestByTaskKey     func(string, string, string) (api.ArtifactDownloadRequestResult, error)
-	MockDownloadArtifact                        func(api.ArtifactDownloadRequestResult) ([]byte, error)
-	MockGetRunPrompt                            func(string) (string, error)
-	MockGetRunPromptByTaskKey                   func(string, string) (string, error)
-	MockGetSandboxInitTemplate                  func() (api.SandboxInitTemplateResult, error)
-	MockListSandboxRuns                         func() (*api.ListSandboxRunsResult, error)
-	MockCancelRun                               func(runID, scopedToken string) error
+	MockGetArtifactDownloadRequest                    func(string, string) (api.ArtifactDownloadRequestResult, error)
+	MockGetArtifactDownloadRequestByTaskKey           func(string, string, string) (api.ArtifactDownloadRequestResult, error)
+	MockDownloadArtifact                              func(api.ArtifactDownloadRequestResult) ([]byte, error)
+	MockGetRunPrompt                                  func(string) (string, error)
+	MockGetRunPromptByTaskKey                         func(string, string) (string, error)
+	MockGetSandboxInitTemplate                        func() (api.SandboxInitTemplateResult, error)
+	MockListSandboxRuns                               func() (*api.ListSandboxRunsResult, error)
+	MockCancelRun                                     func(runID, scopedToken string) error
 }
 
 func (c *API) GetSkillContent() (string, error) {
