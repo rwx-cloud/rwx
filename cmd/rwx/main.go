@@ -10,6 +10,7 @@ import (
 
 	"github.com/rwx-cloud/rwx/internal/cli"
 	internalerrors "github.com/rwx-cloud/rwx/internal/errors"
+	"github.com/rwx-cloud/rwx/internal/git"
 	"github.com/spf13/pflag"
 )
 
@@ -93,6 +94,9 @@ func recordTelemetry(err error, start time.Time) {
 		// errors expose the sentinel string rather than what the user saw.
 		if errType == "unknown" && !handled {
 			props["error_message"] = scrubErrorMessage(err.Error())
+		}
+		if errType == "patch_failed" {
+			props["patch_error_reason"] = git.PatchFailureReason(err)
 		}
 		if errType == "unknown_command" {
 			if attempt := extractUnknownCommandAttempt(err); attempt != "" {

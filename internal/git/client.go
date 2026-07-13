@@ -2,6 +2,7 @@ package git
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -269,7 +270,26 @@ func (e *PatchError) Error() string {
 // stderr must never be sent to telemetry — it embeds customer file paths,
 // branch names, and repo layout.
 func (e *PatchError) Reason() string {
-	s := strings.ToLower(e.Stderr)
+	return classifyPatchStderr(e.Stderr)
+}
+
+// PatchFailureReason buckets any patch-related error into a stable, PII-free
+// category for telemetry. It prefers a *PatchError's structured stderr and
+// otherwise scans the error message for git-apply and LFS signatures. Only the
+// returned bucket is safe to record — never the underlying message.
+func PatchFailureReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	var pe *PatchError
+	if errors.As(err, &pe) {
+		return pe.Reason()
+	}
+	return classifyPatchStderr(err.Error())
+}
+
+func classifyPatchStderr(s string) string {
+	s = strings.ToLower(s)
 	switch {
 	case strings.Contains(s, "bad object"), strings.Contains(s, "shallow"):
 		return "shallow_clone"
@@ -279,6 +299,14 @@ func (e *PatchError) Reason() string {
 		return "missing_external_filter"
 	case strings.Contains(s, "signal: killed"), strings.Contains(s, "out of memory"), strings.Contains(s, "cannot allocate memory"):
 		return "oom_killed"
+	case strings.Contains(s, "lfs file(s) changed locally"):
+		return "lfs_changed"
+	case strings.Contains(s, "already exists in working directory"):
+		return "already_exists"
+	case strings.Contains(s, "corrupt patch"):
+		return "corrupt_patch"
+	case strings.Contains(s, "does not apply"), strings.Contains(s, "patch failed"), strings.Contains(s, "partially applied"):
+		return "patch_conflict"
 	default:
 		return "unknown"
 	}
