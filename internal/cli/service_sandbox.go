@@ -1440,12 +1440,16 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, cleanPr
 	lfsSkippedCount := 0
 	var syncPushErr error
 	defer func() {
-		s.recordTelemetry("sandbox.sync_push", map[string]any{
+		props := map[string]any{
 			"patch_bytes":       patchBytes,
 			"duration_ms":       time.Since(syncStart).Milliseconds(),
 			"lfs_skipped_count": lfsSkippedCount,
 			"success":           syncPushErr == nil,
-		})
+		}
+		if syncPushErr != nil {
+			props["failure_reason"] = sandboxSyncFailureReason(syncPushErr)
+		}
+		s.recordTelemetry("sandbox.sync_push", props)
 	}()
 
 	if err := s.ensureSandboxHasCommit(localHead, connInfo); err != nil {
@@ -1569,6 +1573,9 @@ func (s Service) pushLocalHeadToSandbox(localHead string, connInfo *api.SandboxC
 	hasCommit := pushErr == nil && s.sandboxHasCommit(localHead)
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if pushErr != nil {
+		if isShallowUpdateRejection(pushErr) {
+			return errors.WrapSentinel(errors.New(sandboxShallowSyncMessage), errors.ErrShallowClone)
+		}
 		return errors.Wrap(pushErr, "failed to push git commits to sandbox")
 	}
 	if !hasCommit {
@@ -1576,6 +1583,42 @@ func (s Service) pushLocalHeadToSandbox(localHead string, connInfo *api.SandboxC
 	}
 
 	return nil
+}
+
+// sandboxShallowSyncMessage coaches the recovery path when a shallow local
+// clone causes the sandbox sync push to be rejected. Agents are the primary
+// consumer, so it spells out both fixes explicitly.
+const sandboxShallowSyncMessage = `your local clone is shallow and its history has diverged from the sandbox, so git refused the sync push (shallow update not allowed).
+
+To recover, either:
+  - Unshallow your local clone, then re-run your command:
+      git fetch --unshallow
+  - Set 'fetch-full-depth: true' on the git/clone task in your sandbox config, then re-provision the sandbox:
+      rwx sandbox exec --reset`
+
+func isShallowUpdateRejection(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "shallow update not allowed")
+}
+
+// sandboxSyncFailureReason buckets a sync/patch failure into a stable telemetry
+// category (shallow clone, missing git dir, patch apply) so we can see why syncs
+// fail without leaking raw repo data.
+func sandboxSyncFailureReason(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, errors.ErrShallowClone):
+		return "shallow_clone"
+	case errors.Is(err, errors.ErrSandboxNoGitDir):
+		return "no_git_dir"
+	case errors.Is(err, errors.ErrPatch):
+		return "patch"
+	default:
+		return "other"
+	}
 }
 
 func (s Service) verifySandboxLFSObjects(localHead string) error {

@@ -196,6 +196,8 @@ func classifyError(err error) string {
 		return "sandbox_setup_failure"
 	case errors.Is(err, internalerrors.ErrSandboxNoGitDir):
 		return "sandbox_no_git_dir"
+	case errors.Is(err, internalerrors.ErrShallowClone):
+		return "shallow_clone"
 	default:
 		return "unknown"
 	}

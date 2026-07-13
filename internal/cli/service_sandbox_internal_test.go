@@ -1,10 +1,44 @@
 package cli
 
 import (
+	"fmt"
 	"testing"
 
+	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/stretchr/testify/require"
 )
+
+func TestIsShallowUpdateRejection(t *testing.T) {
+	t.Run("matches the receiver rejection regardless of case", func(t *testing.T) {
+		err := fmt.Errorf("git push failed: To sandbox:.\n ! [remote rejected] abc -> refs/rwx/sync-push (shallow update not allowed)")
+		require.True(t, isShallowUpdateRejection(err))
+	})
+
+	t.Run("does not match unrelated push failures", func(t *testing.T) {
+		require.False(t, isShallowUpdateRejection(nil))
+		require.False(t, isShallowUpdateRejection(fmt.Errorf("git push failed: permission denied")))
+	})
+}
+
+func TestSandboxSyncFailureReason(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{"nil", nil, ""},
+		{"shallow", errors.WrapSentinel(fmt.Errorf("x"), errors.ErrShallowClone), "shallow_clone"},
+		{"no git dir", errors.WrapSentinel(fmt.Errorf("x"), errors.ErrSandboxNoGitDir), "no_git_dir"},
+		{"patch", errors.WrapSentinel(fmt.Errorf("x"), errors.ErrPatch), "patch"},
+		{"other", fmt.Errorf("something else"), "other"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.expected, sandboxSyncFailureReason(tc.err))
+		})
+	}
+}
 
 func TestSandboxLFSFilesFromFsckOutput(t *testing.T) {
 	oid := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

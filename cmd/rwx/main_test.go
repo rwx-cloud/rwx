@@ -40,6 +40,7 @@ func TestClassifyError(t *testing.T) {
 		{"network_transient_error", errors.ErrNetworkTransient, "network_transient_error"},
 		{"sandbox_setup_failure", errors.ErrSandboxSetupFailure, "sandbox_setup_failure"},
 		{"sandbox_no_git_dir", errors.ErrSandboxNoGitDir, "sandbox_no_git_dir"},
+		{"shallow_clone", errors.ErrShallowClone, "shallow_clone"},
 	}
 
 	for _, tc := range cases {

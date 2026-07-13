@@ -65,6 +65,7 @@ var (
 	ErrRetry                   = errors.New("retry")
 	ErrSandboxNoGitDir         = errors.New("no .git directory found in sandbox. Set 'preserve-git-dir: true' on your git/clone task")
 	ErrSandboxSetupFailure     = errors.New("sandbox setup failure")
+	ErrShallowClone            = errors.New("shallow clone error")
 	ErrSSH                     = errors.New("ssh error")
 	ErrPatch                   = errors.New("patch error")
 	ErrTimeout                 = errors.New("timeout")

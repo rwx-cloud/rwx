@@ -75,6 +75,7 @@ fi
 
 echo "$output" | grep -qi "shallow" || fail "sync failure was not about a shallow clone: ${output}"
 echo "$output" | grep -q "git fetch --unshallow" || fail "missing shallow-clone recovery guidance (git fetch --unshallow): ${output}"
+echo "$output" | grep -q "fetch-full-depth: true" || fail "missing shallow-clone recovery guidance (fetch-full-depth: true): ${output}"
 echo "$output" | grep -q "sandbox exec --reset" || fail "missing shallow-clone recovery guidance (sandbox exec --reset): ${output}"
 
 echo "PASS: sandbox shallow-clone sync coaching integration scenario completed"
