@@ -1,6 +1,7 @@
 package git_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -691,6 +692,10 @@ func TestPatchErrorReason(t *testing.T) {
 		{"fatal: pathspec '.rwx' is beyond a symbolic link", "beyond_symlink"},
 		{"error: external filter 'git-lfs filter-process' failed", "missing_external_filter"},
 		{"signal: killed", "oom_killed"},
+		{"error: patch failed: main.go:12", "patch_conflict"},
+		{"error: foo.txt: patch does not apply", "patch_conflict"},
+		{"error: bar.txt: already exists in working directory", "already_exists"},
+		{"error: corrupt patch at line 3", "corrupt_patch"},
 		{"fatal: something else entirely", "unknown"},
 		{"", "unknown"},
 	}
@@ -698,6 +703,35 @@ func TestPatchErrorReason(t *testing.T) {
 	for _, tc := range cases {
 		pe := &git.PatchError{Stderr: tc.stderr}
 		require.Equal(t, tc.want, pe.Reason(), "stderr: %q", tc.stderr)
+	}
+}
+
+func TestPatchFailureReason(t *testing.T) {
+	t.Run("nil is empty", func(t *testing.T) {
+		require.Equal(t, "", git.PatchFailureReason(nil))
+	})
+
+	t.Run("prefers a wrapped *PatchError's structured stderr", func(t *testing.T) {
+		err := fmt.Errorf("failed to generate dirty patch: %w", &git.PatchError{Stderr: "fatal: bad object deadbeef"})
+		require.Equal(t, "shallow_clone", git.PatchFailureReason(err))
+	})
+
+	cases := []struct {
+		name string
+		msg  string
+		want string
+	}{
+		{"git apply conflict", "failed to sync changes to sandbox: git apply failed: error: patch failed: a.go:1", "patch_conflict"},
+		{"already exists", "failed to sync changes to sandbox: git apply failed: error: b.go: already exists in working directory", "already_exists"},
+		{"corrupt patch", "failed to sync changes to sandbox: git apply failed: error: corrupt patch at line 9", "corrupt_patch"},
+		{"lfs changed", "3 LFS file(s) changed locally and cannot be synced to the sandbox", "lfs_changed"},
+		{"unclassified", "failed to apply patch on sandbox: connection reset", "unknown"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, git.PatchFailureReason(fmt.Errorf("%s", tc.msg)))
+		})
 	}
 }
 
