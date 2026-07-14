@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/rwx-cloud/rwx/internal/api"
@@ -22,6 +23,69 @@ func TestService_DownloadArtifact(t *testing.T) {
 			require.Equal(t, "task-123", taskId)
 			require.Equal(t, "my-artifact", artifactKey)
 			return api.ArtifactDownloadRequestResult{}, api.ErrNotFound
+		}
+
+		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
+			TaskID:      "task-123",
+			ArtifactKey: "my-artifact",
+			Output:      s.tmp,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Artifact my-artifact for task task-123 not found")
+	})
+
+	t.Run("polls while the task is in progress, then downloads once ready", func(t *testing.T) {
+		restore := cli.SetArtifactReadyMaxWaitForTest(5 * time.Second)
+		defer restore()
+
+		s := setupTest(t)
+
+		fileContent := []byte("hello")
+		tarBytes := createTestTar(t, map[string][]byte{"myfile.txt": fileContent})
+
+		backoffMs := 1
+		calls := 0
+		s.mockAPI.MockGetArtifactDownloadRequest = func(taskId, artifactKey string) (api.ArtifactDownloadRequestResult, error) {
+			calls++
+			if calls < 3 {
+				return api.ArtifactDownloadRequestResult{
+					Polling: &api.PollingResult{Completed: false, BackoffMs: &backoffMs},
+				}, nil
+			}
+			return api.ArtifactDownloadRequestResult{
+				URL:      "https://example.com/artifact",
+				Filename: "task-123-my-file.tar",
+				Kind:     "file",
+				Key:      "my-file",
+			}, nil
+		}
+		s.mockAPI.MockDownloadArtifact = func(request api.ArtifactDownloadRequestResult) ([]byte, error) {
+			return tarBytes, nil
+		}
+
+		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
+			TaskID:      "task-123",
+			ArtifactKey: "my-file",
+			Output:      s.tmp,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 3, calls)
+		require.Contains(t, s.mockStderr.String(), "Waiting for artifact to be ready...")
+	})
+
+	t.Run("returns not found when the artifact never becomes ready", func(t *testing.T) {
+		restore := cli.SetArtifactReadyMaxWaitForTest(20 * time.Millisecond)
+		defer restore()
+
+		s := setupTest(t)
+
+		backoffMs := 1
+		s.mockAPI.MockGetArtifactDownloadRequest = func(taskId, artifactKey string) (api.ArtifactDownloadRequestResult, error) {
+			return api.ArtifactDownloadRequestResult{
+				Polling: &api.PollingResult{Completed: false, BackoffMs: &backoffMs},
+			}, nil
 		}
 
 		_, err := s.service.DownloadArtifact(cli.DownloadArtifactConfig{
@@ -695,6 +759,64 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, result.OutputFiles)
 		require.Contains(t, s.mockStdout.String(), "No artifacts found for task task-123")
+	})
+
+	t.Run("polls while the task is in progress, then lists once ready", func(t *testing.T) {
+		restore := cli.SetArtifactReadyMaxWaitForTest(5 * time.Second)
+		defer restore()
+
+		s := setupTest(t)
+
+		tarBytes := createTestTar(t, map[string][]byte{"myfile.txt": []byte("hello")})
+		backoffMs := 1
+		calls := 0
+		s.mockAPI.MockGetAllArtifactDownloadRequestsResult = func(taskId string) (api.ArtifactDownloadsResult, error) {
+			calls++
+			if calls < 3 {
+				return api.ArtifactDownloadsResult{
+					Polling: &api.PollingResult{Completed: false, BackoffMs: &backoffMs},
+				}, nil
+			}
+			return api.ArtifactDownloadsResult{
+				ArtifactDownloads: []api.ArtifactDownloadRequestResult{
+					{URL: "https://example.com/artifact", Filename: "task-123-my-file.tar", Kind: "file", Key: "my-file"},
+				},
+			}, nil
+		}
+		s.mockAPI.MockDownloadArtifact = func(request api.ArtifactDownloadRequestResult) ([]byte, error) {
+			return tarBytes, nil
+		}
+
+		_, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
+			TaskID: "task-123",
+			Output: s.tmp,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 3, calls)
+		require.Contains(t, s.mockStderr.String(), "Waiting for artifacts to be ready...")
+	})
+
+	t.Run("returns not found when artifacts never become ready", func(t *testing.T) {
+		restore := cli.SetArtifactReadyMaxWaitForTest(20 * time.Millisecond)
+		defer restore()
+
+		s := setupTest(t)
+
+		backoffMs := 1
+		s.mockAPI.MockGetAllArtifactDownloadRequestsResult = func(taskId string) (api.ArtifactDownloadsResult, error) {
+			return api.ArtifactDownloadsResult{
+				Polling: &api.PollingResult{Completed: false, BackoffMs: &backoffMs},
+			}, nil
+		}
+
+		_, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
+			TaskID: "task-123",
+			Output: s.tmp,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Artifacts for task task-123 not found")
 	})
 
 	t.Run("when task is not found", func(t *testing.T) {

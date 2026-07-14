@@ -18,6 +18,28 @@ import (
 	"github.com/rwx-cloud/rwx/internal/errors"
 )
 
+// artifactReadyMaxWait bounds how long the CLI polls Cloud for an artifact that isn't available
+// yet because the owning task's events are still being ingested (eventual consistency). It is a
+// var (not a const) so tests can shrink it via export_test.go.
+var artifactReadyMaxWait = 30 * time.Second
+
+const artifactDefaultBackoff = 1 * time.Second
+
+// artifactNotReady reports whether Cloud returned a polling retry hint indicating the artifact
+// is not available yet. A nil hint (older Cloud, or a completed hint) means the response is final.
+func artifactNotReady(p *api.PollingResult) bool {
+	return p != nil && !p.Completed
+}
+
+// artifactPollBackoff returns how long to wait before re-requesting the artifact, preferring the
+// server-provided backoff.
+func artifactPollBackoff(p *api.PollingResult) time.Duration {
+	if p != nil && p.BackoffMs != nil && *p.BackoffMs > 0 {
+		return time.Duration(*p.BackoffMs) * time.Millisecond
+	}
+	return artifactDefaultBackoff
+}
+
 type DownloadArtifactConfig struct {
 	TaskID              string
 	RunID               string
@@ -68,20 +90,46 @@ func (s Service) DownloadArtifact(cfg DownloadArtifactConfig) (_ *DownloadArtifa
 		return nil, errors.Wrap(err, "validation failed")
 	}
 
-	var artifactDownloadRequest api.ArtifactDownloadRequestResult
-	if cfg.TaskKey != "" {
-		artifactDownloadRequest, err = s.APIClient.GetArtifactDownloadRequestByTaskKey(cfg.RunID, cfg.TaskKey, cfg.ArtifactKey)
-	} else {
-		artifactDownloadRequest, err = s.APIClient.GetArtifactDownloadRequest(cfg.TaskID, cfg.ArtifactKey)
-	}
-	if err != nil {
-		if errors.Is(err, api.ErrNotFound) {
-			if cfg.TaskKey != "" {
-				return nil, errors.WrapSentinel(errors.New(fmt.Sprintf("Artifact %s for task key '%s' not found", cfg.ArtifactKey, cfg.TaskKey)), api.ErrNotFound)
-			}
-			return nil, errors.WrapSentinel(errors.New(fmt.Sprintf("Artifact %s for task %s not found", cfg.ArtifactKey, cfg.TaskID)), api.ErrNotFound)
+	notFoundErr := func() error {
+		if cfg.TaskKey != "" {
+			return errors.WrapSentinel(errors.New(fmt.Sprintf("Artifact %s for task key '%s' not found", cfg.ArtifactKey, cfg.TaskKey)), api.ErrNotFound)
 		}
-		return nil, errors.Wrap(err, "unable to fetch artifact download request")
+		return errors.WrapSentinel(errors.New(fmt.Sprintf("Artifact %s for task %s not found", cfg.ArtifactKey, cfg.TaskID)), api.ErrNotFound)
+	}
+
+	// The artifact may not be queryable yet if the owning task's events are still being ingested.
+	// While Cloud returns a polling retry hint, wait and re-request until it's ready or we give up.
+	var artifactDownloadRequest api.ArtifactDownloadRequestResult
+	deadline := time.Now().Add(artifactReadyMaxWait)
+	var stopWaitSpinner func()
+	for {
+		if cfg.TaskKey != "" {
+			artifactDownloadRequest, err = s.APIClient.GetArtifactDownloadRequestByTaskKey(cfg.RunID, cfg.TaskKey, cfg.ArtifactKey)
+		} else {
+			artifactDownloadRequest, err = s.APIClient.GetArtifactDownloadRequest(cfg.TaskID, cfg.ArtifactKey)
+		}
+		if err != nil {
+			if stopWaitSpinner != nil {
+				stopWaitSpinner()
+			}
+			if errors.Is(err, api.ErrNotFound) {
+				return nil, notFoundErr()
+			}
+			return nil, errors.Wrap(err, "unable to fetch artifact download request")
+		}
+		if !artifactNotReady(artifactDownloadRequest.Polling) || time.Now().After(deadline) {
+			break
+		}
+		if stopWaitSpinner == nil {
+			stopWaitSpinner = Spin("Waiting for artifact to be ready...", s.StderrIsTTY, s.Stderr)
+		}
+		time.Sleep(artifactPollBackoff(artifactDownloadRequest.Polling))
+	}
+	if stopWaitSpinner != nil {
+		stopWaitSpinner()
+	}
+	if artifactNotReady(artifactDownloadRequest.Polling) {
+		return nil, notFoundErr()
 	}
 
 	totalBytes = artifactDownloadRequest.SizeInBytes
@@ -223,11 +271,11 @@ func (s Service) ListArtifacts(cfg ListArtifactsConfig) (*ListArtifactsResult, e
 		return nil, errors.Wrap(err, "validation failed")
 	}
 
-	var artifactDownloadRequests []api.ArtifactDownloadRequestResult
+	var downloadsResult api.ArtifactDownloadsResult
 	if cfg.TaskKey != "" {
-		artifactDownloadRequests, err = s.APIClient.GetAllArtifactDownloadRequestsByTaskKey(cfg.RunID, cfg.TaskKey)
+		downloadsResult, err = s.APIClient.GetAllArtifactDownloadRequestsByTaskKey(cfg.RunID, cfg.TaskKey)
 	} else {
-		artifactDownloadRequests, err = s.APIClient.GetAllArtifactDownloadRequests(cfg.TaskID)
+		downloadsResult, err = s.APIClient.GetAllArtifactDownloadRequests(cfg.TaskID)
 	}
 	if err != nil {
 		if errors.Is(err, api.ErrNotFound) {
@@ -239,6 +287,7 @@ func (s Service) ListArtifacts(cfg ListArtifactsConfig) (*ListArtifactsResult, e
 		return nil, errors.Wrap(err, "unable to fetch artifacts")
 	}
 
+	artifactDownloadRequests := downloadsResult.ArtifactDownloads
 	artifacts := make([]ArtifactInfo, len(artifactDownloadRequests))
 	for i, req := range artifactDownloadRequests {
 		artifacts[i] = ArtifactInfo{
@@ -358,21 +407,49 @@ func (s Service) DownloadAllArtifacts(cfg DownloadAllArtifactsConfig) (_ *Downlo
 		return nil, errors.Wrap(err, "validation failed")
 	}
 
-	var artifactDownloadRequests []api.ArtifactDownloadRequestResult
-	if cfg.TaskKey != "" {
-		artifactDownloadRequests, err = s.APIClient.GetAllArtifactDownloadRequestsByTaskKey(cfg.RunID, cfg.TaskKey)
-	} else {
-		artifactDownloadRequests, err = s.APIClient.GetAllArtifactDownloadRequests(cfg.TaskID)
-	}
-	if err != nil {
-		if errors.Is(err, api.ErrNotFound) {
-			if cfg.TaskKey != "" {
-				return nil, errors.WrapSentinel(errors.New(fmt.Sprintf("Artifacts for task key '%s' not found", cfg.TaskKey)), api.ErrNotFound)
-			}
-			return nil, errors.WrapSentinel(errors.New(fmt.Sprintf("Artifacts for task %s not found", cfg.TaskID)), api.ErrNotFound)
+	notFoundErr := func() error {
+		if cfg.TaskKey != "" {
+			return errors.WrapSentinel(errors.New(fmt.Sprintf("Artifacts for task key '%s' not found", cfg.TaskKey)), api.ErrNotFound)
 		}
-		return nil, errors.Wrap(err, "unable to fetch artifact download requests")
+		return errors.WrapSentinel(errors.New(fmt.Sprintf("Artifacts for task %s not found", cfg.TaskID)), api.ErrNotFound)
 	}
+
+	// Artifacts may not be queryable yet if the owning task's events are still being ingested.
+	// While Cloud returns a polling retry hint, wait and re-request until they're ready or we give up.
+	var downloadsResult api.ArtifactDownloadsResult
+	deadline := time.Now().Add(artifactReadyMaxWait)
+	var stopWaitSpinner func()
+	for {
+		if cfg.TaskKey != "" {
+			downloadsResult, err = s.APIClient.GetAllArtifactDownloadRequestsByTaskKey(cfg.RunID, cfg.TaskKey)
+		} else {
+			downloadsResult, err = s.APIClient.GetAllArtifactDownloadRequests(cfg.TaskID)
+		}
+		if err != nil {
+			if stopWaitSpinner != nil {
+				stopWaitSpinner()
+			}
+			if errors.Is(err, api.ErrNotFound) {
+				return nil, notFoundErr()
+			}
+			return nil, errors.Wrap(err, "unable to fetch artifact download requests")
+		}
+		if !artifactNotReady(downloadsResult.Polling) || time.Now().After(deadline) {
+			break
+		}
+		if stopWaitSpinner == nil {
+			stopWaitSpinner = Spin("Waiting for artifacts to be ready...", s.StderrIsTTY, s.Stderr)
+		}
+		time.Sleep(artifactPollBackoff(downloadsResult.Polling))
+	}
+	if stopWaitSpinner != nil {
+		stopWaitSpinner()
+	}
+	if artifactNotReady(downloadsResult.Polling) {
+		return nil, notFoundErr()
+	}
+
+	artifactDownloadRequests := downloadsResult.ArtifactDownloads
 
 	artifactCount = len(artifactDownloadRequests)
 	for _, req := range artifactDownloadRequests {
