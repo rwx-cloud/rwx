@@ -34,6 +34,7 @@ tasks:
       repository: https://github.com/rwx-cloud/rwx.git
       ref: ${{ init.ref }}
       preserve-git-dir: true
+      fetch-full-depth: true
 
   - key: sandbox
     use: [code, rwx-cli]
