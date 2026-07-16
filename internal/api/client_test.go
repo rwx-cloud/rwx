@@ -1558,8 +1558,8 @@ func TestAPIClient_GetDebugConnectionInfo(t *testing.T) {
 	t.Run("returns every session when selection is required", func(t *testing.T) {
 		roundTrip := func(req *http.Request) (*http.Response, error) {
 			return &http.Response{
-				Status:     "409 Conflict",
-				StatusCode: http.StatusConflict,
+				Status:     "422 Unprocessable Entity",
+				StatusCode: http.StatusUnprocessableEntity,
 				Body: io.NopCloser(strings.NewReader(`{
 					"error": "selection_required",
 					"debug_sessions": [
@@ -1579,6 +1579,37 @@ func TestAPIClient_GetDebugConnectionInfo(t *testing.T) {
 			{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Name: "shell", Status: "connectable"},
 			{ID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Status: "connectable"},
 		}, selectionErr.DebugSessions)
+	})
+
+	t.Run("returns the session lifecycle when it is not connectable", func(t *testing.T) {
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: http.StatusUnprocessableEntity,
+				Body: io.NopCloser(strings.NewReader(`{
+					"error": "debug_session_not_connectable",
+					"debug_session": {
+						"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+						"name": "shell",
+						"status": "starting"
+					}
+				}`)),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig{
+			DebugKey: "task-123",
+			Session:  "shell",
+		})
+		var notConnectableErr *api.DebugSessionNotConnectableError
+		require.ErrorAs(t, err, &notConnectableErr)
+		require.Equal(t, api.DebugSessionSummary{
+			ID:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			Name:   "shell",
+			Status: "starting",
+		}, notConnectableErr.DebugSession)
 	})
 }
 

@@ -168,7 +168,7 @@ func (c Client) GetDebugConnectionInfo(cfg GetDebugConnectionInfoConfig) (DebugC
 		return connectionInfo, errors.ErrBadRequest
 	case 404:
 		return connectionInfo, errors.ErrNotFound
-	case 409:
+	case http.StatusUnprocessableEntity:
 		connectionError := DebugConnectionInfoError{}
 		if err := json.NewDecoder(resp.Body).Decode(&connectionError); err == nil {
 			switch connectionError.Error {
