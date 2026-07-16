@@ -163,10 +163,24 @@ func (c Client) GetDebugConnectionInfo(cfg GetDebugConnectionInfoConfig) (DebugC
 	case 400:
 		connectionError := DebugConnectionInfoError{}
 		if err := json.NewDecoder(resp.Body).Decode(&connectionError); err == nil {
-			return connectionInfo, errors.Wrap(errors.ErrBadRequest, connectionError.Error)
+			if connectionError.Error == "session_requires_task" {
+				return connectionInfo, &DebugSessionRequiresTaskError{}
+			}
+			if connectionError.Error != "" {
+				return connectionInfo, errors.WrapSentinel(errors.New(connectionError.Error), errors.ErrBadRequest)
+			}
 		}
 		return connectionInfo, errors.ErrBadRequest
 	case 404:
+		connectionError := DebugConnectionInfoError{}
+		if err := json.NewDecoder(resp.Body).Decode(&connectionError); err == nil {
+			if connectionError.Error == "debug_session_not_found" {
+				return connectionInfo, &DebugSessionNotFoundError{Selector: cfg.Session}
+			}
+			if connectionError.Error != "" {
+				return connectionInfo, errors.WrapSentinel(errors.New(connectionError.Error), errors.ErrNotFound)
+			}
+		}
 		return connectionInfo, errors.ErrNotFound
 	case http.StatusUnprocessableEntity:
 		connectionError := DebugConnectionInfoError{}
@@ -177,12 +191,17 @@ func (c Client) GetDebugConnectionInfo(cfg GetDebugConnectionInfoConfig) (DebugC
 			case "debug_session_not_connectable":
 				return connectionInfo, &DebugSessionNotConnectableError{DebugSession: connectionError.DebugSession}
 			}
+			if connectionError.Error != "" {
+				return connectionInfo, errors.WrapSentinel(errors.New(connectionError.Error), errors.ErrBadRequest)
+			}
 		}
-		return connectionInfo, errors.New("debug session conflict")
+		return connectionInfo, errors.WrapSentinel(errors.New("Unable to call RWX API - 422 Unprocessable Entity"), errors.ErrBadRequest)
 	case 410:
 		connectionError := DebugConnectionInfoError{}
 		if err := json.NewDecoder(resp.Body).Decode(&connectionError); err == nil {
-			return connectionInfo, errors.Wrap(errors.ErrGone, connectionError.Error)
+			if connectionError.Error != "" {
+				return connectionInfo, errors.WrapSentinel(errors.New(connectionError.Error), errors.ErrGone)
+			}
 		}
 		return connectionInfo, errors.ErrGone
 	default:

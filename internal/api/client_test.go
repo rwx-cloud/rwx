@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rwx-cloud/rwx/internal/api"
+	internalErrors "github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1575,6 +1576,7 @@ func TestAPIClient_GetDebugConnectionInfo(t *testing.T) {
 		_, err := c.GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig{DebugKey: "task-123"})
 		var selectionErr *api.DebugSessionSelectionError
 		require.ErrorAs(t, err, &selectionErr)
+		require.ErrorIs(t, err, internalErrors.ErrBadRequest)
 		require.Equal(t, []api.DebugSessionSummary{
 			{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Name: "shell", Status: "connectable"},
 			{ID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Status: "connectable"},
@@ -1605,11 +1607,154 @@ func TestAPIClient_GetDebugConnectionInfo(t *testing.T) {
 		})
 		var notConnectableErr *api.DebugSessionNotConnectableError
 		require.ErrorAs(t, err, &notConnectableErr)
+		require.ErrorIs(t, err, internalErrors.ErrBadRequest)
 		require.Equal(t, api.DebugSessionSummary{
 			ID:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Name:   "shell",
 			Status: "starting",
 		}, notConnectableErr.DebugSession)
+	})
+
+	t.Run("requires a task key when selecting a session", func(t *testing.T) {
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "400 Bad Request",
+				StatusCode: http.StatusBadRequest,
+				Body:       io.NopCloser(strings.NewReader(`{"error":"session_requires_task"}`)),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig{
+			DebugKey: "run-123",
+			Session:  "shell",
+		})
+		var requiresTaskErr *api.DebugSessionRequiresTaskError
+		require.ErrorAs(t, err, &requiresTaskErr)
+		require.ErrorIs(t, err, internalErrors.ErrBadRequest)
+		require.EqualError(t, err, "--session requires a task ID or task URL")
+	})
+
+	t.Run("reports a missing session selector", func(t *testing.T) {
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "404 Not Found",
+				StatusCode: http.StatusNotFound,
+				Body:       io.NopCloser(strings.NewReader(`{"error":"debug_session_not_found"}`)),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig{
+			DebugKey: "task-123",
+			Session:  "missing",
+		})
+		var notFoundErr *api.DebugSessionNotFoundError
+		require.ErrorAs(t, err, &notFoundErr)
+		require.ErrorIs(t, err, internalErrors.ErrNotFound)
+		require.Equal(t, "missing", notFoundErr.Selector)
+		require.EqualError(t, err, `debug session "missing" was not found`)
+	})
+
+	t.Run("preserves an unknown unprocessable error", func(t *testing.T) {
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "422 Unprocessable Entity",
+				StatusCode: http.StatusUnprocessableEntity,
+				Body:       io.NopCloser(strings.NewReader(`{"error":"future_session_error"}`)),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig{DebugKey: "task-123"})
+		require.EqualError(t, err, "future_session_error")
+		require.ErrorIs(t, err, internalErrors.ErrBadRequest)
+	})
+
+	t.Run("classifies forbidden and unexpected server errors", func(t *testing.T) {
+		tests := []struct {
+			name       string
+			status     string
+			statusCode int
+			body       string
+			sentinel   error
+		}{
+			{
+				name:       "forbidden",
+				status:     "403 Forbidden",
+				statusCode: http.StatusForbidden,
+				body:       `{}`,
+				sentinel:   internalErrors.ErrUnauthenticated,
+			},
+			{
+				name:       "unexpected server error",
+				status:     "500 Internal Server Error",
+				statusCode: http.StatusInternalServerError,
+				body:       `{"error":"unexpected_error"}`,
+				sentinel:   internalErrors.ErrInternalServerError,
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				c := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+					return &http.Response{
+						Status:     tt.status,
+						StatusCode: tt.statusCode,
+						Body:       io.NopCloser(strings.NewReader(tt.body)),
+					}, nil
+				})
+
+				_, err := c.GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig{DebugKey: "task-123"})
+				require.ErrorIs(t, err, tt.sentinel)
+			})
+		}
+	})
+
+	t.Run("preserves invalid and ended run messages", func(t *testing.T) {
+		tests := []struct {
+			name       string
+			status     string
+			statusCode int
+			message    string
+			sentinel   error
+		}{
+			{
+				name:       "invalid debug key",
+				status:     "400 Bad Request",
+				statusCode: http.StatusBadRequest,
+				message:    "We could not find a run or task with ID `missing`.",
+				sentinel:   internalErrors.ErrBadRequest,
+			},
+			{
+				name:       "ended run",
+				status:     "410 Gone",
+				statusCode: http.StatusGone,
+				message:    "This run or task is no longer debuggable.",
+				sentinel:   internalErrors.ErrGone,
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				c := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+					body, err := json.Marshal(api.DebugConnectionInfoError{Error: tt.message})
+					require.NoError(t, err)
+					return &http.Response{
+						Status:     tt.status,
+						StatusCode: tt.statusCode,
+						Body:       io.NopCloser(bytes.NewReader(body)),
+					}, nil
+				})
+
+				_, err := c.GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig{DebugKey: "missing"})
+				require.EqualError(t, err, tt.message)
+				require.ErrorIs(t, err, tt.sentinel)
+			})
+		}
 	})
 }
 
