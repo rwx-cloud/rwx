@@ -12,7 +12,7 @@ type API struct {
 	MockGetSkillLatestVersion                   func() (string, error)
 	MockInitiateRun                             func(api.InitiateRunConfig) (*api.InitiateRunResult, error)
 	MockDeferredRunStatus                       func(pollingURL string) (api.DeferredRunStatusResult, error)
-	MockGetDebugConnectionInfo                  func(runID string) (api.DebugConnectionInfo, error)
+	MockGetDebugConnectionInfo                  func(api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error)
 	MockGetSandboxConnectionInfo                func(runID, scopedToken string) (api.SandboxConnectionInfo, error)
 	MockCreateSandboxToken                      func(api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error)
 	MockObtainAuthCode                          func(api.ObtainAuthCodeConfig) (*api.ObtainAuthCodeResult, error)
@@ -90,9 +90,9 @@ func (c *API) DeferredRunStatus(pollingURL string) (api.DeferredRunStatusResult,
 	return api.DeferredRunStatusResult{}, errors.New("MockDeferredRunStatus was not configured")
 }
 
-func (c *API) GetDebugConnectionInfo(runID string) (api.DebugConnectionInfo, error) {
+func (c *API) GetDebugConnectionInfo(cfg api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error) {
 	if c.MockGetDebugConnectionInfo != nil {
-		return c.MockGetDebugConnectionInfo(runID)
+		return c.MockGetDebugConnectionInfo(cfg)
 	}
 
 	return api.DebugConnectionInfo{}, errors.New("MockGetDebugConnectionInfo was not configured")

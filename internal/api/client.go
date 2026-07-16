@@ -134,14 +134,18 @@ func (c Client) GetSkillLatestVersion() (string, error) {
 	return result.Version, nil
 }
 
-func (c Client) GetDebugConnectionInfo(debugKey string) (DebugConnectionInfo, error) {
+func (c Client) GetDebugConnectionInfo(cfg GetDebugConnectionInfoConfig) (DebugConnectionInfo, error) {
 	connectionInfo := DebugConnectionInfo{}
 
-	if debugKey == "" {
+	if cfg.DebugKey == "" {
 		return connectionInfo, errors.New("missing debugKey")
 	}
 
-	endpoint := fmt.Sprintf("/mint/api/debug_connection_info?debug_key=%s", url.QueryEscape(debugKey))
+	params := url.Values{"debug_key": []string{cfg.DebugKey}}
+	if cfg.Session != "" {
+		params.Set("session", cfg.Session)
+	}
+	endpoint := "/mint/api/debug_connection_info?" + params.Encode()
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
 		return connectionInfo, errors.Wrap(err, "unable to create new HTTP request")
@@ -164,6 +168,17 @@ func (c Client) GetDebugConnectionInfo(debugKey string) (DebugConnectionInfo, er
 		return connectionInfo, errors.ErrBadRequest
 	case 404:
 		return connectionInfo, errors.ErrNotFound
+	case 409:
+		connectionError := DebugConnectionInfoError{}
+		if err := json.NewDecoder(resp.Body).Decode(&connectionError); err == nil {
+			switch connectionError.Error {
+			case "selection_required":
+				return connectionInfo, &DebugSessionSelectionError{DebugSessions: connectionError.DebugSessions}
+			case "debug_session_not_connectable":
+				return connectionInfo, &DebugSessionNotConnectableError{DebugSession: connectionError.DebugSession}
+			}
+		}
+		return connectionInfo, errors.New("debug session conflict")
 	case 410:
 		connectionError := DebugConnectionInfoError{}
 		if err := json.NewDecoder(resp.Body).Decode(&connectionError); err == nil {

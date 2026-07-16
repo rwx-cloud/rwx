@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -1522,6 +1523,62 @@ func TestAPIClient_GetSandboxConnectionInfo(t *testing.T) {
 		result, err := c.GetSandboxConnectionInfo("run-123", "scoped-token-abc")
 		require.NoError(t, err)
 		require.True(t, result.Sandboxable)
+	})
+}
+
+func TestAPIClient_GetDebugConnectionInfo(t *testing.T) {
+	t.Run("selects a debug session and returns its SSH username", func(t *testing.T) {
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, "/mint/api/debug_connection_info", req.URL.Path)
+			require.Equal(t, "task-123", req.URL.Query().Get("debug_key"))
+			require.Equal(t, "shell", req.URL.Query().Get("session"))
+			return &http.Response{
+				Status:     "200 OK",
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`{
+					"debuggable": true,
+					"address": "192.168.1.1:22",
+					"public_host_key": "public-key",
+					"private_user_key": "private-key",
+					"username": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+				}`)),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		result, err := c.GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig{
+			DebugKey: "task-123",
+			Session:  "shell",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", result.Username)
+	})
+
+	t.Run("returns every session when selection is required", func(t *testing.T) {
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "409 Conflict",
+				StatusCode: http.StatusConflict,
+				Body: io.NopCloser(strings.NewReader(`{
+					"error": "selection_required",
+					"debug_sessions": [
+						{"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "name": "shell", "status": "connectable"},
+						{"id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "name": null, "status": "connectable"}
+					]
+				}`)),
+			}, nil
+		}
+
+		c := api.NewClientWithRoundTrip(roundTrip)
+
+		_, err := c.GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig{DebugKey: "task-123"})
+		var selectionErr *api.DebugSessionSelectionError
+		require.ErrorAs(t, err, &selectionErr)
+		require.Equal(t, []api.DebugSessionSummary{
+			{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Name: "shell", Status: "connectable"},
+			{ID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Status: "connectable"},
+		}, selectionErr.DebugSessions)
 	})
 }
 

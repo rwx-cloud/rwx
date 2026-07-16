@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
 
 	"golang.org/x/crypto/ssh"
@@ -28,7 +29,7 @@ func (s Service) DebugTask(cfg DebugTaskConfig) error {
 		return errors.Wrap(err, "validation failed")
 	}
 
-	connectionInfo, err := s.APIClient.GetDebugConnectionInfo(cfg.DebugKey)
+	connectionInfo, err := s.APIClient.GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig{DebugKey: cfg.DebugKey})
 	if err != nil {
 		return err
 	}

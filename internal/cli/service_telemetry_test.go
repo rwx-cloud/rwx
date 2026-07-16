@@ -640,7 +640,7 @@ func TestTelemetry_DebugSSH(t *testing.T) {
 	t.Run("records ssh.connect and ssh.command for debug session", func(t *testing.T) {
 		setup := setupTest(t)
 
-		setup.mockAPI.MockGetDebugConnectionInfo = func(runId string) (api.DebugConnectionInfo, error) {
+		setup.mockAPI.MockGetDebugConnectionInfo = func(api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error) {
 			return api.DebugConnectionInfo{
 				Debuggable:     true,
 				PrivateUserKey: sandboxPrivateTestKey,

@@ -37,8 +37,8 @@ AAAEC6442PQKevgYgeT0SIu9zwlnEMl6MF59ZgM+i0ByMv4eLJPqG3xnZcEQmktHj/GY2i
 			DebugKey: runID,
 		}
 
-		s.mockAPI.MockGetDebugConnectionInfo = func(runId string) (api.DebugConnectionInfo, error) {
-			require.Equal(t, runID, runId)
+		s.mockAPI.MockGetDebugConnectionInfo = func(cfg api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error) {
+			require.Equal(t, runID, cfg.DebugKey)
 			fetchedConnectionInfo = true
 			return api.DebugConnectionInfo{
 				Debuggable:     true,
@@ -78,8 +78,8 @@ AAAEC6442PQKevgYgeT0SIu9zwlnEMl6MF59ZgM+i0ByMv4eLJPqG3xnZcEQmktHj/GY2i
 			DebugKey: runID,
 		}
 
-		s.mockAPI.MockGetDebugConnectionInfo = func(runId string) (api.DebugConnectionInfo, error) {
-			require.Equal(t, runID, runId)
+		s.mockAPI.MockGetDebugConnectionInfo = func(cfg api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error) {
+			require.Equal(t, runID, cfg.DebugKey)
 			return api.DebugConnectionInfo{Debuggable: false}, nil
 		}
 
