@@ -22,7 +22,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
 	})
@@ -42,7 +42,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
 	})
@@ -67,7 +67,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
 	})
@@ -94,7 +94,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
 		require.Equal(t, []string{"sha"}, result.GitParams)
@@ -126,7 +126,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
 		require.Equal(t, []string{"commit-sha", "sha"}, result.GitParams)
@@ -156,7 +156,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
 		require.Equal(t, []string{"ref"}, result.GitParams)
@@ -184,7 +184,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
 		require.Equal(t, []string{"init"}, result.GitParams)
@@ -213,7 +213,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.True(t, result.Rewritten)
 
@@ -245,7 +245,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.True(t, result.Rewritten)
 
@@ -278,7 +278,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.True(t, result.Rewritten)
 
@@ -310,7 +310,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.True(t, result.Rewritten)
 
@@ -339,7 +339,120 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
+		require.Error(t, err)
+		require.False(t, result.Rewritten)
+		require.Contains(t, err.Error(), "multiple git/clone")
+	})
+
+	t.Run("scopes git/clone ref param to the clone matching the origin url", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
+		require.NoError(t, err)
+		defer tmpFile.Close()
+
+		content := `
+tasks:
+  - key: code
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/task-server-proxy.git
+      ref: ${{ init.commit-sha }}
+  - key: clickhouse-code
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/clickhouse.git
+      ref: ${{ init.clickhouse-ref }}
+`
+		_, err = tmpFile.WriteString(content)
+		require.NoError(t, err)
+
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "git@github.com:rwx-cloud/task-server-proxy.git")
+		require.NoError(t, err)
+		require.True(t, result.Rewritten)
+		require.Equal(t, []string{"commit-sha"}, result.GitParams)
+
+		fileContent, err := os.ReadFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.Contains(t, string(fileContent), "commit-sha: ${{ event.git.sha }}")
+		require.NotContains(t, string(fileContent), "clickhouse-ref: ${{ event.git.sha }}")
+	})
+
+	t.Run("errors on conflicting git/clone ref params when origin url is unknown", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
+		require.NoError(t, err)
+		defer tmpFile.Close()
+
+		content := `
+tasks:
+  - key: code
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/task-server-proxy.git
+      ref: ${{ init.commit-sha }}
+  - key: clickhouse-code
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/clickhouse.git
+      ref: ${{ init.clickhouse-ref }}
+`
+		_, err = tmpFile.WriteString(content)
+		require.NoError(t, err)
+
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
+		require.Error(t, err)
+		require.False(t, result.Rewritten)
+		require.Contains(t, err.Error(), "multiple git/clone")
+	})
+
+	t.Run("errors on conflicting git/clone ref params when origin url matches no clone", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
+		require.NoError(t, err)
+		defer tmpFile.Close()
+
+		content := `
+tasks:
+  - key: code
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/task-server-proxy.git
+      ref: ${{ init.commit-sha }}
+  - key: clickhouse-code
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/clickhouse.git
+      ref: ${{ init.clickhouse-ref }}
+`
+		_, err = tmpFile.WriteString(content)
+		require.NoError(t, err)
+
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "git@github.com:rwx-cloud/some-other-repo.git")
+		require.Error(t, err)
+		require.False(t, result.Rewritten)
+		require.Contains(t, err.Error(), "multiple git/clone")
+	})
+
+	t.Run("errors when the origin-matching repo is cloned with different ref params", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
+		require.NoError(t, err)
+		defer tmpFile.Close()
+
+		content := `
+tasks:
+  - key: clone1
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/task-server-proxy.git
+      ref: ${{ init.ref }}
+  - key: clone2
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/task-server-proxy.git
+      ref: ${{ init.sha }}
+`
+		_, err = tmpFile.WriteString(content)
+		require.NoError(t, err)
+
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "git@github.com:rwx-cloud/task-server-proxy.git")
 		require.Error(t, err)
 		require.False(t, result.Rewritten)
 		require.Contains(t, err.Error(), "multiple git/clone")
@@ -364,7 +477,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.True(t, result.Rewritten)
 
@@ -389,7 +502,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.True(t, result.Rewritten)
 
@@ -415,7 +528,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.True(t, result.Rewritten)
 
@@ -446,7 +559,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.True(t, result.Rewritten)
 
@@ -479,7 +592,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.True(t, result.Rewritten)
 
@@ -508,7 +621,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
 	})
@@ -535,7 +648,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
 
@@ -566,7 +679,7 @@ tasks:
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
 
-		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.Error(t, err)
 		require.False(t, result.Rewritten)
 		require.Contains(t, err.Error(), "multiple event triggers")

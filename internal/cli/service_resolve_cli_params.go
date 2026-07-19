@@ -15,13 +15,13 @@ type ResolveCliParamsResult struct {
 	GitParams []string
 }
 
-func ResolveCliParamsForFile(filePath string) (ResolveCliParamsResult, error) {
+func ResolveCliParamsForFile(filePath, originURL string) (ResolveCliParamsResult, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return ResolveCliParamsResult{}, errors.Wrap(err, "unable to read file")
 	}
 
-	resolvedContent, gitParams, err := resolveCliParams(string(content))
+	resolvedContent, gitParams, err := resolveCliParams(string(content), originURL)
 	if err != nil {
 		return ResolveCliParamsResult{GitParams: gitParams}, err
 	}
@@ -37,13 +37,13 @@ func ResolveCliParamsForFile(filePath string) (ResolveCliParamsResult, error) {
 	return ResolveCliParamsResult{Rewritten: false, GitParams: gitParams}, nil
 }
 
-func resolveCliParams(yamlContent string) (string, []string, error) {
+func resolveCliParams(yamlContent, originURL string) (string, []string, error) {
 	doc, err := ParseYAMLDoc(yamlContent)
 	if err != nil {
 		return "", nil, errors.Wrap(err, "failed to parse YAML")
 	}
 
-	gitParamsMap, err := extractGitParams(doc)
+	gitParamsMap, err := extractGitParams(doc, originURL)
 	gitParamNames := getGitParamNames(gitParamsMap)
 	if err != nil {
 		return "", gitParamNames, err
@@ -174,7 +174,7 @@ func prependOnSection(yamlContent string, params map[string]any) string {
 	return onSection.String() + yamlContent
 }
 
-func extractGitParams(doc *YAMLDoc) (map[string]any, error) {
+func extractGitParams(doc *YAMLDoc, originURL string) (map[string]any, error) {
 	result := make(map[string]any)
 
 	result, err := extractGitParamsFromTriggers(doc, result)
@@ -182,7 +182,7 @@ func extractGitParams(doc *YAMLDoc) (map[string]any, error) {
 		return nil, err
 	}
 
-	result, err = extractGitParamsFromGitClone(doc, result)
+	result, err = extractGitParamsFromGitClone(doc, result, originURL)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +291,12 @@ func extractGitParamsFromInit(node ast.Node, result map[string]any) (map[string]
 	return result, nil
 }
 
-func extractGitParamsFromGitClone(doc *YAMLDoc, result map[string]any) (map[string]any, error) {
+type gitCloneRef struct {
+	repository string
+	paramName  string
+}
+
+func extractGitParamsFromGitClone(doc *YAMLDoc, result map[string]any, originURL string) (map[string]any, error) {
 	tasksNode, err := doc.getNodeAtPath("$.tasks")
 	if err != nil {
 		return result, nil
@@ -302,7 +307,7 @@ func extractGitParamsFromGitClone(doc *YAMLDoc, result map[string]any) (map[stri
 		return result, nil
 	}
 
-	var gitCloneRefParam string
+	var refs []gitCloneRef
 
 	for i := range sequenceNode.Values {
 		callValue := doc.TryReadStringAtPath(fmt.Sprintf("$.tasks[%d].call", i))
@@ -327,18 +332,81 @@ func extractGitParamsFromGitClone(doc *YAMLDoc, result map[string]any) (map[stri
 			continue
 		}
 
-		if gitCloneRefParam != "" && gitCloneRefParam != paramName {
-			return nil, errors.New("multiple git/clone packages use different ref init params")
-		}
-		gitCloneRefParam = paramName
+		repository := doc.TryReadStringAtPath(fmt.Sprintf("$.tasks[%d].with.repository", i))
+		refs = append(refs, gitCloneRef{repository: repository, paramName: paramName})
 	}
 
-	if gitCloneRefParam == "" {
+	if len(refs) == 0 {
 		return result, nil
+	}
+
+	// Prefer the git/clone task(s) that clone the current repository. When the
+	// origin URL is known and at least one git/clone repository matches it,
+	// restrict the ref-param scan to those clones — a clone of a different
+	// repository legitimately uses its own ref init param and must not be
+	// treated as a conflict. If the origin URL is unknown or nothing matches,
+	// fall back to considering every clone, which surfaces the existing conflict
+	// error when they disagree.
+	if originURL != "" {
+		var matched []gitCloneRef
+		for _, ref := range refs {
+			if gitRepositoriesMatch(ref.repository, originURL) {
+				matched = append(matched, ref)
+			}
+		}
+		if len(matched) > 0 {
+			refs = matched
+		}
+	}
+
+	var gitCloneRefParam string
+	for _, ref := range refs {
+		if gitCloneRefParam != "" && gitCloneRefParam != ref.paramName {
+			return nil, errors.New("multiple git/clone packages use different ref init params")
+		}
+		gitCloneRefParam = ref.paramName
 	}
 
 	// Always map to event.git.sha for CLI trigger
 	result[gitCloneRefParam] = "${{ event.git.sha }}"
 
 	return result, nil
+}
+
+// gitRepositoriesMatch reports whether two git repository references identify
+// the same repository, ignoring transport differences (e.g. an HTTPS config
+// repository vs. an SSH origin URL).
+func gitRepositoriesMatch(a, b string) bool {
+	na := normalizeGitRepository(a)
+	return na != "" && na == normalizeGitRepository(b)
+}
+
+// normalizeGitRepository reduces a git repository reference to a comparable
+// host/path identity, stripping the scheme, any userinfo, a trailing ".git",
+// and normalizing scp-style (host:org/repo) to host/org/repo.
+func normalizeGitRepository(repository string) string {
+	repo := strings.TrimSpace(repository)
+	if repo == "" {
+		return ""
+	}
+
+	// Strip a scheme like https://, http://, ssh://, or git://.
+	if idx := strings.Index(repo, "://"); idx != -1 {
+		repo = repo[idx+3:]
+	}
+
+	// Strip a userinfo prefix like git@.
+	if idx := strings.Index(repo, "@"); idx != -1 {
+		repo = repo[idx+1:]
+	}
+
+	// scp-style syntax uses host:org/repo; normalize the host separator to a
+	// slash so it compares equal to host/org/repo URL forms.
+	if slash := strings.Index(repo, "/"); slash == -1 || strings.Index(repo, ":") < slash {
+		repo = strings.Replace(repo, ":", "/", 1)
+	}
+
+	repo = strings.TrimSuffix(repo, "/")
+	repo = strings.TrimSuffix(repo, ".git")
+	return strings.ToLower(repo)
 }
