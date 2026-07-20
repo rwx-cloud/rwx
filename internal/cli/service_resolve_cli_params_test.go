@@ -363,7 +363,7 @@ tasks:
     with:
       repository: https://github.com/rwx-cloud/primary-repo.git
       ref: ${{ init.commit-sha }}
-  - key: clickhouse-code
+  - key: secondary-code
     call: git/clone 2.0.8
     with:
       repository: https://github.com/rwx-cloud/secondary-repo.git
