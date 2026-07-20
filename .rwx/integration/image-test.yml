@@ -36,7 +36,7 @@ tasks:
 
   - key: aws-role
     use: aws-cli
-    call: aws/assume-role 2.0.9
+    call: aws/assume-role 2.0.10
     with:
       region: us-east-2
       role-to-assume: arn:aws:iam::646244215049:role/rwx-repo-cd
