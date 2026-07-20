@@ -345,6 +345,43 @@ tasks:
 		require.Contains(t, err.Error(), "multiple git/clone")
 	})
 
+	t.Run("does not error on multiple git/clone ref params when CLI init already declares git params", func(t *testing.T) {
+		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
+		require.NoError(t, err)
+		defer tmpFile.Close()
+
+		content := `
+on:
+  cli:
+    init:
+      commit-sha: ${{ event.git.sha }}
+      secondary-repo-ref: main
+
+tasks:
+  - key: code
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/primary-repo.git
+      ref: ${{ init.commit-sha }}
+  - key: secondary-code
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/secondary-repo.git
+      ref: ${{ init.secondary-repo-ref }}
+`
+		_, err = tmpFile.WriteString(content)
+		require.NoError(t, err)
+
+		result, err := ResolveCliParamsForFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.False(t, result.Rewritten)
+		require.Equal(t, []string{"commit-sha"}, result.GitParams)
+
+		fileContent, err := os.ReadFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.Equal(t, content, string(fileContent))
+	})
+
 	t.Run("uses init expression when one git/clone has hardcoded ref", func(t *testing.T) {
 		tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.yml")
 		require.NoError(t, err)
