@@ -43,18 +43,29 @@ func resolveCliParams(yamlContent, originURL string) (string, []string, error) {
 		return "", nil, errors.Wrap(err, "failed to parse YAML")
 	}
 
-	gitParamsMap, err := extractGitParams(doc, originURL)
-	gitParamNames := getGitParamNames(gitParamsMap)
+	gitParamsMap := make(map[string]any)
+	gitParamsMap, err = extractGitParamsFromTriggers(doc, gitParamsMap)
 	if err != nil {
-		return "", gitParamNames, err
+		return "", getGitParamNames(gitParamsMap), err
 	}
-	gitParamNames = mergeGitParamNames(gitParamNames, extractCliGitParamNames(doc))
+
+	gitParamNames := mergeGitParamNames(getGitParamNames(gitParamsMap), extractCliGitParamNames(doc))
 
 	// Skip rewriting if CLI init already has git event references, but still
 	// return the git param names so callers can suppress HEAD-based patches.
+	// The git/clone ref scan below is redundant in this case (the params are
+	// already declared), so we skip it — otherwise it would raise a spurious
+	// conflict error for configs that clone multiple repositories with
+	// different ref init params.
 	if cliInit := doc.TryReadStringAtPath("$.on.cli.init"); strings.Contains(cliInit, "event.git.") {
 		return yamlContent, gitParamNames, nil
 	}
+
+	gitParamsMap, err = extractGitParamsFromGitClone(doc, gitParamsMap, originURL)
+	if err != nil {
+		return "", gitParamNames, err
+	}
+	gitParamNames = mergeGitParamNames(gitParamNames, getGitParamNames(gitParamsMap))
 
 	if len(gitParamsMap) == 0 {
 		return yamlContent, gitParamNames, nil
@@ -172,22 +183,6 @@ func prependOnSection(yamlContent string, params map[string]any) string {
 		return "---\n" + onSection.String() + strings.TrimPrefix(yamlContent, "---\n")
 	}
 	return onSection.String() + yamlContent
-}
-
-func extractGitParams(doc *YAMLDoc, originURL string) (map[string]any, error) {
-	result := make(map[string]any)
-
-	result, err := extractGitParamsFromTriggers(doc, result)
-	if err != nil {
-		return nil, err
-	}
-
-	result, err = extractGitParamsFromGitClone(doc, result, originURL)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
 }
 
 func extractGitParamsFromTriggers(doc *YAMLDoc, result map[string]any) (map[string]any, error) {
