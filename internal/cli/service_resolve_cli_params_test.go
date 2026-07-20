@@ -355,7 +355,7 @@ on:
   cli:
     init:
       commit-sha: ${{ event.git.sha }}
-      clickhouse-ref: main
+      secondary-repo-ref: main
 
 tasks:
   - key: code
@@ -367,7 +367,7 @@ tasks:
     call: git/clone 2.0.8
     with:
       repository: https://github.com/rwx-cloud/secondary-repo.git
-      ref: ${{ init.clickhouse-ref }}
+      ref: ${{ init.secondary-repo-ref }}
 `
 		_, err = tmpFile.WriteString(content)
 		require.NoError(t, err)
