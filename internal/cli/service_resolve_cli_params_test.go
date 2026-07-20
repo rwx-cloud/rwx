@@ -361,12 +361,12 @@ tasks:
   - key: code
     call: git/clone 2.0.8
     with:
-      repository: https://github.com/rwx-cloud/task-server-proxy.git
+      repository: https://github.com/rwx-cloud/primary-repo.git
       ref: ${{ init.commit-sha }}
   - key: clickhouse-code
     call: git/clone 2.0.8
     with:
-      repository: https://github.com/rwx-cloud/clickhouse.git
+      repository: https://github.com/rwx-cloud/secondary-repo.git
       ref: ${{ init.clickhouse-ref }}
 `
 		_, err = tmpFile.WriteString(content)
