@@ -157,7 +157,7 @@ func (s Service) getDebugConnectionInfo(cfg DebugTaskConfig) (api.DebugConnectio
 func (s Service) promptForDebugSession(sessions []api.DebugSessionSummary) (api.DebugSessionSummary, error) {
 	fmt.Fprintln(s.Stdout, "Select a debug session:")
 	for index, session := range sessions {
-		fmt.Fprintf(s.Stdout, "  %d. %s — %s\n", index+1, debugSessionLabel(session), debugSessionStatusLabel(session))
+		fmt.Fprintf(s.Stdout, "  %d. %s\n", index+1, debugSessionLabel(session))
 	}
 	fmt.Fprintln(s.Stdout)
 	fmt.Fprintf(s.Stdout, "Enter a number (1-%d): ", len(sessions))
@@ -177,13 +177,13 @@ func (s Service) promptForDebugSession(sessions []api.DebugSessionSummary) (api.
 
 func debugSessionSelectionError(debugKey string, sessions []api.DebugSessionSummary) error {
 	var message strings.Builder
-	message.WriteString("multiple debug sessions are ready for connection\n\nAvailable sessions:\n")
+	message.WriteString("multiple debug sessions require selection\n\nAvailable sessions:\n")
 	for _, session := range sessions {
 		name := session.Name
 		if name == "" {
 			name = "(unnamed)"
 		}
-		fmt.Fprintf(&message, "  %s\n    ID: %s\n    Status: %s\n", name, session.ID, debugSessionStatusLabel(session))
+		fmt.Fprintf(&message, "  %s\n    ID: %s\n", name, session.ID)
 	}
 	if len(sessions) > 0 {
 		fmt.Fprintf(&message, "\nChoose a session and retry:\n  rwx debug --session %s %s", sessions[0].ID, debugKey)
@@ -201,13 +201,6 @@ func debugSessionLabel(session api.DebugSessionSummary) string {
 		return shortID
 	}
 	return fmt.Sprintf("%s (%s)", session.Name, shortID)
-}
-
-func debugSessionStatusLabel(session api.DebugSessionSummary) string {
-	if session.Status == "connectable" {
-		return "Ready for connection"
-	}
-	return session.Status
 }
 
 func debugSSHUser(connectionInfo api.DebugConnectionInfo) string {

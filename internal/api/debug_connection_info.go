@@ -36,7 +36,7 @@ type DebugSessionSelectionError struct {
 }
 
 func (e *DebugSessionSelectionError) Error() string {
-	return "multiple debug sessions are ready for connection"
+	return "multiple debug sessions require selection"
 }
 
 func (e *DebugSessionSelectionError) Unwrap() error {
