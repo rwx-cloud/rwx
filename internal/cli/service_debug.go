@@ -38,6 +38,10 @@ func (s Service) DebugTask(cfg DebugTaskConfig) error {
 		return err
 	}
 
+	return s.connectDebugSession(connectionInfo)
+}
+
+func (s Service) connectDebugSession(connectionInfo api.DebugConnectionInfo) error {
 	if !connectionInfo.Debuggable {
 		return errors.Wrap(errors.ErrRetry, "The task or run is not in a debuggable state")
 	}
