@@ -103,15 +103,15 @@ AAAEC6442PQKevgYgeT0SIu9zwlnEMl6MF59ZgM+i0ByMv4eLJPqG3xnZcEQmktHj/GY2i
 
 		err := s.service.DebugTask(cli.DebugTaskConfig{DebugKey: "task-123"})
 
-		require.EqualError(t, err, `multiple debug sessions are connectable
+		require.EqualError(t, err, `multiple debug sessions are ready for connection
 
 Available sessions:
   shell
     ID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-    Status: connectable
+    Status: Ready for connection
   (unnamed)
     ID: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-    Status: connectable
+    Status: Ready for connection
 
 Choose a session and retry:
   rwx debug --session aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa task-123`)
@@ -157,8 +157,8 @@ Choose a session and retry:
 		require.NoError(t, err)
 		require.Equal(t, 2, calls)
 		require.Equal(t, `Select a debug session:
-  1. shell (aaaaaaaa) — connectable
-  2. bbbbbbbb — connectable
+  1. shell (aaaaaaaa) — Ready for connection
+  2. bbbbbbbb — Ready for connection
 
 Enter a number (1-2): `, s.mockStdout.String())
 	})
