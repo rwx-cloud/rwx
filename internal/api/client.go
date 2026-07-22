@@ -134,14 +134,18 @@ func (c Client) GetSkillLatestVersion() (string, error) {
 	return result.Version, nil
 }
 
-func (c Client) GetDebugConnectionInfo(debugKey string) (DebugConnectionInfo, error) {
+func (c Client) GetDebugConnectionInfo(cfg GetDebugConnectionInfoConfig) (DebugConnectionInfo, error) {
 	connectionInfo := DebugConnectionInfo{}
 
-	if debugKey == "" {
+	if cfg.DebugKey == "" {
 		return connectionInfo, errors.New("missing debugKey")
 	}
 
-	endpoint := fmt.Sprintf("/mint/api/debug_connection_info?debug_key=%s", url.QueryEscape(debugKey))
+	params := url.Values{"debug_key": []string{cfg.DebugKey}}
+	if cfg.Session != "" {
+		params.Set("session", cfg.Session)
+	}
+	endpoint := "/mint/api/debug_connection_info?" + params.Encode()
 	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
 		return connectionInfo, errors.Wrap(err, "unable to create new HTTP request")
@@ -159,15 +163,45 @@ func (c Client) GetDebugConnectionInfo(debugKey string) (DebugConnectionInfo, er
 	case 400:
 		connectionError := DebugConnectionInfoError{}
 		if err := json.NewDecoder(resp.Body).Decode(&connectionError); err == nil {
-			return connectionInfo, errors.Wrap(errors.ErrBadRequest, connectionError.Error)
+			if connectionError.Error == "session_requires_task" {
+				return connectionInfo, &DebugSessionRequiresTaskError{}
+			}
+			if connectionError.Error != "" {
+				return connectionInfo, errors.WrapSentinel(errors.New(connectionError.Error), errors.ErrBadRequest)
+			}
 		}
 		return connectionInfo, errors.ErrBadRequest
 	case 404:
+		connectionError := DebugConnectionInfoError{}
+		if err := json.NewDecoder(resp.Body).Decode(&connectionError); err == nil {
+			if connectionError.Error == "debug_session_not_found" {
+				return connectionInfo, &DebugSessionNotFoundError{Selector: cfg.Session}
+			}
+			if connectionError.Error != "" {
+				return connectionInfo, errors.WrapSentinel(errors.New(connectionError.Error), errors.ErrNotFound)
+			}
+		}
 		return connectionInfo, errors.ErrNotFound
+	case http.StatusUnprocessableEntity:
+		connectionError := DebugConnectionInfoError{}
+		if err := json.NewDecoder(resp.Body).Decode(&connectionError); err == nil {
+			switch connectionError.Error {
+			case "selection_required":
+				return connectionInfo, &DebugSessionSelectionError{DebugSessions: connectionError.DebugSessions}
+			case "debug_session_not_connectable":
+				return connectionInfo, &DebugSessionNotConnectableError{DebugSession: connectionError.DebugSession}
+			}
+			if connectionError.Error != "" {
+				return connectionInfo, errors.WrapSentinel(errors.New(connectionError.Error), errors.ErrBadRequest)
+			}
+		}
+		return connectionInfo, errors.WrapSentinel(errors.New("Unable to call RWX API - 422 Unprocessable Entity"), errors.ErrBadRequest)
 	case 410:
 		connectionError := DebugConnectionInfoError{}
 		if err := json.NewDecoder(resp.Body).Decode(&connectionError); err == nil {
-			return connectionInfo, errors.Wrap(errors.ErrGone, connectionError.Error)
+			if connectionError.Error != "" {
+				return connectionInfo, errors.WrapSentinel(errors.New(connectionError.Error), errors.ErrGone)
+			}
 		}
 		return connectionInfo, errors.ErrGone
 	default:

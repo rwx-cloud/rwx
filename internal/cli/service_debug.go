@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
 
 	"golang.org/x/crypto/ssh"
@@ -11,6 +15,7 @@ import (
 
 type DebugTaskConfig struct {
 	DebugKey string
+	Session  string
 }
 
 func (c DebugTaskConfig) Validate() error {
@@ -28,11 +33,15 @@ func (s Service) DebugTask(cfg DebugTaskConfig) error {
 		return errors.Wrap(err, "validation failed")
 	}
 
-	connectionInfo, err := s.APIClient.GetDebugConnectionInfo(cfg.DebugKey)
+	connectionInfo, err := s.getDebugConnectionInfo(cfg)
 	if err != nil {
 		return err
 	}
 
+	return s.connectDebugSession(connectionInfo)
+}
+
+func (s Service) connectDebugSession(connectionInfo api.DebugConnectionInfo) error {
 	if !connectionInfo.Debuggable {
 		return errors.Wrap(errors.ErrRetry, "The task or run is not in a debuggable state")
 	}
@@ -53,7 +62,7 @@ func (s Service) DebugTask(cfg DebugTaskConfig) error {
 	}
 
 	sshConfig := ssh.ClientConfig{
-		User:            rwxCLISSHUser,
+		User:            debugSSHUser(connectionInfo),
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(privateUserKey)},
 		HostKeyCallback: ssh.FixedHostKey(publicHostKey),
 		BannerCallback: func(message string) error {
@@ -106,4 +115,97 @@ func (s Service) DebugTask(cfg DebugTaskConfig) error {
 	})
 
 	return nil
+}
+
+func (s Service) getDebugConnectionInfo(cfg DebugTaskConfig) (api.DebugConnectionInfo, error) {
+	connectionInfo, err := s.APIClient.GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig{
+		DebugKey: cfg.DebugKey,
+		Session:  cfg.Session,
+	})
+	if err == nil {
+		return connectionInfo, nil
+	}
+
+	var selectionErr *api.DebugSessionSelectionError
+	if !errors.As(err, &selectionErr) {
+		return api.DebugConnectionInfo{}, err
+	}
+
+	if !s.StdoutIsTTY || cfg.Session != "" {
+		return api.DebugConnectionInfo{}, debugSessionSelectionError(cfg.DebugKey, selectionErr.DebugSessions)
+	}
+
+	selected, err := s.promptForDebugSession(selectionErr.DebugSessions)
+	if err != nil {
+		return api.DebugConnectionInfo{}, err
+	}
+
+	connectionInfo, err = s.APIClient.GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig{
+		DebugKey: cfg.DebugKey,
+		Session:  selected.ID,
+	})
+	if err != nil {
+		if errors.As(err, &selectionErr) {
+			return api.DebugConnectionInfo{}, debugSessionSelectionError(cfg.DebugKey, selectionErr.DebugSessions)
+		}
+		return api.DebugConnectionInfo{}, err
+	}
+
+	return connectionInfo, nil
+}
+
+func (s Service) promptForDebugSession(sessions []api.DebugSessionSummary) (api.DebugSessionSummary, error) {
+	fmt.Fprintln(s.Stdout, "Select a debug session:")
+	for index, session := range sessions {
+		fmt.Fprintf(s.Stdout, "  %d. %s\n", index+1, debugSessionLabel(session))
+	}
+	fmt.Fprintln(s.Stdout)
+	fmt.Fprintf(s.Stdout, "Enter a number (1-%d): ", len(sessions))
+
+	scanner := bufio.NewScanner(s.Stdin)
+	if !scanner.Scan() {
+		return api.DebugSessionSummary{}, errors.New("no debug session selected")
+	}
+
+	choice, err := strconv.Atoi(strings.TrimSpace(scanner.Text()))
+	if err != nil || choice < 1 || choice > len(sessions) {
+		return api.DebugSessionSummary{}, errors.Errorf("invalid debug session selection: %s", scanner.Text())
+	}
+
+	return sessions[choice-1], nil
+}
+
+func debugSessionSelectionError(debugKey string, sessions []api.DebugSessionSummary) error {
+	var message strings.Builder
+	message.WriteString("multiple debug sessions require selection\n\nAvailable sessions:\n")
+	for _, session := range sessions {
+		name := session.Name
+		if name == "" {
+			name = "(unnamed)"
+		}
+		fmt.Fprintf(&message, "  %s\n    ID: %s\n", name, session.ID)
+	}
+	if len(sessions) > 0 {
+		fmt.Fprintf(&message, "\nChoose a session and retry:\n  rwx debug --session %s %s", sessions[0].ID, debugKey)
+	}
+
+	return errors.New(message.String())
+}
+
+func debugSessionLabel(session api.DebugSessionSummary) string {
+	shortID := session.ID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
+	if session.Name == "" {
+		return shortID
+	}
+	return fmt.Sprintf("%s (%s)", session.Name, shortID)
+}
+
+func debugSSHUser(connectionInfo api.DebugConnectionInfo) string {
+	if connectionInfo.Username != "" {
+		return connectionInfo.Username
+	}
+	return rwxCLISSHUser
 }

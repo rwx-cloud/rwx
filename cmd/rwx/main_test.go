@@ -41,6 +41,15 @@ func TestClassifyError(t *testing.T) {
 		{"sandbox_setup_failure", errors.ErrSandboxSetupFailure, "sandbox_setup_failure"},
 		{"sandbox_no_git_dir", errors.ErrSandboxNoGitDir, "sandbox_no_git_dir"},
 		{"shallow_clone", errors.ErrShallowClone, "shallow_clone"},
+		{"debug_session_selection", &api.DebugSessionSelectionError{}, "bad_request"},
+		{"debug_session_not_connectable", &api.DebugSessionNotConnectableError{}, "bad_request"},
+		{"debug_session_requires_task", &api.DebugSessionRequiresTaskError{}, "bad_request"},
+		{"debug_session_not_found", &api.DebugSessionNotFoundError{}, "not_found"},
+		{"debug_session_attachment_bad_request", &api.DebugSessionAttachmentError{Code: "invalid_task"}, "bad_request"},
+		{"debug_session_attachment_unauthenticated", &api.DebugSessionAttachmentError{Code: "vault_access_required"}, "unauthenticated"},
+		{"debug_session_attachment_not_found", &api.DebugSessionAttachmentError{Code: "task_not_found"}, "not_found"},
+		{"debug_session_attachment_gone", &api.DebugSessionAttachmentError{Code: "task_not_running"}, "gone"},
+		{"debug_session_attachment_server_error", &api.DebugSessionAttachmentError{Code: "task_server_error"}, "internal_server_error"},
 	}
 
 	for _, tc := range cases {
