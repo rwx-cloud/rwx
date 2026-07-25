@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/rwx-cloud/rwx/internal/api"
+	internalerrors "github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1788,5 +1791,138 @@ func TestAPIClient_DownloadArtifact(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, largeContent, result)
 		require.Equal(t, 1024*1024, len(result))
+	})
+}
+
+func TestAPIClient_DownloadArtifact_Retries(t *testing.T) {
+	resetConnection := func(t *testing.T, w http.ResponseWriter) {
+		t.Helper()
+
+		hijacker, ok := w.(http.Hijacker)
+		require.True(t, ok)
+
+		conn, _, err := hijacker.Hijack()
+		require.NoError(t, err)
+
+		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			_ = tcpConn.SetLinger(0)
+		}
+		conn.Close()
+	}
+
+	downloadRequest := api.ArtifactDownloadRequestResult{
+		Filename: "artifact.tar",
+		Kind:     "file",
+		Key:      "my-artifact",
+	}
+
+	t.Run("retries a connection reset and returns the artifact", func(t *testing.T) {
+		var slept []time.Duration
+		restore := api.StubDownloadArtifactRetrySleep(func(d time.Duration) { slept = append(slept, d) })
+		defer restore()
+
+		artifactContents := []byte("artifact binary data")
+		var attempts atomic.Int32
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if attempts.Add(1) == 1 {
+				resetConnection(t, w)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			_, writeErr := w.Write(artifactContents)
+			require.NoError(t, writeErr)
+		}))
+		defer server.Close()
+
+		request := downloadRequest
+		request.URL = server.URL
+
+		result, err := api.NewClientWithRoundTrip(nil).DownloadArtifact(request)
+
+		require.NoError(t, err)
+		require.Equal(t, artifactContents, result)
+		require.Equal(t, int32(2), attempts.Load())
+		require.Equal(t, []time.Duration{1 * time.Second}, slept)
+	})
+
+	t.Run("gives up after repeated connection resets", func(t *testing.T) {
+		var slept []time.Duration
+		restore := api.StubDownloadArtifactRetrySleep(func(d time.Duration) { slept = append(slept, d) })
+		defer restore()
+
+		var attempts atomic.Int32
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			attempts.Add(1)
+			resetConnection(t, w)
+		}))
+		defer server.Close()
+
+		request := downloadRequest
+		request.URL = server.URL
+
+		_, err := api.NewClientWithRoundTrip(nil).DownloadArtifact(request)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "HTTP request failed")
+		require.True(t, errors.Is(err, internalerrors.ErrNetworkTransient))
+		require.Equal(t, int32(5), attempts.Load())
+		require.Len(t, slept, 4)
+	})
+
+	t.Run("retries a 503 from storage", func(t *testing.T) {
+		restore := api.StubDownloadArtifactRetrySleep(func(time.Duration) {})
+		defer restore()
+
+		artifactContents := []byte("artifact binary data")
+		var attempts atomic.Int32
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if attempts.Add(1) == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`<?xml version="1.0"?><Error><Code>SlowDown</Code></Error>`))
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			_, writeErr := w.Write(artifactContents)
+			require.NoError(t, writeErr)
+		}))
+		defer server.Close()
+
+		request := downloadRequest
+		request.URL = server.URL
+
+		result, err := api.NewClientWithRoundTrip(nil).DownloadArtifact(request)
+
+		require.NoError(t, err)
+		require.Equal(t, artifactContents, result)
+		require.Equal(t, int32(2), attempts.Load())
+	})
+
+	t.Run("does not retry a 403 from storage", func(t *testing.T) {
+		restore := api.StubDownloadArtifactRetrySleep(func(time.Duration) {
+			require.FailNow(t, "unexpected retry")
+		})
+		defer restore()
+
+		var attempts atomic.Int32
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			attempts.Add(1)
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`<?xml version="1.0"?><Error><Code>AccessDenied</Code></Error>`))
+		}))
+		defer server.Close()
+
+		request := downloadRequest
+		request.URL = server.URL
+
+		_, err := api.NewClientWithRoundTrip(nil).DownloadArtifact(request)
+
+		require.Error(t, err)
+		require.Equal(t, int32(1), attempts.Load())
 	})
 }
