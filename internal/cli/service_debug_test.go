@@ -37,8 +37,8 @@ AAAEC6442PQKevgYgeT0SIu9zwlnEMl6MF59ZgM+i0ByMv4eLJPqG3xnZcEQmktHj/GY2i
 			DebugKey: runID,
 		}
 
-		s.mockAPI.MockGetDebugConnectionInfo = func(runId string) (api.DebugConnectionInfo, error) {
-			require.Equal(t, runID, runId)
+		s.mockAPI.MockGetDebugConnectionInfo = func(cfg api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error) {
+			require.Equal(t, runID, cfg.DebugKey)
 			fetchedConnectionInfo = true
 			return api.DebugConnectionInfo{
 				Debuggable:     true,
@@ -78,13 +78,86 @@ AAAEC6442PQKevgYgeT0SIu9zwlnEMl6MF59ZgM+i0ByMv4eLJPqG3xnZcEQmktHj/GY2i
 			DebugKey: runID,
 		}
 
-		s.mockAPI.MockGetDebugConnectionInfo = func(runId string) (api.DebugConnectionInfo, error) {
-			require.Equal(t, runID, runId)
+		s.mockAPI.MockGetDebugConnectionInfo = func(cfg api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error) {
+			require.Equal(t, runID, cfg.DebugKey)
 			return api.DebugConnectionInfo{Debuggable: false}, nil
 		}
 
 		err := s.service.DebugTask(debugConfig)
 
 		require.True(t, errors.Is(err, internalErrors.ErrRetry))
+	})
+
+	t.Run("when multiple sessions require selection in a non-TTY", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockAPI.MockGetDebugConnectionInfo = func(cfg api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error) {
+			require.Equal(t, "task-123", cfg.DebugKey)
+			require.Empty(t, cfg.Session)
+			return api.DebugConnectionInfo{}, &api.DebugSessionSelectionError{
+				DebugSessions: []api.DebugSessionSummary{
+					{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Name: "shell", Status: "connectable"},
+					{ID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Status: "connectable"},
+				},
+			}
+		}
+
+		err := s.service.DebugTask(cli.DebugTaskConfig{DebugKey: "task-123"})
+
+		require.EqualError(t, err, `multiple debug sessions require selection
+
+Available sessions:
+  shell
+    ID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  (unnamed)
+    ID: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+Choose a session and retry:
+  rwx debug --session aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa task-123`)
+	})
+
+	t.Run("when multiple sessions require selection in a TTY", func(t *testing.T) {
+		s := setupTestWithTTY(t)
+		_, err := s.mockStdin.WriteString("2\n")
+		require.NoError(t, err)
+
+		calls := 0
+		s.mockAPI.MockGetDebugConnectionInfo = func(cfg api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error) {
+			calls++
+			require.Equal(t, "task-123", cfg.DebugKey)
+			if calls == 1 {
+				require.Empty(t, cfg.Session)
+				return api.DebugConnectionInfo{}, &api.DebugSessionSelectionError{
+					DebugSessions: []api.DebugSessionSummary{
+						{ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Name: "shell", Status: "connectable"},
+						{ID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Status: "connectable"},
+					},
+				}
+			}
+
+			require.Equal(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", cfg.Session)
+			return api.DebugConnectionInfo{
+				Debuggable:     true,
+				PrivateUserKey: privateTestKey,
+				PublicHostKey:  publicTestKey,
+				Address:        "debug.example.org:22",
+				Username:       cfg.Session,
+			}, nil
+		}
+		s.mockSSH.MockConnect = func(addr string, cfg ssh.ClientConfig) error {
+			require.Equal(t, "debug.example.org:22", addr)
+			require.Equal(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", cfg.User)
+			return nil
+		}
+		s.mockSSH.MockInteractiveSession = func() error { return nil }
+
+		err = s.service.DebugTask(cli.DebugTaskConfig{DebugKey: "task-123"})
+
+		require.NoError(t, err)
+		require.Equal(t, 2, calls)
+		require.Equal(t, `Select a debug session:
+  1. shell (aaaaaaaa)
+  2. bbbbbbbb
+
+Enter a number (1-2): `, s.mockStdout.String())
 	})
 }

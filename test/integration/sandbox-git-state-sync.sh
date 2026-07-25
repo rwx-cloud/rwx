@@ -157,6 +157,8 @@ TEMP_BRANCHES=(
   "${TEST_ID}-lfs-push"
   "${TEST_ID}-lfs-patch"
   "${TEST_ID}-dirty-state"
+  "${TEST_ID}-already-exists"
+  "${TEST_ID}-node-modules"
 )
 TEST_FILES=(
   integration-pushed-commit.txt
@@ -172,6 +174,8 @@ TEST_FILES=(
   integration-lfs-push.bin
   integration-lfs-patch.bin
   integration-staged-state.txt
+  integration-already-exists.txt
+  integration-node-modules-new.txt
 )
 
 cleanup() {
@@ -326,5 +330,77 @@ printf '\n// integration unstaged state\n' >> go.mod
 
 git diff --cached --name-only | grep -qx integration-staged-state.txt || fail "local staged state was not preserved"
 git diff --name-only | grep -qx go.mod || fail "local unstaged state was not preserved"
+
+echo "Scenario: new-file patch applies over a pre-applied gitignored sandbox file (already_exists regression)"
+git reset --hard "$ORIGINAL_HEAD" >/dev/null
+git switch -C "${TEST_ID}-already-exists" "$ORIGINAL_HEAD" >/dev/null
+already_exists_file="integration-already-exists.txt"
+
+# Commit an ignore rule so the sandbox's checked-out tree ignores the path.
+printf '%s\n' "$already_exists_file" >> .gitignore
+git add .gitignore
+git -c user.email="sandbox-integration@example.com" -c user.name="Sandbox Integration" commit -m "integration ignore already-exists path" >/dev/null
+
+# Pre-create the ignored file inside the sandbox. git clean -f would skip it
+# because it is ignored, so it survives into the patch-apply step.
+"${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sh -c "printf 'sandbox-copy\n' > ${already_exists_file}"
+
+# Force-track the same path locally so the dirty patch creates it. Before the
+# fix, git apply collided with the pre-applied sandbox copy (already_exists).
+printf '%s\n' "local-copy" > "$already_exists_file"
+git add -f "$already_exists_file"
+
+already_exists_output_file=$(mktemp)
+already_exists_exit=0
+run_and_capture_output "$already_exists_output_file" "${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- cat "$already_exists_file" || already_exists_exit=$?
+already_exists_output=$(cat "$already_exists_output_file")
+rm -f "$already_exists_output_file"
+if [ "$already_exists_exit" -ne 0 ]; then
+  fail "sandbox exec failed to sync a new file that already existed in the sandbox: ${already_exists_output}"
+fi
+if echo "$already_exists_output" | grep -q "already exists in working directory"; then
+  fail "patch sync still hit the already_exists collision: ${already_exists_output}"
+fi
+assert_sandbox_file_content "$already_exists_file" "local-copy"
+
+git reset -- "$already_exists_file" .gitignore >/dev/null 2>&1 || true
+rm -f "$already_exists_file"
+
+echo "Scenario: a routine sandbox exec sync does not remove a gitignored node_modules tree (git clean -x blast radius)"
+git reset --hard "$ORIGINAL_HEAD" >/dev/null
+git switch -C "${TEST_ID}-node-modules" "$ORIGINAL_HEAD" >/dev/null
+node_modules_new_file="integration-node-modules-new.txt"
+
+# Ignore node_modules in the committed tree, mirroring a real project layout so
+# the sandbox's checked-out worktree treats the directory as gitignored.
+printf 'node_modules/\n' >> .gitignore
+git add .gitignore
+git -c user.email="sandbox-integration@example.com" -c user.name="Sandbox Integration" commit -m "integration ignore node_modules" >/dev/null
+
+# Populate a gitignored node_modules tree in the sandbox, as a dependency install would.
+"${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sh -c '
+  set -e
+  cd "$(git rev-parse --show-toplevel)"
+  mkdir -p node_modules/leftpad
+  printf "keep-me\n" > node_modules/leftpad/index.js
+  printf "{}\n" > node_modules/leftpad/package.json
+'
+
+# Add a new file locally so the dirty patch has new-file paths: that is what
+# makes the real sync run its scoped pre-apply cleanup at all.
+printf '%s\n' "node-modules-sibling" > "$node_modules_new_file"
+git add "$node_modules_new_file"
+
+# A routine exec drives the actual CLI sync (reset + scoped clean + apply). No
+# git-clean is run by the test itself, so this cannot drift from the CLI.
+"${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- pwd >/dev/null
+
+# The new file must sync, and the gitignored node_modules tree must survive.
+assert_sandbox_file_content "$node_modules_new_file" "node-modules-sibling"
+assert_sandbox_file_content "node_modules/leftpad/index.js" "keep-me"
+assert_sandbox_file_content "node_modules/leftpad/package.json" "{}"
+
+git reset -- "$node_modules_new_file" .gitignore >/dev/null 2>&1 || true
+rm -f "$node_modules_new_file"
 
 echo "PASS: sandbox git-state sync integration scenarios completed"

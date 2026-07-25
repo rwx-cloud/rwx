@@ -774,7 +774,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	var syncPushMs int64
 	var syncPushPatchBytes int
 	syncPushStart := time.Now()
-	patchBytes, err := s.prepareSandboxForExec(cfg.Json, isNewSandbox, isNewSandbox || execCount == 0, localHeadForSync, connInfo)
+	patchBytes, err := s.prepareSandboxForExec(cfg.Json, isNewSandbox, localHeadForSync, connInfo)
 	syncPushMs = time.Since(syncPushStart).Milliseconds()
 	syncPushPatchBytes = patchBytes
 	if err != nil {
@@ -1428,7 +1428,7 @@ func (s Service) revertSandboxToGitState(localHead string) error {
 	return nil
 }
 
-func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, cleanPreAppliedNewFiles bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
+func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
 	if localHead == "" {
 		return 0, fmt.Errorf("sandbox sync requires a git repository with a valid HEAD")
 	}
@@ -1490,11 +1490,9 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, cleanPr
 		return patchBytes, syncPushErr
 	}
 
-	if cleanPreAppliedNewFiles {
-		if err := s.removePreAppliedNewFilesFromSandbox(patches); err != nil {
-			syncPushErr = err
-			return patchBytes, syncPushErr
-		}
+	if err := s.removePreAppliedNewFilesFromSandbox(patches); err != nil {
+		syncPushErr = err
+		return patchBytes, syncPushErr
 	}
 
 	if err := s.applyDirtyPatchesToSandbox(patches); err != nil {
@@ -1815,7 +1813,8 @@ func (s Service) removePreAppliedNewFilesFromSandbox(patches git.DirtyPatches) e
 	for i, path := range paths {
 		quoted[i] = quoteShellArg(path)
 	}
-	script := fmt.Sprintf("/usr/bin/git clean -f -- %s >/dev/null 2>&1", strings.Join(quoted, " "))
+	// -x: the pre-applied file the patch re-creates may be gitignored, which a plain git clean skips.
+	script := fmt.Sprintf("/usr/bin/git clean -fdx -- %s >/dev/null 2>&1", strings.Join(quoted, " "))
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand(script))

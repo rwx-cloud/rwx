@@ -14,7 +14,8 @@ import (
 type APIClient interface {
 	GetSkillContent() (string, error)
 	GetSkillLatestVersion() (string, error)
-	GetDebugConnectionInfo(debugKey string) (api.DebugConnectionInfo, error)
+	AttachDebugSession(api.AttachDebugSessionConfig) (api.DebugSessionSummary, error)
+	GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error)
 	GetSandboxConnectionInfo(runID, scopedToken string) (api.SandboxConnectionInfo, error)
 	CreateSandboxToken(api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error)
 	GetDispatch(api.GetDispatchConfig) (*api.GetDispatchResult, error)

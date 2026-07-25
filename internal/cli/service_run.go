@@ -224,7 +224,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 	// Convert to relative path for display purposes (e.g., run title)
 	relativeRunDefinitionPath := relativePathFromWd(runDefinitionPath)
 
-	resolveResult, err := ResolveCliParamsForFile(relativeRunDefinitionPath)
+	resolveResult, err := ResolveCliParamsForFile(relativeRunDefinitionPath, originUrl)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to resolve CLI init params")
 	}
