@@ -451,6 +451,30 @@ func TestPushRef(t *testing.T) {
 	require.Equal(t, head, pushed)
 }
 
+func TestPushRefDisablesThinPacks(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args")
+	fakeGit := filepath.Join(dir, "git")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$RWX_TEST_ARGS_FILE\"\n"
+	require.NoError(t, os.WriteFile(fakeGit, []byte(script), 0o755))
+
+	client := &git.Client{Binary: fakeGit, Dir: dir}
+	err := client.PushRef(git.PushRefOptions{
+		Remote:  "sandbox",
+		Refspec: "abc:refs/rwx/sync-push",
+		Env:     []string{"RWX_TEST_ARGS_FILE=" + argsFile},
+	})
+	require.NoError(t, err)
+
+	recorded, err := os.ReadFile(argsFile)
+	require.NoError(t, err)
+	require.Equal(
+		t,
+		[]string{"push", "--no-thin", "sandbox", "abc:refs/rwx/sync-push"},
+		strings.Fields(string(recorded)),
+	)
+}
+
 func TestGeneratePatchFile(t *testing.T) {
 	t.Run("does not write a patch file", func(t *testing.T) {
 		t.Run("when git is not installed", func(t *testing.T) {

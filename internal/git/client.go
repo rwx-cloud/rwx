@@ -694,7 +694,8 @@ func (c *Client) PushRef(opts PushRefOptions) error {
 		return fmt.Errorf("no refspec provided")
 	}
 
-	cmd := exec.Command(c.Binary, "push", opts.Remote, opts.Refspec)
+	// A shallow remote can lack delta bases that a thin pack assumes it has.
+	cmd := exec.Command(c.Binary, "push", "--no-thin", opts.Remote, opts.Refspec)
 	cmd.Dir = c.Dir
 	if len(opts.Env) > 0 {
 		cmd.Env = append(os.Environ(), opts.Env...)
