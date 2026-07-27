@@ -19,6 +19,10 @@ trap cleanup EXIT
 
 rm -rf .rwx/sandboxes
 
+if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+  git fetch --unshallow origin
+fi
+
 sandbox_result=$(
   "${RWX_CLI}" sandbox start \
     "${SCRIPT_DIR}/definitions/sandbox-depth-one.yml" \
