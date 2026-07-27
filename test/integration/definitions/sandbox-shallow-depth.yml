@@ -1,0 +1,51 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+      clone-ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  # Deliberately omits fetch-full-depth so the sandbox workspace is a depth-1
+  # clone, matching what customers get from git/clone's defaults.
+  - key: code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.clone-ref }}
+      preserve-git-dir: true
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  # The sync's only recovery path for history the depth-1 clone lacks is an
+  # in-sandbox `git fetch origin`. This repo is public, so that fetch succeeds
+  # anonymously and hides the bug — verified by two green runs before this line
+  # existed. Customers hit the failure because their repo is private and the
+  # sandbox has no usable credentials: git/clone's credential helper expands
+  # $GITHUB_TOKEN at invocation time, and GITHUB_TOKEN is task-local (never
+  # written to $RWX_ENV), so the helper yields an empty password and git falls
+  # back to anonymous access, which a private repo refuses. An unreachable
+  # origin reproduces that condition without needing a private fixture repo.
+  - key: sandbox
+    use: [code, rwx-cli]
+    run: |
+      /usr/bin/git remote set-url origin https://invalid.invalid/rwx-cloud/rwx.git
+      rwx-sandbox
+    env:
+      UUID: ${{ run.id }}
+      RWX_ACCESS_TOKEN: ""
