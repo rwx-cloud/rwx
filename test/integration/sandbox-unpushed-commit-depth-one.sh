@@ -44,8 +44,21 @@ if [ -z "$SANDBOX_RUN_ID" ] || [ "$SANDBOX_RUN_ID" = "null" ]; then
 fi
 
 echo "unpushed commit content" > unpushed-depth-one-test.txt
-git add unpushed-depth-one-test.txt
+historical_commit=$(
+  git log \
+    --diff-filter=A \
+    --format=%H \
+    -- internal/cli/service_sandbox_test.go |
+    tail -1
+)
+git show "${historical_commit}:internal/cli/service_sandbox_test.go" \
+  > internal/cli/service_sandbox_test.go
+echo "// force a new blob based on history absent from the depth-one sandbox" \
+  >> internal/cli/service_sandbox_test.go
+
+git add unpushed-depth-one-test.txt internal/cli/service_sandbox_test.go
 git commit -m "unpushed local commit"
+git -c pack.window=250 -c pack.depth=50 gc --aggressive --prune=now
 
 output=$(
   "${RWX_CLI}" sandbox exec \
