@@ -255,14 +255,17 @@ func TestAPIClient_AcquireToken(t *testing.T) {
 func TestAPIClient_Whoami(t *testing.T) {
 	t.Run("makes the request", func(t *testing.T) {
 		email := "some-email@example.com"
+		serviceAccountName := "deploy bot"
 		body := struct {
-			OrganizationSlug string  `json:"organization_slug"`
-			TokenKind        string  `json:"token_kind"`
-			UserEmail        *string `json:"user_email,omitempty"`
+			OrganizationSlug   string  `json:"organization_slug"`
+			TokenKind          string  `json:"token_kind"`
+			UserEmail          *string `json:"user_email,omitempty"`
+			ServiceAccountName *string `json:"service_account_name,omitempty"`
 		}{
-			OrganizationSlug: "some-org",
-			TokenKind:        "personal_access_token",
-			UserEmail:        &email,
+			OrganizationSlug:   "some-org",
+			TokenKind:          "personal_access_token",
+			UserEmail:          &email,
+			ServiceAccountName: &serviceAccountName,
 		}
 		bodyBytes, _ := json.Marshal(body)
 
@@ -277,8 +280,9 @@ func TestAPIClient_Whoami(t *testing.T) {
 
 		c := api.NewClientWithRoundTrip(roundTrip)
 
-		_, err := c.Whoami()
+		result, err := c.Whoami()
 		require.NoError(t, err)
+		require.Equal(t, &serviceAccountName, result.ServiceAccountName)
 	})
 }
 
