@@ -31,8 +31,16 @@ func (s Service) Whoami(cfg WhoamiConfig) (*api.WhoamiResult, error) {
 
 		fmt.Fprint(s.Stdout, string(encoded))
 	} else {
-		fmt.Fprintf(s.Stdout, "Token Kind: %v\n", strings.ReplaceAll(result.TokenKind, "_", " "))
+		tokenKind := strings.ReplaceAll(result.TokenKind, "_", " ")
+		if result.ServiceAccountName != nil {
+			tokenKind = "service account"
+		}
+
+		fmt.Fprintf(s.Stdout, "Token Kind: %v\n", tokenKind)
 		fmt.Fprintf(s.Stdout, "Organization: %v\n", result.OrganizationSlug)
+		if result.ServiceAccountName != nil {
+			fmt.Fprintf(s.Stdout, "Service Account: %v\n", *result.ServiceAccountName)
+		}
 		if result.UserEmail != nil {
 			fmt.Fprintf(s.Stdout, "User: %v\n", *result.UserEmail)
 		}
