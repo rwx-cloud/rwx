@@ -256,16 +256,22 @@ func TestAPIClient_Whoami(t *testing.T) {
 	t.Run("makes the request", func(t *testing.T) {
 		email := "some-email@example.com"
 		serviceAccountName := "deploy bot"
+		tokenDescription := "CI release token"
+		tokenURL := "https://cloud.rwx.com/org/some-org/manage/service_accounts/123"
 		body := struct {
 			OrganizationSlug   string  `json:"organization_slug"`
 			TokenKind          string  `json:"token_kind"`
 			UserEmail          *string `json:"user_email,omitempty"`
 			ServiceAccountName *string `json:"service_account_name,omitempty"`
+			TokenDescription   *string `json:"token_description,omitempty"`
+			TokenURL           *string `json:"token_url,omitempty"`
 		}{
 			OrganizationSlug:   "some-org",
 			TokenKind:          "personal_access_token",
 			UserEmail:          &email,
 			ServiceAccountName: &serviceAccountName,
+			TokenDescription:   &tokenDescription,
+			TokenURL:           &tokenURL,
 		}
 		bodyBytes, _ := json.Marshal(body)
 
@@ -283,6 +289,8 @@ func TestAPIClient_Whoami(t *testing.T) {
 		result, err := c.Whoami()
 		require.NoError(t, err)
 		require.Equal(t, &serviceAccountName, result.ServiceAccountName)
+		require.Equal(t, &tokenDescription, result.TokenDescription)
+		require.Equal(t, &tokenURL, result.TokenURL)
 	})
 }
 
