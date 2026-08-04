@@ -146,9 +146,11 @@ type AcquireTokenResult struct {
 
 type WhoamiResult struct {
 	OrganizationSlug   string  `json:"organization_slug"`
-	TokenKind          string  `json:"token_kind"` // organization_access_token, personal_access_token
+	TokenKind          string  `json:"token_kind"` // service_account, personal_access_token
 	UserEmail          *string `json:"user_email,omitempty"`
 	ServiceAccountName *string `json:"service_account_name,omitempty"`
+	TokenDescription   *string `json:"token_description,omitempty"`
+	TokenURL           *string `json:"token_url,omitempty"`
 }
 
 type DocsTokenResult struct {

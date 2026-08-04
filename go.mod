@@ -18,6 +18,7 @@ require (
 	github.com/moby/moby v28.5.2+incompatible
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/pkg/errors v0.9.1
+	github.com/savioxavier/termlink v1.4.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/crypto v0.53.0

@@ -44,6 +44,16 @@ func (s Service) Whoami(cfg WhoamiConfig) (*api.WhoamiResult, error) {
 		if result.UserEmail != nil {
 			fmt.Fprintf(s.Stdout, "User: %v\n", *result.UserEmail)
 		}
+		if result.TokenDescription != nil {
+			fmt.Fprintf(s.Stdout, "Token Description: %v\n", *result.TokenDescription)
+		}
+		if result.TokenURL != nil {
+			if HyperlinksSupported(s.StdoutIsTTY) {
+				fmt.Fprintln(s.Stdout, Hyperlink("Edit token", *result.TokenURL, s.StdoutIsTTY))
+			} else {
+				fmt.Fprintf(s.Stdout, "Token URL: %v\n", *result.TokenURL)
+			}
+		}
 	}
 
 	return result, nil
