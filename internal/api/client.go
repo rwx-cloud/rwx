@@ -14,6 +14,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/accesstoken"
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/messages"
+	"github.com/rwx-cloud/rwx/internal/retry"
 	"github.com/rwx-cloud/rwx/internal/versions"
 )
 
@@ -1602,26 +1603,53 @@ func (c Client) GetArtifactDownloadRequestByTaskKey(runID, taskKey, artifactKey 
 	return result, nil
 }
 
+var downloadArtifactRetrySleep = time.Sleep
+
 func (c Client) DownloadArtifact(request ArtifactDownloadRequestResult) ([]byte, error) {
+	backoff := retry.NewBackoff()
+
+	for {
+		artifactBytes, retryable, err := downloadArtifactOnce(request)
+		if err == nil {
+			return artifactBytes, nil
+		}
+
+		if !retryable {
+			return nil, err
+		}
+
+		delay, capErr := backoff.Record()
+		if capErr != nil {
+			return nil, errors.WrapSentinel(
+				fmt.Errorf("download failed after %d attempts: %w", backoff.MaxFailures, err),
+				errors.ErrNetworkTransient,
+			)
+		}
+
+		downloadArtifactRetrySleep(delay)
+	}
+}
+
+func downloadArtifactOnce(request ArtifactDownloadRequestResult) (_ []byte, retryable bool, err error) {
 	req, err := http.NewRequest(http.MethodGet, request.URL, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to create new HTTP request")
+		return nil, false, errors.Wrap(err, "unable to create new HTTP request")
 	}
 	req.Header.Set("Accept", "application/octet-stream")
 
 	// Use http.DefaultClient directly since the artifact will come from storage (S3, etc.)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, errors.Wrap(err, "HTTP request failed")
+		return nil, retry.IsTransient(err), errors.Wrap(err, "HTTP request failed")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		artifactBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, errors.Wrap(err, "unable to read response body")
+			return nil, retry.IsTransient(err), errors.Wrap(err, "unable to read response body")
 		}
-		return artifactBytes, nil
+		return artifactBytes, false, nil
 	}
 
 	bodyBytes, _ := io.ReadAll(resp.Body)
@@ -1629,7 +1657,8 @@ func (c Client) DownloadArtifact(request ArtifactDownloadRequestResult) ([]byte,
 	if errMsg == "" {
 		errMsg = fmt.Sprintf("Unable to download artifact - %s", resp.Status)
 	}
-	return nil, errors.New(errMsg)
+	isTransient := resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode >= 500 && resp.StatusCode < 600)
+	return nil, isTransient, errors.New(errMsg)
 }
 
 func (c Client) CancelRun(runID, scopedToken string) error {

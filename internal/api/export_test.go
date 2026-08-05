@@ -10,3 +10,9 @@ func StubListRunsRetrySleep(fn func(time.Duration)) func() {
 	listRunsRetrySleep = fn
 	return func() { listRunsRetrySleep = original }
 }
+
+func StubDownloadArtifactRetrySleep(fn func(time.Duration)) func() {
+	original := downloadArtifactRetrySleep
+	downloadArtifactRetrySleep = fn
+	return func() { downloadArtifactRetrySleep = original }
+}
