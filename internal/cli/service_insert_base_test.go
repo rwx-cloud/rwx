@@ -448,4 +448,94 @@ tasks:
 `, string(contents))
 		})
 	})
+
+	t.Run("when yaml file calls into the packages directory and doesn't include base", func(t *testing.T) {
+		bl := setupBaseLayer(t)
+
+		err := os.WriteFile(filepath.Join(bl.mintDir, "foo.yaml"), []byte(`tasks:
+  - key: a
+    call: ${{ run.dir }}/packages/my-package
+`), 0o644)
+		require.NoError(t, err)
+
+		t.Run("adds base to file", func(t *testing.T) {
+			_, err = bl.s.service.InsertBase(cli.InsertBaseConfig{})
+			require.NoError(t, err)
+
+			var contents []byte
+
+			contents, err = os.ReadFile(filepath.Join(bl.mintDir, "foo.yaml"))
+			require.NoError(t, err)
+			require.Equal(t, `base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: a
+    call: ${{ run.dir }}/packages/my-package
+`, string(contents))
+		})
+	})
+
+	t.Run("when yaml file calls with an expression and 'with' and doesn't include base", func(t *testing.T) {
+		bl := setupBaseLayer(t)
+
+		err := os.WriteFile(filepath.Join(bl.mintDir, "foo.yaml"), []byte(`tasks:
+  - key: a
+    call: ${{ run.dir }}/my-package
+    with:
+      some-param: some-value
+`), 0o644)
+		require.NoError(t, err)
+
+		t.Run("adds base to file", func(t *testing.T) {
+			_, err = bl.s.service.InsertBase(cli.InsertBaseConfig{})
+			require.NoError(t, err)
+
+			var contents []byte
+
+			contents, err = os.ReadFile(filepath.Join(bl.mintDir, "foo.yaml"))
+			require.NoError(t, err)
+			require.Equal(t, `base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: a
+    call: ${{ run.dir }}/my-package
+    with:
+      some-param: some-value
+`, string(contents))
+		})
+	})
+
+	t.Run("when yaml file calls with an expression and 'use' and doesn't include base", func(t *testing.T) {
+		bl := setupBaseLayer(t)
+
+		err := os.WriteFile(filepath.Join(bl.mintDir, "foo.yaml"), []byte(`tasks:
+  - key: a
+    use: setup
+    call: ${{ run.dir }}/my-package
+`), 0o644)
+		require.NoError(t, err)
+
+		t.Run("adds base to file", func(t *testing.T) {
+			_, err = bl.s.service.InsertBase(cli.InsertBaseConfig{})
+			require.NoError(t, err)
+
+			var contents []byte
+
+			contents, err = os.ReadFile(filepath.Join(bl.mintDir, "foo.yaml"))
+			require.NoError(t, err)
+			require.Equal(t, `base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: a
+    use: setup
+    call: ${{ run.dir }}/my-package
+`, string(contents))
+		})
+	})
 }
