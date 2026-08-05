@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -70,6 +71,10 @@ func (doc *YAMLDoc) HasTasks() bool {
 	return doc.hasPath("$.tasks")
 }
 
+// packagesDirCallRe matches calls into the local packages directory, eg.
+// `call: ${{ run.dir }}/packages/my-package`
+var packagesDirCallRe = regexp.MustCompile(`^\$\{\{\s*run\.dir\s*\}\}/packages/`)
+
 func (doc *YAMLDoc) AllTasksAreEmbeddedRuns() bool {
 	err := doc.ForEachNode("$.tasks[*]", func(node ast.Node) error {
 		mapNode, ok := node.(*ast.MappingNode)
@@ -77,20 +82,24 @@ func (doc *YAMLDoc) AllTasksAreEmbeddedRuns() bool {
 			return fmt.Errorf("expected mapping node, got %T", node)
 		}
 
-		hasEmbeddedRun := false
+		callValue := ""
+		hasPackageMarker := false
 		for _, entry := range mapNode.Values {
-			if entry.Key.String() != "call" {
-				continue
+			switch entry.Key.String() {
+			case "call":
+				callValue = entry.Value.String()
+			case "with", "use":
+				// `with` and `use` are only valid on package calls, so their
+				// presence means this is a local package call, not an embedded run.
+				hasPackageMarker = true
 			}
-
-			if strings.HasPrefix(entry.Value.String(), "${{") {
-				hasEmbeddedRun = true
-			}
-
-			break
 		}
 
-		if !hasEmbeddedRun {
+		isEmbeddedRun := strings.HasPrefix(callValue, "${{") &&
+			!hasPackageMarker &&
+			!packagesDirCallRe.MatchString(callValue)
+
+		if !isEmbeddedRun {
 			return errors.New("no embedded run found")
 		}
 
