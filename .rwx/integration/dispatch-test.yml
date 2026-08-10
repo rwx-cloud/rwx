@@ -47,7 +47,7 @@ tasks:
 
       echo "$run_url" > "$RWX_LINKS/Run URL"
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-dispatch-failure
     use: rwx-cli
@@ -85,7 +85,7 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-dispatch-fail-fast
     use: rwx-cli
@@ -123,4 +123,4 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}

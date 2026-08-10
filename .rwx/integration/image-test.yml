@@ -127,5 +127,5 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
       BUILD_IMAGE_DEF: ${{ run.dir }}/integration/image-test/build-image.yml

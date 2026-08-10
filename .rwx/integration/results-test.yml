@@ -73,7 +73,7 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
       RUN_DEF: ${{ run.dir }}/integration/results-test/passing.yml
 
   - key: test-results-fail-fast
@@ -124,7 +124,7 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
       RUN_DEF: ${{ run.dir }}/integration/results-test/failing.yml
 
   - key: test-results-task-level
@@ -148,5 +148,5 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
       RUN_DEF: ${{ run.dir }}/integration/results-test/mixed-task-statuses.yml

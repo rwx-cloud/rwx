@@ -52,7 +52,7 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-resolve-packages-adds-version-pin
     use: rwx-cli
@@ -78,7 +78,7 @@ tasks:
 
       rm -rf "$tmpdir"
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-update-packages-bumps-old-version
     use: rwx-cli
@@ -101,7 +101,7 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-update-packages-bumps-base-config
     use: rwx-cli
@@ -134,7 +134,7 @@ tasks:
       fi
       rm -rf "$tmpdir"
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-update-base-updates-base-image
     use: rwx-cli
@@ -160,7 +160,7 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-update-packages-allow-major-version-change
     use: rwx-cli
@@ -182,7 +182,7 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-resolve-packages-with-file-argument
     use: rwx-cli
@@ -204,4 +204,4 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
