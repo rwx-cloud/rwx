@@ -1000,21 +1000,15 @@ func (c Client) UploadPackage(cfg UploadPackageConfig) (*UploadPackageResult, er
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		msg := extractErrorMessage(resp.Body)
-		if msg == "" {
-			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
-		}
-
-		return nil, errors.New(msg)
+	// Package validation failures (missing rwx-package.yml or README.md, invalid
+	// YAML, a name owned by another organization, ...) come back as
+	// {"error": "..."} and are surfaced verbatim to the user.
+	result := UploadPackageResult{}
+	if err := decodeResponseJSON(resp, &result); err != nil {
+		return nil, err
 	}
 
-	respBody := UploadPackageResult{}
-	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-		return nil, errors.Wrap(err, "unable to parse API response")
-	}
-
-	return &respBody, nil
+	return &result, nil
 }
 
 func (c Client) GetPackageDocumentation(packageName string) (*PackageDocumentationResult, error) {
