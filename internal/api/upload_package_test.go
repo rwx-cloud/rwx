@@ -64,7 +64,11 @@ func TestAPIClient_UploadPackage(t *testing.T) {
 		require.Equal(t, []byte("zip-bytes"), gotFileContents)
 	})
 
-	// The bodies below are verbatim responses captured from cloud.rwx.com.
+	// The bodies below are verbatim responses from cloud.rwx.com. The registry
+	// reports every validation failure as 400 {"error": "<single string>"}, so
+	// the CLI's job is to display it unchanged. Messages that name the manifest
+	// use whichever filename was uploaded, so assertions here avoid depending on
+	// rwx-package.yml vs the legacy mint-leaf.yml.
 	t.Run("surfaces real package validation errors verbatim", func(t *testing.T) {
 		for _, tc := range []struct {
 			name string
@@ -100,6 +104,51 @@ func TestAPIClient_UploadPackage(t *testing.T) {
 				name: "name owned by another organization",
 				body: "{\"error\":\"mint-leaf.yml has a leaf name owned by `someoneelse`, but request was made under organization `rwx`\"}",
 				want: "has a leaf name owned by `someoneelse`, but request was made under organization `rwx`",
+			},
+			{
+				name: "missing description",
+				body: `{"error":"rwx-package.yml did not contain a description"}`,
+				want: "rwx-package.yml did not contain a description",
+			},
+			{
+				name: "manifest is not a mapping",
+				body: `{"error":"rwx-package.yml did not contain a mapping"}`,
+				want: "rwx-package.yml did not contain a mapping",
+			},
+			{
+				name: "invalid parameters",
+				body: `{"error":"rwx-package.yml did not contain valid parameters"}`,
+				want: "rwx-package.yml did not contain valid parameters",
+			},
+			{
+				name: "no file in the upload",
+				body: `{"error":"Upload did not contain a file"}`,
+				want: "Upload did not contain a file",
+			},
+			{
+				name: "not a readable zip",
+				body: `{"error":"Upload was not a readable zip archive"}`,
+				want: "Upload was not a readable zip archive",
+			},
+			{
+				name: "compressed size limit",
+				body: `{"error":"Upload exceeded the 10 MB compressed size limit"}`,
+				want: "Upload exceeded the 10 MB compressed size limit",
+			},
+			{
+				name: "uncompressed size limit",
+				body: `{"error":"Upload exceeded the 100 MB uncompressed size limit"}`,
+				want: "Upload exceeded the 100 MB uncompressed size limit",
+			},
+			{
+				name: "file count limit",
+				body: `{"error":"Upload exceeded the 10,000 file limit"}`,
+				want: "Upload exceeded the 10,000 file limit",
+			},
+			{
+				name: "already published",
+				body: `{"error":"rwx/thing 1.0.0 has already been published. Bump the version number according to semver."}`,
+				want: "has already been published. Bump the version number according to semver.",
 			},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
