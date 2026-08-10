@@ -360,4 +360,4 @@ tasks:
       trimmed_version="${version#v}"
       rwx dispatch release-homebrew-tap --param version="${trimmed_version}"
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}

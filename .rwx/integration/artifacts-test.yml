@@ -52,7 +52,7 @@ tasks:
       echo "$run_url" > "$RWX_VALUES/run-url"
       echo "$run_url" > "$RWX_LINKS/Run URL"
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
       RUN_DEF: ${{ run.dir }}/integration/artifacts-test/run-def.yml
 
   - key: test-list-artifacts
@@ -76,7 +76,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-single-artifact
     use: rwx-cli
@@ -94,7 +94,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-all-artifacts
     use: rwx-cli
@@ -122,7 +122,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-all-artifacts-with-auto-extract
     use: rwx-cli
@@ -150,7 +150,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-single-artifact-with-output
     use: rwx-cli
@@ -167,7 +167,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-directory-artifact-with-auto-extract
     use: rwx-cli
@@ -194,7 +194,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-directory-artifact-as-tar
     use: rwx-cli
@@ -216,7 +216,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-artifact-json-output
     use: rwx-cli
@@ -239,7 +239,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-file-artifact-output-directory-fails
     use: rwx-cli
@@ -261,7 +261,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-directory-artifact-output-file-fails
     use: rwx-cli
@@ -283,4 +283,4 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}

@@ -93,12 +93,11 @@ tasks:
           "  use: [rwx-cli, git]" \
           "  run: ./${script}" \
           "  env:" \
-          "    RWX_ACCESS_TOKEN: ${RWX_ACCESS_TOKEN}" \
+          '    RWX_ACCESS_TOKEN: \${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}' \
           "    COMMIT_SHA: ${COMMIT_SHA}" \
           >> "$RWX_DYNAMIC_TASKS/sandbox-tests.yml"
       done
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
       COMMIT_SHA: ${{ init.commit-sha }}
     filter:
       - test/integration/sandbox-*.sh

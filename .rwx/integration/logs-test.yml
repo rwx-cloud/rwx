@@ -48,7 +48,7 @@ tasks:
       echo "$run_url" > "$RWX_VALUES/run-url"
       echo "$run_url" > "$RWX_LINKS/Run URL"
     env:
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
       RUN_DEF: ${{ run.dir }}/integration/logs-test/run-def.yml
 
   - key: test-download-and-extract-logs
@@ -76,7 +76,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-logs-as-zip
     use: rwx-cli
@@ -97,7 +97,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-logs-json-extract-output
     use: rwx-cli
@@ -130,7 +130,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-logs-json-zip-output
     use: rwx-cli
@@ -152,7 +152,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-logs-zip-output-directory-fails
     use: rwx-cli
@@ -174,7 +174,7 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-download-logs-extract-output-file-fails
     use: rwx-cli
@@ -196,4 +196,4 @@ tasks:
     env:
       RUN_ID: ${{ tasks.rwx-run.values.run-id }}
       RUN_URL: ${{ tasks.rwx-run.values.run-url }}
-      RWX_ACCESS_TOKEN: ${{ secrets.RWX_ACCESS_TOKEN }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
