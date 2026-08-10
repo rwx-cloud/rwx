@@ -1,0 +1,80 @@
+on:
+  cli:
+    init:
+      commit-sha: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.1.1
+
+tasks:
+  - key: code
+    call: git/clone 2.0.8
+    with:
+      preserve-git-dir: true
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.commit-sha }}
+      github-token: ${{ github['rwx-cloud'].token }}
+
+  - key: tool-versions
+    use: code
+    run: |
+      while read -r tool version _; do
+        printf "%s" "$version" > "$RWX_VALUES/$tool"
+      done < .tool-versions
+      cp language-server-ref $RWX_VALUES
+    filter:
+      - .tool-versions
+      - language-server-ref
+
+  - key: go-installation
+    call: golang/install 1.2.2
+    with:
+      go-version: ${{ tasks.tool-versions.values.golang }}
+
+  - key: go
+    use: go-installation
+    run: echo "$(go env GOPATH)/bin" > "${MINT_ENV}/PATH"
+
+  - key: go-deps
+    use: [go, code]
+    call: golang/mod-download 1.0.2
+    filter: [go.mod, go.sum]
+    with:
+      tool-cache: cli-go-deps
+
+  - key: git
+    run: |
+      sudo apt-get update
+      sudo apt-get install git git-lfs
+      sudo apt-get clean
+
+      git config --global user.name "Testing"
+      git config --global user.email "git@example.com"
+      git config --global init.defaultBranch main
+
+      git lfs install --skip-repo
+
+  - key: lsp-code
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/language-server.git
+      ref: ${{ tasks.tool-versions.values.language-server-ref }}
+      path: language-server
+
+  - key: lsp-build-def
+    use: lsp-code
+    run: cp language-server/.rwx/build.yml $RWX_ARTIFACTS/build-run-def
+
+  - key: lsp-build
+    call: ${{ tasks.lsp-build-def.artifacts.build-run-def }}
+    init:
+      ref: ${{ tasks.tool-versions.values.language-server-ref }}
+
+  - key: lsp-server
+    use: code
+    run: cp ${{ tasks.lsp-build.tasks.build.artifacts.bundle }} internal/lsp/bundle/server.js
+
+  - key: sandbox
+    use: [go-deps, lsp-server, git]
+    run: rwx-sandbox
