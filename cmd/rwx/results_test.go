@@ -98,6 +98,29 @@ func TestMergeEnrichedResults(t *testing.T) {
 		require.Equal(t, []any{map[string]any{"ID": "task_def456", "CompletedRuntimeSeconds": float64(250)}}, merged["Tasks"])
 	})
 
+	t.Run("leaves env, init, and package_params keys untouched", func(t *testing.T) {
+		base := map[string]any{"RunID": "abc123"}
+		details := map[string]any{
+			"init":           map[string]any{"commit-sha": "d603c0b", "deploy_target": "staging"},
+			"package_params": map[string]any{"github-token": "secret"},
+			"tasks": []any{
+				map[string]any{
+					"id":  "task_def456",
+					"env": map[string]any{"GIT_LFS_SKIP_SMUDGE": "1", "RWX_TASK_ID": "task_def456"},
+				},
+			},
+		}
+
+		merged := rwx.MergeEnrichedResults(base, details)
+
+		require.Equal(t, map[string]any{"commit-sha": "d603c0b", "deploy_target": "staging"}, merged["Init"])
+		require.Equal(t, map[string]any{"github-token": "secret"}, merged["PackageParams"])
+
+		task := merged["Tasks"].([]any)[0].(map[string]any)
+		require.Equal(t, "task_def456", task["ID"])
+		require.Equal(t, map[string]any{"GIT_LFS_SKIP_SMUDGE": "1", "RWX_TASK_ID": "task_def456"}, task["Env"])
+	})
+
 	t.Run("keeps the enriched id as ID alongside the base id keys", func(t *testing.T) {
 		base := map[string]any{"RunID": "abc123"}
 		details := map[string]any{"id": "abc123", "branch": "main"}

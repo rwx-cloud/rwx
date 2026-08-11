@@ -249,14 +249,28 @@ func MergeEnrichedResults(base, details map[string]any) map[string]any {
 	return merged
 }
 
+// opaqueValueKeys names the fields whose values are user-controlled maps rather
+// than wire schema: environment variable names, init parameters, and package
+// parameters. Their keys carry meaning, so rewriting them destroys data. For
+// example, pascalCase turns GIT_LFS_SKIP_SMUDGE into GITLFSSKIPSMUDGE.
+var opaqueValueKeys = map[string]bool{
+	"env":            true,
+	"init":           true,
+	"package_params": true,
+}
+
 // pascalCaseKeys recursively rewrites map keys from snake_case to PascalCase,
 // recursing into nested maps and slices. Non-map/slice values are returned
-// unchanged.
+// unchanged. Values under an opaqueValueKeys field are copied through untouched.
 func pascalCaseKeys(v any) any {
 	switch value := v.(type) {
 	case map[string]any:
 		result := make(map[string]any, len(value))
 		for key, nested := range value {
+			if opaqueValueKeys[key] {
+				result[pascalCase(key)] = nested
+				continue
+			}
 			result[pascalCase(key)] = pascalCaseKeys(nested)
 		}
 		return result
