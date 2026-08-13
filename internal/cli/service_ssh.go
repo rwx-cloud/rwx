@@ -13,6 +13,7 @@ const defaultSSHSessionPollInterval = time.Second
 type AttachSSHSessionConfig struct {
 	TaskID       string
 	Name         string
+	Timeout      string
 	PollInterval time.Duration
 }
 
@@ -29,8 +30,9 @@ func (s Service) AttachSSHSession(cfg AttachSSHSessionConfig) error {
 	}
 
 	session, err := s.APIClient.AttachDebugSession(api.AttachDebugSessionConfig{
-		TaskID: cfg.TaskID,
-		Name:   cfg.Name,
+		TaskID:         cfg.TaskID,
+		Name:           cfg.Name,
+		SessionTimeout: cfg.Timeout,
 	})
 	if err != nil {
 		return err

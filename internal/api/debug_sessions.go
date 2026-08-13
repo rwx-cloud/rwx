@@ -11,8 +11,9 @@ import (
 )
 
 type AttachDebugSessionConfig struct {
-	TaskID string
-	Name   string
+	TaskID         string
+	Name           string
+	SessionTimeout string
 }
 
 type DebugSessionAttachmentError struct {
@@ -63,8 +64,12 @@ func (c Client) AttachDebugSession(cfg AttachDebugSessionConfig) (DebugSessionSu
 	}
 
 	requestBody := struct {
-		Name string `json:"name,omitempty"`
-	}{Name: cfg.Name}
+		Name           string `json:"name,omitempty"`
+		SessionTimeout string `json:"session_timeout,omitempty"`
+	}{
+		Name:           cfg.Name,
+		SessionTimeout: cfg.SessionTimeout,
+	}
 	encodedBody, err := json.Marshal(requestBody)
 	if err != nil {
 		return DebugSessionSummary{}, errors.Wrap(err, "unable to encode as JSON")

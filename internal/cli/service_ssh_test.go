@@ -18,6 +18,7 @@ func TestService_AttachSSHSession(t *testing.T) {
 		s.mockAPI.MockAttachDebugSession = func(cfg api.AttachDebugSessionConfig) (api.DebugSessionSummary, error) {
 			require.Equal(t, "task-123", cfg.TaskID)
 			require.Equal(t, "shell", cfg.Name)
+			require.Equal(t, "1h", cfg.SessionTimeout)
 			return api.DebugSessionSummary{ID: sessionID, Name: "shell", Status: "starting"}, nil
 		}
 
@@ -54,6 +55,7 @@ func TestService_AttachSSHSession(t *testing.T) {
 		err := s.service.AttachSSHSession(cli.AttachSSHSessionConfig{
 			TaskID:       "task-123",
 			Name:         "shell",
+			Timeout:      "1h",
 			PollInterval: time.Millisecond,
 		})
 
