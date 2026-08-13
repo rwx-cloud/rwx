@@ -1337,13 +1337,15 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.Contains(t, err.Error(), "git apply failed")
 	})
 
-	t.Run("syncs changes and reverts sandbox after pull", func(t *testing.T) {
+	t.Run("resets before command and leaves sandbox state after pull", func(t *testing.T) {
 		setup := setupTest(t)
 
 		runID := "run-sync-123"
 		address := "192.168.1.1:22"
+		sandboxPatch := "diff --git a/generated.txt b/generated.txt\nnew file mode 100644\nindex 0000000..3e75765\n--- /dev/null\n+++ b/generated.txt\n@@ -0,0 +1 @@\n+generated\n"
 		var commandOrder []string
 		var stdinCommandOrder []string
+		pulledPatchApplied := false
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
@@ -1368,12 +1370,21 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		}
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			commandOrder = append(commandOrder, cmd)
+			if isSandboxPullDiffCommand(cmd) {
+				return 0, sandboxPatch, nil
+			}
 			return 0, "", nil
 		}
 
 		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
 			stdinCommandOrder = append(stdinCommandOrder, command)
 			return 0, "", nil
+		}
+		setup.mockGit.MockApplyPatch = func(patch []byte) *exec.Cmd {
+			require.Equal(t, sandboxPatch, string(patch))
+			pulledPatchApplied = true
+			return exec.Command("true")
 		}
 
 		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
@@ -1386,20 +1397,32 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, runID, result.RunID)
 		require.Equal(t, 0, result.ExitCode)
+		require.Equal(t, []string{"generated.txt"}, result.PulledFiles)
+		require.True(t, pulledPatchApplied, "command-created changes should be applied locally")
 		require.Equal(t, "__rwx_sandbox_lock_requested__", commandOrder[0])
 		require.Contains(t, commandOrder, "__rwx_sandbox_sync_start__")
 		require.Contains(t, commandOrder, "echo hello")
 		// git apply uses stdin method
 		require.GreaterOrEqual(t, len(stdinCommandOrder), 1)
 		requireSandboxWorktreeRootCommand(t, stdinCommandOrder[0], "/usr/bin/git apply --allow-empty -")
-		// Sandbox should be reverted back to local git state after pull.
-		revertIdx := -1
+		// A reused sandbox should be normalized before the user command, then left
+		// untouched after its changes have been pulled back.
+		cleanIndexes := []int{}
+		execIdx := slices.Index(commandOrder, "echo hello")
+		pullIdx := slices.IndexFunc(commandOrder, isSandboxPullDiffCommand)
 		for i, cmd := range commandOrder {
-			if strings.Contains(cmd, "git clean -fd") && strings.Contains(cmd, "update-ref refs/rwx-sync HEAD") {
-				revertIdx = i
+			if strings.Contains(cmd, "/usr/bin/git clean -fd >/dev/null 2>&1") {
+				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git clean -fd >/dev/null 2>&1")
+				cleanIndexes = append(cleanIndexes, i)
 			}
 		}
-		require.NotEqual(t, -1, revertIdx, "sandbox should be reverted after pull")
+		require.Len(t, cleanIndexes, 1, "sandbox should be cleaned exactly once")
+		require.Less(t, cleanIndexes[0], execIdx, "sandbox should be cleaned before the user command")
+		require.Less(t, execIdx, pullIdx, "sandbox changes should be pulled after the user command")
+		for _, cmd := range commandOrder[pullIdx+1:] {
+			require.NotContains(t, cmd, "git clean", "sandbox should not be cleaned after pull")
+			require.NotContains(t, cmd, "git checkout", "sandbox should not be reset after pull")
+		}
 
 		// Snapshot and reset git commands must be wrapped in sync markers
 		// so they don't appear in task logs. Find the sync block that contains them.
@@ -1881,6 +1904,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.NotEqual(t, -1, applyIndex)
 		require.NotEqual(t, -1, snapshotIndex)
 		require.Less(t, cleanIndex, applyIndex)
+		require.Equal(t, -1, sandboxCommandIndex(order, "/usr/bin/git clean -fd >/dev/null 2>&1"), "first exec should preserve setup-created files")
 		require.Contains(t, order[snapshotIndex], "/usr/bin/git update-index --add --remove --")
 		require.Contains(t, order[snapshotIndex], "dir with space/quote")
 		require.Contains(t, order[snapshotIndex], "file.txt")
@@ -2780,7 +2804,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		require.Equal(t, 1, len(result.PulledFiles))
 	})
 
-	t.Run("returns pull errors without cleaning sandbox", func(t *testing.T) {
+	t.Run("pull errors leave sandbox changes intact", func(t *testing.T) {
 		setup := setupTest(t)
 
 		runID := "run-pull-err-123"
@@ -2799,14 +2823,15 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			return nil
 		}
 
+		var commandOrder []string
 		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			commandOrder = append(commandOrder, cmd)
 			if strings.Contains(cmd, "git ls-files") {
 				return 1, "fatal: not a git repository", nil // Pull fails
 			}
 			return 0, "", nil
 		}
 
-		var commandOrder []string
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			commandOrder = append(commandOrder, cmd)
 			if strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync") {
@@ -2825,8 +2850,19 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, result)
 		require.Contains(t, err.Error(), "failed to pull changes from sandbox")
-		commandText := strings.Join(commandOrder, "\n")
-		require.NotContains(t, commandText, "git update-ref refs/rwx-sync HEAD 2>/dev/null")
+
+		cleanIdx := sandboxCommandIndex(commandOrder, "/usr/bin/git clean -fd >/dev/null 2>&1")
+		execIdx := slices.Index(commandOrder, "echo hello")
+		pullIdx := slices.IndexFunc(commandOrder, func(cmd string) bool {
+			return strings.Contains(cmd, "git ls-files") && strings.Contains(cmd, "--others")
+		})
+		require.NotEqual(t, -1, cleanIdx, "sandbox should still be cleaned before exec")
+		require.Less(t, cleanIdx, execIdx)
+		require.Less(t, execIdx, pullIdx)
+		for _, cmd := range commandOrder[pullIdx+1:] {
+			require.NotContains(t, cmd, "git clean", "pull failure must not trigger post-command cleanup")
+			require.NotContains(t, cmd, "git checkout", "pull failure must not trigger post-command reset")
+		}
 	})
 
 }

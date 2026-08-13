@@ -848,17 +848,6 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 		"rej_file_count": syncPullRejCount,
 	})
 
-	// Revert sandbox to clean HEAD so the next exec starts from a known state
-	var revertErr error
-	if localHeadForSync != "" {
-		revertErr = s.revertSandboxToGitState(localHeadForSync)
-	} else {
-		revertErr = s.revertSandbox()
-	}
-	if revertErr != nil {
-		fmt.Fprintf(s.Stderr, "Warning: failed to revert sandbox: %v\n", revertErr)
-	}
-
 	// Update session exec count and last exec time
 	execNow := time.Now().UTC()
 	if lockFile, lockErr := s.lockSandboxStorageWithInfo(cfg.Json); lockErr == nil {
@@ -1390,44 +1379,6 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 	return files, patchBytes, nil
 }
 
-// revertSandbox resets the sandbox working tree to a clean HEAD state.
-// This runs after pull so the next exec starts from a known clean baseline.
-func (s Service) revertSandbox() error {
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-
-	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand("/usr/bin/git checkout . >/dev/null 2>&1; /usr/bin/git clean -fd >/dev/null 2>&1; /usr/bin/git update-ref refs/rwx-sync HEAD 2>/dev/null"))
-
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
-
-	if err != nil {
-		return errors.Wrap(err, "failed to revert sandbox")
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("failed to revert sandbox (exit code %d)", exitCode)
-	}
-	return nil
-}
-
-func (s Service) revertSandboxToGitState(localHead string) error {
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-
-	if err := s.checkoutSandboxHead(localHead); err != nil {
-		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
-		return err
-	}
-
-	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand("/usr/bin/git clean -fd >/dev/null 2>&1; /usr/bin/git update-ref refs/rwx-sync HEAD 2>/dev/null"))
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
-	if err != nil {
-		return errors.Wrap(err, "failed to clean sandbox after reset")
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("failed to clean sandbox after reset (exit code %d)", exitCode)
-	}
-
-	return nil
-}
-
 func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
 	if localHead == "" {
 		return 0, fmt.Errorf("sandbox sync requires a git repository with a valid HEAD")
@@ -1458,7 +1409,22 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 	}
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	if err := s.checkoutSandboxHead(localHead); err != nil {
+	head := quoteShellArg(localHead)
+	branch := s.GitClient.GetBranch()
+	gitCommand := "GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false /usr/bin/git"
+	var checkoutCommand string
+	if branch == "" {
+		checkoutCommand = fmt.Sprintf("%s checkout -f --detach %s >/dev/null 2>&1 && %s reset --hard %s >/dev/null 2>&1", gitCommand, head, gitCommand, head)
+	} else {
+		checkoutCommand = fmt.Sprintf("%s checkout -f -B %s %s >/dev/null 2>&1 && %s reset --hard %s >/dev/null 2>&1", gitCommand, quoteShellArg(branch), head, gitCommand, head)
+	}
+	checkoutExitCode, checkoutErr := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand(checkoutCommand))
+	if checkoutErr != nil {
+		checkoutErr = errors.Wrap(checkoutErr, "failed to reset sandbox to local git state")
+	} else if checkoutExitCode != 0 {
+		checkoutErr = fmt.Errorf("failed to reset sandbox to local git state (exit code %d)", checkoutExitCode)
+	}
+	if checkoutErr != nil {
 		// Prefer the more actionable "missing LFS objects" error, but ignore a
 		// failure of the check itself so it can't mask the checkout error.
 		lfsMissing, _ := s.checkSandboxLFSObjects(localHead)
@@ -1467,13 +1433,30 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 			syncPushErr = lfsMissing
 			return patchBytes, syncPushErr
 		}
-		syncPushErr = err
+		syncPushErr = checkoutErr
 		return patchBytes, syncPushErr
 	}
 	if err := s.verifySandboxLFSObjects(localHead); err != nil {
 		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 		syncPushErr = err
 		return patchBytes, syncPushErr
+	}
+	// A reused sandbox may still contain untracked files from the previous exec.
+	// Remove them before applying local dirty state so the command starts from a
+	// known baseline. A new sandbox may contain files prepared by its setup tasks,
+	// so preserve those on its first exec.
+	if !isNewSandbox {
+		exitCode, cleanErr := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand("/usr/bin/git clean -fd >/dev/null 2>&1"))
+		if cleanErr != nil {
+			_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+			syncPushErr = errors.Wrap(cleanErr, "failed to clean sandbox before sync")
+			return patchBytes, syncPushErr
+		}
+		if exitCode != 0 {
+			_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+			syncPushErr = fmt.Errorf("failed to clean sandbox before sync (exit code %d)", exitCode)
+			return patchBytes, syncPushErr
+		}
 	}
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 
@@ -1764,27 +1747,6 @@ func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo
 func (s Service) sandboxHasCommit(sha string) bool {
 	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand(fmt.Sprintf("/usr/bin/git cat-file -e %s^{commit} >/dev/null 2>&1", quoteShellArg(sha))))
 	return err == nil && exitCode == 0
-}
-
-func (s Service) checkoutSandboxHead(localHead string) error {
-	head := quoteShellArg(localHead)
-	branch := s.GitClient.GetBranch()
-	git := "GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false /usr/bin/git"
-	var cmd string
-	if branch == "" {
-		cmd = fmt.Sprintf("%s checkout -f --detach %s >/dev/null 2>&1 && %s reset --hard %s >/dev/null 2>&1", git, head, git, head)
-	} else {
-		cmd = fmt.Sprintf("%s checkout -f -B %s %s >/dev/null 2>&1 && %s reset --hard %s >/dev/null 2>&1", git, quoteShellArg(branch), head, git, head)
-	}
-
-	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand(cmd))
-	if err != nil {
-		return errors.Wrap(err, "failed to reset sandbox to local git state")
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("failed to reset sandbox to local git state (exit code %d)", exitCode)
-	}
-	return nil
 }
 
 func (s Service) applyDirtyPatchesToSandbox(patches git.DirtyPatches) error {
