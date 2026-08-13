@@ -12,6 +12,7 @@ func TestSSHCommand(t *testing.T) {
 	require.Equal(t, "ssh [flags] [task-id]", cmd.Use)
 	require.Equal(t, "execution", cmd.GroupID)
 	require.NotNil(t, cmd.Flags().Lookup("name"), "rwx ssh should expose the --name flag")
+	require.NotNil(t, cmd.Flags().Lookup("max-duration"), "rwx ssh should expose the --max-duration flag")
 
 	require.NoError(t, cmd.Args(cmd, []string{"task-123"}))
 	require.Error(t, cmd.Args(cmd, nil))
