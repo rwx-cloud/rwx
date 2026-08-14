@@ -13,6 +13,37 @@ import (
 )
 
 func TestAPIClient_AttachDebugSession(t *testing.T) {
+	t.Run("includes a maximum duration", func(t *testing.T) {
+		c := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
+			require.Equal(t, map[string]any{
+				"name":         "shell",
+				"max_duration": "1h",
+			}, body)
+
+			return &http.Response{
+				Status:     "202 Accepted",
+				StatusCode: http.StatusAccepted,
+				Body: io.NopCloser(strings.NewReader(`{
+					"debug_session": {
+						"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+						"name": "shell",
+						"status": "starting"
+					}
+				}`)),
+			}, nil
+		})
+
+		_, err := c.AttachDebugSession(api.AttachDebugSessionConfig{
+			TaskID:      "task-123",
+			Name:        "shell",
+			MaxDuration: "1h",
+		})
+
+		require.NoError(t, err)
+	})
+
 	t.Run("attaches a named session", func(t *testing.T) {
 		c := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
 			require.Equal(t, http.MethodPost, req.Method)
