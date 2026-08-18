@@ -240,6 +240,168 @@ CONFIG FILE
 	},
 }
 
+var sandboxSyncCmd = &cobra.Command{
+	Use:    "sync",
+	Short:  "Sync local changes to a sandbox",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		return requireAccessToken()
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		useJson := useJsonOutput()
+		result, err := service.SyncSandbox(cli.SyncSandboxConfig{
+			RunID: sandboxRunID,
+			Json:  useJson,
+		})
+		if err != nil {
+			return err
+		}
+
+		if useJson {
+			jsonOutput, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(jsonOutput))
+		}
+
+		return nil
+	},
+}
+
+var sandboxBackgroundCmd = &cobra.Command{
+	Use:    "background -- <command>",
+	Short:  "Start or replace a sandbox background process",
+	Hidden: true,
+	Long: `Start or replace a named managed process in an existing sandbox.
+Local changes are synced before the process starts. When --port is provided,
+the port is forwarded locally and its localhost URL is printed.`,
+	Args: cobra.ArbitraryArgs,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		return requireAccessToken()
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dashIndex := cmd.ArgsLenAtDash()
+		if dashIndex < 0 || dashIndex >= len(args) {
+			return fmt.Errorf("No command specified. Usage: rwx sandbox background -- <command>")
+		}
+		if dashIndex != 0 {
+			return fmt.Errorf("Unexpected arguments before '--'. Usage: rwx sandbox background -- <command>")
+		}
+
+		useJson := useJsonOutput()
+		result, err := service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command:    args[dashIndex:],
+			Name:       sandboxBackgroundName,
+			TargetPort: sandboxBackgroundPort,
+			LocalPort:  sandboxBackgroundLocalPort,
+			RunID:      sandboxRunID,
+			Json:       useJson,
+		})
+		if err != nil {
+			return err
+		}
+
+		if useJson {
+			output, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stdout, string(output))
+		}
+		return nil
+	},
+}
+
+var sandboxBackgroundRestartCmd = &cobra.Command{
+	Use:    "restart",
+	Short:  "Sync changes and restart a sandbox background process",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		return requireAccessToken()
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		useJson := useJsonOutput()
+		result, err := service.RestartSandboxBackground(cli.SandboxBackgroundConfig{
+			Name:  sandboxBackgroundName,
+			RunID: sandboxRunID,
+			Json:  useJson,
+		})
+		if err != nil {
+			return err
+		}
+		if useJson {
+			output, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stdout, string(output))
+		}
+		return nil
+	},
+}
+
+var sandboxBackgroundStopCmd = &cobra.Command{
+	Use:    "stop",
+	Short:  "Stop a sandbox background process",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		return requireAccessToken()
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		useJson := useJsonOutput()
+		result, err := service.StopSandboxBackground(cli.SandboxBackgroundConfig{
+			Name:  sandboxBackgroundName,
+			RunID: sandboxRunID,
+			Json:  useJson,
+		})
+		if err != nil {
+			return err
+		}
+		if useJson {
+			output, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stdout, string(output))
+		}
+		return nil
+	},
+}
+
+var sandboxBackgroundLogsCmd = &cobra.Command{
+	Use:    "logs",
+	Short:  "Show logs for a sandbox background process",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		return requireAccessToken()
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		useJson := useJsonOutput()
+		result, err := service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
+			Name:   sandboxBackgroundName,
+			RunID:  sandboxRunID,
+			Json:   useJson,
+			Follow: sandboxBackgroundFollow,
+		})
+		if err != nil {
+			return err
+		}
+		if useJson {
+			output, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stdout, string(output))
+		}
+		return nil
+	},
+}
+
 var sandboxListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List sandbox sessions with status",
@@ -389,19 +551,28 @@ var sandboxResetCmd = &cobra.Command{
 }
 
 var (
-	sandboxRunID      string
-	sandboxStopAll    bool
-	sandboxRwxDir     string
-	sandboxOpen       bool
-	sandboxWait       bool
-	sandboxReset      bool
-	sandboxInitParams []string
+	sandboxRunID               string
+	sandboxStopAll             bool
+	sandboxRwxDir              string
+	sandboxOpen                bool
+	sandboxWait                bool
+	sandboxReset               bool
+	sandboxBackgroundName      string
+	sandboxBackgroundPort      int
+	sandboxBackgroundLocalPort int
+	sandboxBackgroundFollow    bool
+	sandboxInitParams          []string
 )
 
 func init() {
 	sandboxCmd.AddCommand(sandboxInitCmd)
 	sandboxCmd.AddCommand(sandboxStartCmd)
 	sandboxCmd.AddCommand(sandboxExecCmd)
+	sandboxCmd.AddCommand(sandboxSyncCmd)
+	sandboxBackgroundCmd.AddCommand(sandboxBackgroundRestartCmd)
+	sandboxBackgroundCmd.AddCommand(sandboxBackgroundStopCmd)
+	sandboxBackgroundCmd.AddCommand(sandboxBackgroundLogsCmd)
+	sandboxCmd.AddCommand(sandboxBackgroundCmd)
 	sandboxCmd.AddCommand(sandboxListCmd)
 	sandboxCmd.AddCommand(sandboxStopCmd)
 	sandboxCmd.AddCommand(sandboxResetCmd)
@@ -423,6 +594,19 @@ func init() {
 	}
 	sandboxExecCmd.Flags().BoolVar(&sandboxReset, "reset", false, "Reset the sandbox before executing")
 	sandboxExecCmd.Flags().StringArrayVar(&sandboxInitParams, "init", []string{}, "initialization parameters for the sandbox run, available in the `init` context. Can be specified multiple times")
+
+	// sync flags
+	sandboxSyncCmd.Flags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")
+
+	// background flags
+	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")
+	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxBackgroundName, "name", "", "Name of the managed sandbox process")
+	sandboxBackgroundCmd.Flags().IntVar(&sandboxBackgroundPort, "port", 0, "Sandbox port to forward locally")
+	sandboxBackgroundCmd.Flags().IntVar(&sandboxBackgroundLocalPort, "local-port", 0, "Local port to use (default: allocate or reuse one)")
+	sandboxBackgroundLogsCmd.Flags().BoolVarP(&sandboxBackgroundFollow, "follow", "f", false, "Follow log output")
+	if err := sandboxBackgroundCmd.MarkPersistentFlagRequired("name"); err != nil {
+		panic(err)
+	}
 
 	// stop flags
 	sandboxStopCmd.Flags().StringVar(&sandboxRunID, "id", "", "Stop specific sandbox by run ID")
