@@ -19,6 +19,7 @@ type testSetup struct {
 	collector  *telemetry.Collector
 	mockAPI    *mocks.API
 	mockSSH    *mocks.SSH
+	mockTunnel *mocks.SSHTunnelManager
 	mockGit    *mocks.Git
 	mockDocker *mocks.DockerClient
 	mockStdin  *bytes.Buffer
@@ -63,6 +64,7 @@ func setupTest(t *testing.T) *testSetup {
 	require.NoError(t, os.Mkdir(filepath.Join(setup.tmp, ".rwx"), 0o755))
 	setup.mockAPI = new(mocks.API)
 	setup.mockSSH = new(mocks.SSH)
+	setup.mockTunnel = new(mocks.SSHTunnelManager)
 	setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
 		return 0, "", nil
 	}
@@ -80,6 +82,7 @@ func setupTest(t *testing.T) *testSetup {
 	setup.config = cli.Config{
 		APIClient:          setup.mockAPI,
 		SSHClient:          setup.mockSSH,
+		SSHTunnelManager:   setup.mockTunnel,
 		GitClient:          setup.mockGit,
 		DockerCLI:          setup.mockDocker,
 		TelemetryCollector: setup.collector,
