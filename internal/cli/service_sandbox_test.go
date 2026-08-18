@@ -1143,6 +1143,41 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		return setup, &commands
 	}
 
+	t.Run("validates names before contacting the sandbox", func(t *testing.T) {
+		setup := setupTest(t)
+		invalidName := "../web"
+		for action, run := range map[string]func() error{
+			"start": func() error {
+				_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{Name: invalidName, Command: []string{"bin/server"}})
+				return err
+			},
+			"restart": func() error {
+				_, err := setup.service.RestartSandboxBackground(cli.SandboxBackgroundConfig{Name: invalidName})
+				return err
+			},
+			"stop": func() error {
+				_, err := setup.service.StopSandboxBackground(cli.SandboxBackgroundConfig{Name: invalidName})
+				return err
+			},
+			"logs": func() error {
+				_, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{Name: invalidName})
+				return err
+			},
+		} {
+			t.Run(action, func(t *testing.T) {
+				require.EqualError(t, run(), "background process name may contain only letters, numbers, underscores, and hyphens")
+			})
+		}
+
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{Command: []string{"bin/server"}})
+		require.EqualError(t, err, "background process name is required")
+
+		_, err = setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Name: strings.Repeat("a", 256), Command: []string{"bin/server"},
+		})
+		require.EqualError(t, err, "background process name must be at most 255 bytes")
+	})
+
 	t.Run("syncs, starts a managed process, and opens a local tunnel", func(t *testing.T) {
 		setup, commands := setupBackground(t)
 		var tunnelConfig rwxssh.TunnelConfig

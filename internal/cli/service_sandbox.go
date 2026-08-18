@@ -28,6 +28,7 @@ const (
 	sandboxDirectiveProcessStop    = "__rwx_sandbox_process_stop__"
 	sandboxDirectiveProcessStatus  = "__rwx_sandbox_process_status__"
 	sandboxDirectiveProcessLogs    = "__rwx_sandbox_process_logs__"
+	sandboxBackgroundNameSizeLimit = 255
 	rwxCLISSHUser                  = "rwx-cli"
 	// Reuse one fixed ref (force-pushed) rather than a unique ref per push so the
 	// sandbox's ref namespace doesn't accumulate dangling refs.
@@ -542,8 +543,8 @@ func (s Service) SyncSandbox(cfg SyncSandboxConfig) (*SyncSandboxResult, error) 
 }
 
 func (s Service) BackgroundSandbox(cfg BackgroundSandboxConfig) (*SandboxBackgroundResult, error) {
-	if strings.TrimSpace(cfg.Name) == "" {
-		return nil, fmt.Errorf("background process name is required")
+	if err := validateSandboxBackgroundName(cfg.Name); err != nil {
+		return nil, err
 	}
 	if cfg.TargetPort < 0 || cfg.TargetPort > 65535 {
 		return nil, fmt.Errorf("background process port must be between 1 and 65535")
@@ -587,8 +588,8 @@ func (s Service) BackgroundSandbox(cfg BackgroundSandboxConfig) (*SandboxBackgro
 }
 
 func (s Service) RestartSandboxBackground(cfg SandboxBackgroundConfig) (*SandboxBackgroundResult, error) {
-	if strings.TrimSpace(cfg.Name) == "" {
-		return nil, fmt.Errorf("background process name is required")
+	if err := validateSandboxBackgroundName(cfg.Name); err != nil {
+		return nil, err
 	}
 	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
 		RunID:           cfg.RunID,
@@ -612,8 +613,8 @@ func (s Service) RestartSandboxBackground(cfg SandboxBackgroundConfig) (*Sandbox
 }
 
 func (s Service) StopSandboxBackground(cfg SandboxBackgroundConfig) (*SandboxBackgroundResult, error) {
-	if strings.TrimSpace(cfg.Name) == "" {
-		return nil, fmt.Errorf("background process name is required")
+	if err := validateSandboxBackgroundName(cfg.Name); err != nil {
+		return nil, err
 	}
 	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
 		RunID:           cfg.RunID,
@@ -654,8 +655,8 @@ func (s Service) StopSandboxBackground(cfg SandboxBackgroundConfig) (*SandboxBac
 }
 
 func (s Service) LogsSandboxBackground(cfg SandboxBackgroundLogsConfig) (*SandboxBackgroundResult, error) {
-	if strings.TrimSpace(cfg.Name) == "" {
-		return nil, fmt.Errorf("background process name is required")
+	if err := validateSandboxBackgroundName(cfg.Name); err != nil {
+		return nil, err
 	}
 	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
 		RunID:           cfg.RunID,
@@ -798,6 +799,23 @@ func sandboxBackgroundResult(runID string, process sandboxProcessResponse) *Sand
 		PID: process.PID, PGID: process.PGID, StartedAt: process.StartedAt, CompletedAt: process.CompletedAt,
 		ExitCode: process.ExitCode, Signal: process.Signal, StdoutPath: process.StdoutPath, StderrPath: process.StderrPath,
 	}
+}
+
+func validateSandboxBackgroundName(name string) error {
+	if name == "" {
+		return fmt.Errorf("background process name is required")
+	}
+	if len(name) > sandboxBackgroundNameSizeLimit {
+		return fmt.Errorf("background process name must be at most %d bytes", sandboxBackgroundNameSizeLimit)
+	}
+	for _, char := range name {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-' || char == '_' {
+			continue
+		}
+		return fmt.Errorf("background process name may contain only letters, numbers, underscores, and hyphens")
+	}
+	return nil
 }
 
 func sandboxTunnelStateDirectory() (string, error) {
