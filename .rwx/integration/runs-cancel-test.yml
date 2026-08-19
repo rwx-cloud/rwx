@@ -1,0 +1,151 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.1.1
+
+tasks:
+  - key: code
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: test-runs-cancel
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      # Seeds a run whose only task sleeps, so the run stays active long enough
+      # to cancel. Echoes the run ID.
+      seed_run() {
+        local label="$1" kickoff run_id run_url
+        kickoff=$(rwx run "$RUN_DEF" --json)
+        run_id=$(echo "$kickoff" | jq -r '.RunID')
+        run_url=$(echo "$kickoff" | jq -r '.RunURL // empty')
+        echo "$run_url" > "$RWX_LINKS/$label"
+
+        if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+          echo "Failed to get RunID from kickoff"
+          echo "$kickoff"
+          exit 1
+        fi
+
+        echo "$run_id"
+      }
+
+      run_status() {
+        rwx runs list --limit 100 --json | jq -c --arg id "$1" '.Runs[] | select(.ID == $id) | .Status'
+      }
+
+      # The API accepts the cancellation before it stops the run, so the status
+      # settles a few seconds later. The test polls instead of reading once.
+      wait_for_aborted() {
+        local run_id="$1" status execution
+        for _ in $(seq 1 30); do
+          status=$(run_status "$run_id")
+          execution=$(echo "$status" | jq -r '.Execution')
+          if [ "$execution" != "waiting" ] && [ "$execution" != "in_progress" ]; then
+            if [ "$execution" != "aborted" ]; then
+              echo "Expected execution 'aborted' for cancelled run $run_id, got '$execution'"
+              echo "$status"
+              exit 1
+            fi
+            if [ "$(echo "$status" | jq -r '.AbortedSubStatus')" != "cancelled" ]; then
+              echo "Expected AbortedSubStatus 'cancelled' for run $run_id"
+              echo "$status"
+              exit 1
+            fi
+            return 0
+          fi
+          sleep 5
+        done
+
+        echo "Run $run_id did not reach an aborted status after the cancellation"
+        run_status "$run_id"
+        exit 1
+      }
+
+      # 'rwx runs cancel' cancels an active run and names it on stdout.
+      run_id=$(seed_run "Cancelled Run URL")
+      out=$(rwx runs cancel "$run_id")
+      if ! echo "$out" | grep -q "$run_id"; then
+        echo "Expected the cancel output to name run $run_id"
+        echo "$out"
+        exit 1
+      fi
+      wait_for_aborted "$run_id"
+
+      # Cancelling the same run twice is rejected, because the first request
+      # already applied.
+      exit_code=0
+      out=$(rwx runs cancel "$run_id" 2>&1) || exit_code=$?
+      if [ "$exit_code" -eq 0 ]; then
+        echo "Expected a non-zero exit when cancelling an already-cancelled run"
+        echo "$out"
+        exit 1
+      fi
+      if ! echo "$out" | grep -qi "cancel"; then
+        echo "Expected the repeat-cancel error to mention cancellation"
+        echo "$out"
+        exit 1
+      fi
+
+      # 'rwx cancel' is the top-level form of the same command. It reports the
+      # run ID under --json.
+      alias_run_id=$(seed_run "Alias Cancelled Run URL")
+      alias_json=$(rwx cancel "$alias_run_id" --json)
+      if [ "$(echo "$alias_json" | jq -r '.RunID')" != "$alias_run_id" ]; then
+        echo "Expected .RunID $alias_run_id from 'rwx cancel --json'"
+        echo "$alias_json"
+        exit 1
+      fi
+      wait_for_aborted "$alias_run_id"
+
+      # An unknown run ID surfaces the API's not-found error.
+      exit_code=0
+      out=$(rwx runs cancel 00000000000000000000000000000000 2>&1) || exit_code=$?
+      if [ "$exit_code" -eq 0 ]; then
+        echo "Expected a non-zero exit for an unknown run ID"
+        echo "$out"
+        exit 1
+      fi
+      if ! echo "$out" | grep -qi "not found"; then
+        echo "Expected the unknown-run error to mention that the run was not found"
+        echo "$out"
+        exit 1
+      fi
+
+      # The run ID is required, so a bare invocation fails before any API call.
+      exit_code=0
+      out=$(rwx runs cancel 2>&1) || exit_code=$?
+      if [ "$exit_code" -eq 0 ]; then
+        echo "Expected a non-zero exit when no run ID is given"
+        echo "$out"
+        exit 1
+      fi
+      if ! echo "$out" | grep -q "accepts 1 arg"; then
+        echo "Expected the missing-argument error to report that 1 arg is accepted"
+        echo "$out"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RUN_DEF: ${{ run.dir }}/integration/runs-cancel-test/cancellable.yml

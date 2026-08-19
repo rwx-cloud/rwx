@@ -28,6 +28,11 @@ tasks:
     init:
       ref: ${{ init.commit-sha }}
 
+  - key: run-rwx-runs-cancel-test
+    call: ${{ run.dir }}/integration/runs-cancel-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
   - key: run-rwx-dispatch-test
     call: ${{ run.dir }}/integration/dispatch-test.yml
     init:
