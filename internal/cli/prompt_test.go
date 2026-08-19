@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,12 +28,14 @@ func TestBubbleTeaChoicePicker(t *testing.T) {
 		require.Contains(t, output.String(), "enter confirm")
 	})
 
-	t.Run("rejects an empty multi-selection", func(t *testing.T) {
-		picker := newBubbleTeaChoicePicker(bytes.NewBufferString("\r"), new(strings.Builder))
+	t.Run("keeps the prompt open after an empty multi-selection", func(t *testing.T) {
+		model := newSelectionPromptModel("Select tool caches:", choices, true)
 
-		selected, err := picker.PickMany("Select tool caches:", choices)
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		result := updated.(selectionPromptModel)
 
-		require.Nil(t, selected)
-		require.EqualError(t, err, "no options selected")
+		require.Nil(t, command)
+		require.False(t, result.submitted)
+		require.Contains(t, result.View(), "Select at least one option.")
 	})
 }

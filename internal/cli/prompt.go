@@ -25,13 +25,14 @@ type bubbleTeaChoicePicker struct {
 }
 
 type selectionPromptModel struct {
-	title     string
-	choices   []Choice
-	cursor    int
-	selected  map[int]bool
-	multiple  bool
-	submitted bool
-	cancelled bool
+	title      string
+	choices    []Choice
+	cursor     int
+	selected   map[int]bool
+	multiple   bool
+	submitted  bool
+	cancelled  bool
+	validation string
 }
 
 func newBubbleTeaChoicePicker(input io.Reader, output io.Writer) ChoicePicker {
@@ -69,8 +70,13 @@ func (m selectionPromptModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case " ":
 		if m.multiple {
 			m.selected[m.cursor] = !m.selected[m.cursor]
+			m.validation = ""
 		}
 	case "enter":
+		if m.multiple && !m.hasSelection() {
+			m.validation = "Select at least one option."
+			return m, nil
+		}
 		if !m.multiple {
 			m.selected[m.cursor] = true
 		}
@@ -82,6 +88,15 @@ func (m selectionPromptModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m selectionPromptModel) hasSelection() bool {
+	for _, selected := range m.selected {
+		if selected {
+			return true
+		}
+	}
+	return false
 }
 
 func (m selectionPromptModel) View() string {
@@ -110,7 +125,12 @@ func (m selectionPromptModel) View() string {
 		}
 	}
 
-	view.WriteString("\n↑/↓ move • ")
+	view.WriteString("\n")
+	if m.validation != "" {
+		view.WriteString(m.validation)
+		view.WriteString("\n\n")
+	}
+	view.WriteString("↑/↓ move • ")
 	if m.multiple {
 		view.WriteString("space toggle • enter confirm")
 	} else {
