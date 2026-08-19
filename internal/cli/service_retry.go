@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"bufio"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/rwx-cloud/rwx/internal/api"
@@ -36,12 +34,8 @@ func (s Service) Retry(cfg RetryConfig) (*api.RequestRetryResult, error) {
 	}
 
 	interactive := s.StdoutIsTTY && !cfg.OutputJSON
-	var input *bufio.Reader
-	if interactive {
-		input = bufio.NewReader(s.Stdin)
-	}
 
-	request, err := s.selectRetryRequest(input, interactive, cfg, options)
+	request, err := s.selectRetryRequest(interactive, cfg, options)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +52,7 @@ func (s Service) Retry(cfg RetryConfig) (*api.RequestRetryResult, error) {
 		fmt.Fprintln(s.Stdout, "The available retry options changed.")
 		fmt.Fprintln(s.Stdout)
 
-		request, err = s.selectRetryRequest(input, true, RetryConfig{Target: cfg.Target}, requestErr.Options)
+		request, err = s.selectRetryRequest(true, RetryConfig{Target: cfg.Target}, requestErr.Options)
 		if err != nil {
 			return nil, err
 		}
@@ -77,7 +71,6 @@ func (s Service) Retry(cfg RetryConfig) (*api.RequestRetryResult, error) {
 }
 
 func (s Service) selectRetryRequest(
-	input *bufio.Reader,
 	interactive bool,
 	cfg RetryConfig,
 	options api.RetryOptions,
@@ -98,7 +91,7 @@ func (s Service) selectRetryRequest(
 		if !interactive {
 			return api.RequestRetryConfig{}, retryActionSelectionError("retry action selection is required", cfg.Target, options.Actions)
 		}
-		selected, err := s.promptForRetryAction(input, options.Actions)
+		selected, err := s.promptForRetryAction(options.Actions)
 		if err != nil {
 			return api.RequestRetryConfig{}, err
 		}
@@ -121,7 +114,7 @@ func (s Service) selectRetryRequest(
 					options.ToolCaches,
 				)
 			}
-			selected, err := s.promptForRetryToolCaches(input, options.ToolCaches)
+			selected, err := s.promptForRetryToolCaches(options.ToolCaches)
 			if err != nil {
 				return api.RequestRetryConfig{}, err
 			}
@@ -160,65 +153,47 @@ func (c RetryConfig) bare() bool {
 		c.DebugPlacement == ""
 }
 
-func (s Service) promptForRetryAction(input *bufio.Reader, actions []api.RetryAction) (string, error) {
+func (s Service) promptForRetryAction(actions []api.RetryAction) (string, error) {
 	if len(actions) == 0 {
 		return "", retryBadRequest("no retry actions are available")
 	}
 
-	fmt.Fprintln(s.Stdout, "Select a retry action:")
-	for index, action := range actions {
-		fmt.Fprintf(s.Stdout, "  %d. %s (%s)\n", index+1, action.Label, action.Value)
-		if action.Description != "" {
-			fmt.Fprintf(s.Stdout, "     %s\n", action.Description)
-		}
+	choices := make([]Choice, 0, len(actions))
+	for _, action := range actions {
+		choices = append(choices, Choice{
+			Label:       fmt.Sprintf("%s (%s)", action.Label, action.Value),
+			Description: action.Description,
+		})
 	}
-	fmt.Fprintln(s.Stdout)
-	fmt.Fprintf(s.Stdout, "Enter a number (1-%d): ", len(actions))
 
-	choice, err := readRetryChoice(input, len(actions), "retry action")
+	selected, err := s.ChoicePicker.PickOne("Select a retry action:", choices)
 	if err != nil {
-		return "", err
+		return "", retryBadRequest(err.Error())
 	}
-	return actions[choice-1].Value, nil
+	return actions[selected].Value, nil
 }
 
-func (s Service) promptForRetryToolCaches(input *bufio.Reader, caches []api.RetryToolCache) ([]string, error) {
+func (s Service) promptForRetryToolCaches(caches []api.RetryToolCache) ([]string, error) {
 	if len(caches) == 0 {
 		return nil, retryBadRequest("no tool caches are available")
 	}
 
-	fmt.Fprintln(s.Stdout, "Select one or more tool caches:")
-	for index, cache := range caches {
-		fmt.Fprintf(s.Stdout, "  %d. %s\n", index+1, cache.Name)
-		if cache.UsageDescription != "" {
-			fmt.Fprintf(s.Stdout, "     %s\n", cache.UsageDescription)
-		}
+	choices := make([]Choice, 0, len(caches))
+	for _, cache := range caches {
+		choices = append(choices, Choice{
+			Label:       cache.Name,
+			Description: cache.UsageDescription,
+		})
 	}
-	fmt.Fprintln(s.Stdout)
-	fmt.Fprintf(s.Stdout, "Enter numbers separated by commas (1-%d): ", len(caches))
 
-	line, err := readRetryLine(input, "no tool caches selected")
+	selectedIndexes, err := s.ChoicePicker.PickMany("Select one or more tool caches:", choices)
 	if err != nil {
-		return nil, err
-	}
-	parts := strings.FieldsFunc(line, func(r rune) bool {
-		return r == ',' || r == ' ' || r == '\t'
-	})
-	if len(parts) == 0 {
-		return nil, retryBadRequest("no tool caches selected")
+		return nil, retryBadRequest(err.Error())
 	}
 
-	selected := make([]string, 0, len(parts))
-	seen := make(map[int]bool)
-	for _, part := range parts {
-		choice, err := strconv.Atoi(part)
-		if err != nil || choice < 1 || choice > len(caches) {
-			return nil, retryBadRequest(fmt.Sprintf("invalid tool cache selection: %s", line))
-		}
-		if !seen[choice] {
-			selected = append(selected, caches[choice-1].Name)
-			seen[choice] = true
-		}
+	selected := make([]string, 0, len(selectedIndexes))
+	for _, index := range selectedIndexes {
+		selected = append(selected, caches[index].Name)
 	}
 	return selected, nil
 }
@@ -244,26 +219,6 @@ func selectRetryDebugOptions(placement string, options api.RetryDebugOptions) (*
 	}
 	enabled := true
 	return &enabled, placement, nil
-}
-
-func readRetryChoice(input *bufio.Reader, count int, selectionName string) (int, error) {
-	line, err := readRetryLine(input, fmt.Sprintf("no %s selected", selectionName))
-	if err != nil {
-		return 0, err
-	}
-	choice, err := strconv.Atoi(line)
-	if err != nil || choice < 1 || choice > count {
-		return 0, retryBadRequest(fmt.Sprintf("invalid %s selection: %s", selectionName, line))
-	}
-	return choice, nil
-}
-
-func readRetryLine(input *bufio.Reader, emptyMessage string) (string, error) {
-	line, err := input.ReadString('\n')
-	if err != nil && line == "" {
-		return "", retryBadRequest(emptyMessage)
-	}
-	return strings.TrimSpace(line), nil
 }
 
 func retryActionAvailable(value string, actions []api.RetryAction) bool {

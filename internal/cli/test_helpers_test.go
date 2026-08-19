@@ -28,6 +28,19 @@ type testSetup struct {
 	originalWd string
 }
 
+type choicePickerStub struct {
+	pickOne  func(title string, choices []cli.Choice) (int, error)
+	pickMany func(title string, choices []cli.Choice) ([]int, error)
+}
+
+func (p choicePickerStub) PickOne(title string, choices []cli.Choice) (int, error) {
+	return p.pickOne(title, choices)
+}
+
+func (p choicePickerStub) PickMany(title string, choices []cli.Choice) ([]int, error) {
+	return p.pickMany(title, choices)
+}
+
 // absConfig returns an absolute config file path rooted in the test's temp directory.
 func (s *testSetup) absConfig(relPath string) string {
 	return filepath.Join(s.tmp, relPath)

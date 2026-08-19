@@ -186,7 +186,26 @@ Choose one or more tool caches and retry:
 
 	t.Run("prompts for retry actions and tool caches in a TTY", func(t *testing.T) {
 		setup := setupTestWithTTY(t)
-		_, err := setup.mockStdin.WriteString("2\n1,2\n")
+		setup.config.ChoicePicker = choicePickerStub{
+			pickOne: func(title string, choices []cli.Choice) (int, error) {
+				require.Equal(t, "Select a retry action:", title)
+				require.Equal(t, []cli.Choice{
+					{Label: "Standard retry (standard)", Description: "The task will run again."},
+					{Label: "Retry without tool caches (no-tool-cache)", Description: "Only affected tasks will run again."},
+				}, choices)
+				return 1, nil
+			},
+			pickMany: func(title string, choices []cli.Choice) ([]int, error) {
+				require.Equal(t, "Select one or more tool caches:", title)
+				require.Equal(t, []cli.Choice{
+					{Label: "bundler", Description: "Used by test"},
+					{Label: "golang", Description: "Used by 2 tasks"},
+				}, choices)
+				return []int{0, 1}, nil
+			},
+		}
+		var err error
+		setup.service, err = cli.NewService(setup.config)
 		require.NoError(t, err)
 
 		setup.mockAPI.MockGetRetryOptions = func(target api.RetryTarget) (api.RetryOptions, error) {
@@ -206,12 +225,7 @@ Choose one or more tool caches and retry:
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		output := setup.mockStdout.String()
-		require.Contains(t, output, "Select a retry action:")
-		require.Contains(t, output, "2. Retry without tool caches (no-tool-cache)")
-		require.Contains(t, output, "Select one or more tool caches:")
-		require.NotContains(t, output, "Open a breakpoint?")
-		require.NotContains(t, output, "Select breakpoint placement:")
+		require.Empty(t, setup.mockStdout.String())
 	})
 
 	t.Run("enables debugging at the selected placement", func(t *testing.T) {
