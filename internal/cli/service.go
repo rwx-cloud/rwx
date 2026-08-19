@@ -49,6 +49,9 @@ func NewService(cfg Config) (Service, error) {
 	if err := cfg.Validate(); err != nil {
 		return Service{}, errors.Wrap(err, "validation failed")
 	}
+	if cfg.ChoicePicker == nil {
+		cfg.ChoicePicker = newBubbleTeaChoicePicker(cfg.Stdin, cfg.Stdout)
+	}
 
 	svc := Service{cfg}
 	svc.outputLatestVersionMessage()

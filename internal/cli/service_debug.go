@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"bufio"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -155,24 +153,16 @@ func (s Service) getDebugConnectionInfo(cfg DebugTaskConfig) (api.DebugConnectio
 }
 
 func (s Service) promptForDebugSession(sessions []api.DebugSessionSummary) (api.DebugSessionSummary, error) {
-	fmt.Fprintln(s.Stdout, "Select a debug session:")
-	for index, session := range sessions {
-		fmt.Fprintf(s.Stdout, "  %d. %s\n", index+1, debugSessionLabel(session))
-	}
-	fmt.Fprintln(s.Stdout)
-	fmt.Fprintf(s.Stdout, "Enter a number (1-%d): ", len(sessions))
-
-	scanner := bufio.NewScanner(s.Stdin)
-	if !scanner.Scan() {
-		return api.DebugSessionSummary{}, errors.New("no debug session selected")
+	choices := make([]Choice, 0, len(sessions))
+	for _, session := range sessions {
+		choices = append(choices, Choice{Label: debugSessionLabel(session)})
 	}
 
-	choice, err := strconv.Atoi(strings.TrimSpace(scanner.Text()))
-	if err != nil || choice < 1 || choice > len(sessions) {
-		return api.DebugSessionSummary{}, errors.Errorf("invalid debug session selection: %s", scanner.Text())
+	selected, err := s.ChoicePicker.PickOne("Select a debug session:", choices)
+	if err != nil {
+		return api.DebugSessionSummary{}, err
 	}
-
-	return sessions[choice-1], nil
+	return sessions[selected], nil
 }
 
 func debugSessionSelectionError(debugKey string, sessions []api.DebugSessionSummary) error {

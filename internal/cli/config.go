@@ -23,6 +23,7 @@ type Config struct {
 	VersionsBackend      versions.Backend
 	SkillVersionsBackend versions.Backend
 	TelemetryCollector   *telemetry.Collector
+	ChoicePicker         ChoicePicker
 	Stdin                io.Reader
 	Stdout               io.Writer
 	StdoutIsTTY          bool
