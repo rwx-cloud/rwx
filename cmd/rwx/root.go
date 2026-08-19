@@ -236,6 +236,7 @@ func init() {
 	rootCmd.AddCommand(packagesCmd)
 	rootCmd.AddCommand(pushCmd)
 	rootCmd.AddCommand(resolveCmd)
+	rootCmd.AddCommand(retryCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(sandboxCmd)
 	rootCmd.AddCommand(skillCmd)

@@ -43,6 +43,8 @@ type APIClient interface {
 	RunStatus(api.RunStatusConfig) (api.RunStatusResult, error)
 	GetRunDetails(api.RunDetailsConfig) (map[string]any, error)
 	ListRuns(api.ListRunsConfig) (*api.ListRunsResult, error)
+	GetRetryOptions(api.RetryTarget) (api.RetryOptions, error)
+	RequestRetry(api.RequestRetryConfig) (api.RequestRetryResult, error)
 	GetLogDownloadRequest(taskId string) (api.LogDownloadRequestResult, error)
 	GetLogDownloadRequestByTaskKey(runID, taskKey string) (api.LogDownloadRequestResult, error)
 	DownloadLogs(api.LogDownloadRequestResult, ...int) ([]byte, error)

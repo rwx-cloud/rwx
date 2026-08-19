@@ -40,6 +40,8 @@ type API struct {
 	MockRunStatus                               func(api.RunStatusConfig) (api.RunStatusResult, error)
 	MockGetRunDetails                           func(api.RunDetailsConfig) (map[string]any, error)
 	MockListRuns                                func(api.ListRunsConfig) (*api.ListRunsResult, error)
+	MockGetRetryOptions                         func(api.RetryTarget) (api.RetryOptions, error)
+	MockRequestRetry                            func(api.RequestRetryConfig) (api.RequestRetryResult, error)
 	MockGetLogDownloadRequest                   func(string) (api.LogDownloadRequestResult, error)
 	MockGetLogDownloadRequestByTaskKey          func(string, string) (api.LogDownloadRequestResult, error)
 	MockDownloadLogs                            func(api.LogDownloadRequestResult) ([]byte, error)
@@ -416,6 +418,22 @@ func (c *API) CancelRun(runID, scopedToken string) error {
 	}
 
 	return errors.New("MockCancelRun was not configured")
+}
+
+func (c *API) GetRetryOptions(target api.RetryTarget) (api.RetryOptions, error) {
+	if c.MockGetRetryOptions != nil {
+		return c.MockGetRetryOptions(target)
+	}
+
+	return api.RetryOptions{}, errors.New("MockGetRetryOptions was not configured")
+}
+
+func (c *API) RequestRetry(cfg api.RequestRetryConfig) (api.RequestRetryResult, error) {
+	if c.MockRequestRetry != nil {
+		return c.MockRequestRetry(cfg)
+	}
+
+	return api.RequestRetryResult{}, errors.New("MockRequestRetry was not configured")
 }
 
 func (c *API) GetSandboxInitTemplate() (api.SandboxInitTemplateResult, error) {
