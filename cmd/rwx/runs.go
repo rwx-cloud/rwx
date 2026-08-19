@@ -44,6 +44,7 @@ func init() {
 	runsCmd.AddCommand(runsStartCmd)
 	runsCmd.AddCommand(runsShowCmd)
 	runsCmd.AddCommand(runsListCmd)
+	runsCmd.AddCommand(runsCancelCmd)
 
 	rootCmd.AddCommand(runsCmd)
 }

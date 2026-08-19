@@ -55,3 +55,50 @@ func TestService_ListRuns(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestService_CancelRun(t *testing.T) {
+	t.Run("passes the run ID through to the API with no scoped token", func(t *testing.T) {
+		setup := setupTest(t)
+
+		called := false
+		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+			called = true
+			require.Equal(t, "run-123", runID)
+			require.Empty(t, scopedToken)
+			return nil
+		}
+
+		result, err := setup.service.CancelRun(cli.CancelRunConfig{RunID: "run-123"})
+
+		require.NoError(t, err)
+		require.True(t, called)
+		require.Equal(t, "run-123", result.RunID)
+	})
+
+	t.Run("returns an error when the run ID is missing", func(t *testing.T) {
+		setup := setupTest(t)
+
+		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+			t.Fatal("the API must not be called without a run ID")
+			return nil
+		}
+
+		result, err := setup.service.CancelRun(cli.CancelRunConfig{})
+
+		require.Nil(t, result)
+		require.Error(t, err)
+	})
+
+	t.Run("returns an error when the API fails", func(t *testing.T) {
+		setup := setupTest(t)
+
+		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+			return errors.New("run is already finished")
+		}
+
+		result, err := setup.service.CancelRun(cli.CancelRunConfig{RunID: "run-123"})
+
+		require.Nil(t, result)
+		require.ErrorContains(t, err, "run is already finished")
+	})
+}
