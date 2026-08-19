@@ -14,7 +14,6 @@ import (
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/git"
 	"github.com/rwx-cloud/rwx/internal/skill"
-	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
 	"github.com/rwx-cloud/rwx/internal/versions"
 )
 
@@ -47,9 +46,6 @@ type Service struct {
 }
 
 func NewService(cfg Config) (Service, error) {
-	if cfg.SSHTunnelManager == nil {
-		cfg.SSHTunnelManager = rwxssh.NewTunnelManager()
-	}
 	if err := cfg.Validate(); err != nil {
 		return Service{}, errors.Wrap(err, "validation failed")
 	}

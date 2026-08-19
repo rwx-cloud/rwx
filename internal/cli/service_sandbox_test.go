@@ -3761,15 +3761,16 @@ func TestService_ExecSandbox_ConcurrentAutoCreate(t *testing.T) {
 		stdout2 := &strings.Builder{}
 		stderr2 := &strings.Builder{}
 		service2, err := cli.NewService(cli.Config{
-			APIClient:   setup.mockAPI,
-			SSHClient:   setup.mockSSH,
-			GitClient:   setup.mockGit,
-			DockerCLI:   setup.mockDocker,
-			Stdin:       &bytes.Buffer{},
-			Stdout:      stdout2,
-			StdoutIsTTY: false,
-			Stderr:      stderr2,
-			StderrIsTTY: false,
+			APIClient:        setup.mockAPI,
+			SSHClient:        setup.mockSSH,
+			SSHTunnelManager: setup.mockTunnel,
+			GitClient:        setup.mockGit,
+			DockerCLI:        setup.mockDocker,
+			Stdin:            &bytes.Buffer{},
+			Stdout:           stdout2,
+			StdoutIsTTY:      false,
+			Stderr:           stderr2,
+			StderrIsTTY:      false,
 		})
 		require.NoError(t, err)
 

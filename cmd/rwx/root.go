@@ -86,8 +86,9 @@ var (
 			}
 
 			service, err = cli.NewService(cli.Config{
-				APIClient: c,
-				SSHClient: new(ssh.Client),
+				APIClient:        c,
+				SSHClient:        new(ssh.Client),
+				SSHTunnelManager: ssh.NewTunnelManager(),
 				GitClient: &git.Client{
 					Binary: "git",
 					Dir:    dir,

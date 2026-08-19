@@ -42,6 +42,10 @@ func (c Config) Validate() error {
 		return errors.New("missing SSH client constructor")
 	}
 
+	if c.SSHTunnelManager == nil {
+		return errors.New("missing SSH tunnel manager")
+	}
+
 	if c.GitClient == nil {
 		return errors.New("missing Git client constructor")
 	}
