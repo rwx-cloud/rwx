@@ -6,6 +6,7 @@ import (
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
+	internalErrors "github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -62,6 +63,15 @@ func newRetryCommand(use, short string, targetType api.RetryTargetType, groupID 
 				OutputJSON:       useJsonOutput(),
 			})
 			if err != nil {
+				var requestErr *api.RetryRequestError
+				if useJsonOutput() && internalErrors.As(err, &requestErr) {
+					encoded, encodeErr := json.Marshal(requestErr)
+					if encodeErr != nil {
+						return encodeErr
+					}
+					fmt.Fprintln(service.Stdout, string(encoded))
+					return internalErrors.WrapSentinel(requestErr, HandledError)
+				}
 				return err
 			}
 

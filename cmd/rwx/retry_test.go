@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
+	internalErrors "github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
@@ -93,4 +95,47 @@ func TestRetryCommandPassesFlagSelectionsToService(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "Retry requested for task task-123\n", stdout.String())
+}
+
+func TestRetryCommandOutputsEndpointErrorAsJSON(t *testing.T) {
+	originalService := service
+	originalFormat := Format
+	t.Cleanup(func() {
+		service = originalService
+		Format = originalFormat
+	})
+
+	options := api.RetryOptions{
+		Retryable:  true,
+		Kinds:      []api.RetryKind{{Value: "standard", Label: "Standard retry"}},
+		Debug:      api.RetryDebugOptions{Placements: []string{}},
+		ToolCaches: []api.RetryToolCache{},
+	}
+	mockAPI := new(mocks.API)
+	mockAPI.MockGetRetryOptions = func(target api.RetryTarget) (api.RetryOptions, error) {
+		return options, nil
+	}
+	mockAPI.MockRequestRetry = func(cfg api.RequestRetryConfig) (api.RequestRetryResult, error) {
+		return api.RequestRetryResult{}, &api.RetryRequestError{
+			Message: "This retry configuration is not supported.",
+			Errors:  []api.RetryFieldError{{Field: "kind", Message: "Choose `standard`."}},
+			Options: options,
+		}
+	}
+
+	var stdout strings.Builder
+	service = cli.Service{Config: cli.Config{APIClient: mockAPI, Stdout: &stdout}}
+	Format = "json"
+	cmd := newRetryCommand("retry [flags] <task-id>", "Retry a task", api.RetryTargetTask, "")
+	require.NoError(t, cmd.Flags().Parse([]string{"--kind", "standard"}))
+
+	err := cmd.RunE(cmd, []string{"task-123"})
+
+	require.ErrorIs(t, err, HandledError)
+	require.ErrorIs(t, err, internalErrors.ErrBadRequest)
+	var output map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout.String()), &output))
+	require.Equal(t, "This retry configuration is not supported.", output["error"])
+	require.Equal(t, "Choose `standard`.", output["errors"].([]any)[0].(map[string]any)["message"])
+	require.Equal(t, "standard", output["options"].(map[string]any)["kinds"].([]any)[0].(map[string]any)["value"])
 }
