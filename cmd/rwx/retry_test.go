@@ -34,9 +34,12 @@ func TestRetryCommandsAreRegistered(t *testing.T) {
 			require.Error(t, cmd.Args(cmd, nil))
 			require.Error(t, cmd.Args(cmd, []string{"one", "two"}))
 
-			for _, flag := range []string{"kind", "without-tool-cache", "debug", "debug-placement"} {
+			for _, flag := range []string{"action", "without-tool-cache", "debug"} {
 				require.NotNil(t, cmd.Flags().Lookup(flag), "retry should expose --%s", flag)
 			}
+			require.Nil(t, cmd.Flags().Lookup("kind"))
+			require.Equal(t, "string", cmd.Flags().Lookup("debug").Value.Type())
+			require.Nil(t, cmd.Flags().Lookup("debug-placement"))
 		})
 	}
 
@@ -59,18 +62,20 @@ func TestRetryCommandPassesFlagSelectionsToService(t *testing.T) {
 		require.Equal(t, api.RetryTarget{ID: "task-123", Type: api.RetryTargetTask}, target)
 		return api.RetryOptions{
 			Retryable: true,
-			Kinds: []api.RetryKind{{
+			Actions: []api.RetryAction{{
 				Value: "no-tool-cache",
 				Label: "Retry without tool caches",
 			}},
+			Debug:      api.RetryDebugOptions{Supported: true, Placements: []string{"end", "start"}},
 			ToolCaches: []api.RetryToolCache{{Name: "bundler"}, {Name: "golang"}},
 		}, nil
 	}
 	mockAPI.MockRequestRetry = func(cfg api.RequestRetryConfig) (api.RequestRetryResult, error) {
-		require.Equal(t, "no-tool-cache", cfg.Kind)
+		require.Equal(t, "no-tool-cache", cfg.Action)
 		require.Equal(t, []string{"bundler", "golang"}, cfg.ToolCacheNames)
 		require.NotNil(t, cfg.Debug)
-		require.False(t, *cfg.Debug)
+		require.True(t, *cfg.Debug)
+		require.Equal(t, "start", cfg.DebugPlacement)
 		return api.RequestRetryResult{
 			Status: "retry_requested",
 			RunID:  "run-123",
@@ -85,10 +90,10 @@ func TestRetryCommandPassesFlagSelectionsToService(t *testing.T) {
 	}}
 	cmd := newRetryCommand("retry [flags] <task-id>", "Retry a task", api.RetryTargetTask, "")
 	require.NoError(t, cmd.Flags().Parse([]string{
-		"--kind", "no-tool-cache",
+		"--action", "no-tool-cache",
 		"--without-tool-cache", "bundler",
 		"--without-tool-cache", "golang",
-		"--debug=false",
+		"--debug", "start",
 	}))
 
 	err := cmd.RunE(cmd, []string{"task-123"})
@@ -107,7 +112,7 @@ func TestRetryCommandOutputsEndpointErrorAsJSON(t *testing.T) {
 
 	options := api.RetryOptions{
 		Retryable:  true,
-		Kinds:      []api.RetryKind{{Value: "standard", Label: "Standard retry"}},
+		Actions:    []api.RetryAction{{Value: "standard", Label: "Standard retry"}},
 		Debug:      api.RetryDebugOptions{Placements: []string{}},
 		ToolCaches: []api.RetryToolCache{},
 	}
@@ -118,7 +123,7 @@ func TestRetryCommandOutputsEndpointErrorAsJSON(t *testing.T) {
 	mockAPI.MockRequestRetry = func(cfg api.RequestRetryConfig) (api.RequestRetryResult, error) {
 		return api.RequestRetryResult{}, &api.RetryRequestError{
 			Message: "This retry configuration is not supported.",
-			Errors:  []api.RetryFieldError{{Field: "kind", Message: "Choose `standard`."}},
+			Errors:  []api.RetryFieldError{{Field: "action", Message: "Choose `standard`."}},
 			Options: options,
 		}
 	}
@@ -127,7 +132,7 @@ func TestRetryCommandOutputsEndpointErrorAsJSON(t *testing.T) {
 	service = cli.Service{Config: cli.Config{APIClient: mockAPI, Stdout: &stdout}}
 	Format = "json"
 	cmd := newRetryCommand("retry [flags] <task-id>", "Retry a task", api.RetryTargetTask, "")
-	require.NoError(t, cmd.Flags().Parse([]string{"--kind", "standard"}))
+	require.NoError(t, cmd.Flags().Parse([]string{"--action", "standard"}))
 
 	err := cmd.RunE(cmd, []string{"task-123"})
 
@@ -137,5 +142,13 @@ func TestRetryCommandOutputsEndpointErrorAsJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout.String()), &output))
 	require.Equal(t, "This retry configuration is not supported.", output["error"])
 	require.Equal(t, "Choose `standard`.", output["errors"].([]any)[0].(map[string]any)["message"])
-	require.Equal(t, "standard", output["options"].(map[string]any)["kinds"].([]any)[0].(map[string]any)["value"])
+	require.Equal(t, "standard", output["options"].(map[string]any)["actions"].([]any)[0].(map[string]any)["value"])
+}
+
+func TestRetryDebugRequiresPlacement(t *testing.T) {
+	cmd := newRetryCommand("retry [flags] <task-id>", "Retry a task", api.RetryTargetTask, "")
+
+	err := cmd.Flags().Parse([]string{"--debug"})
+
+	require.ErrorContains(t, err, "flag needs an argument")
 }

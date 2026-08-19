@@ -32,10 +32,9 @@ var tasksRetryCmd = newRetryCommand(
 )
 
 func newRetryCommand(use, short string, targetType api.RetryTargetType, groupID string) *cobra.Command {
-	var kind string
+	var action string
 	var withoutToolCache []string
-	var debug bool
-	var debugPlacement string
+	var debug string
 
 	cmd := &cobra.Command{
 		GroupID: groupID,
@@ -46,20 +45,14 @@ func newRetryCommand(use, short string, targetType api.RetryTargetType, groupID 
 			return requireAccessToken()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var debugSelection *bool
-			if cmd.Flags().Changed("debug") {
-				debugSelection = &debug
-			}
-
 			result, err := service.Retry(cli.RetryConfig{
 				Target: api.RetryTarget{
 					ID:   args[0],
 					Type: targetType,
 				},
-				Kind:             kind,
+				Action:           action,
 				WithoutToolCache: withoutToolCache,
-				Debug:            debugSelection,
-				DebugPlacement:   debugPlacement,
+				DebugPlacement:   debug,
 				OutputJSON:       useJsonOutput(),
 			})
 			if err != nil {
@@ -93,9 +86,8 @@ func newRetryCommand(use, short string, targetType api.RetryTargetType, groupID 
 		},
 	}
 
-	cmd.Flags().StringVar(&kind, "kind", "", "retry kind to use")
+	cmd.Flags().StringVar(&action, "action", "", "retry action to use")
 	cmd.Flags().StringArrayVar(&withoutToolCache, "without-tool-cache", nil, "tool cache to exclude; can be specified multiple times")
-	cmd.Flags().BoolVar(&debug, "debug", false, "open a breakpoint during the retried task")
-	cmd.Flags().StringVar(&debugPlacement, "debug-placement", "", "where to open the breakpoint: start or end")
+	cmd.Flags().StringVar(&debug, "debug", "", "open a breakpoint at the start or end of the retried task")
 	return cmd
 }

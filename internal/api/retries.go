@@ -24,7 +24,7 @@ type RetryTarget struct {
 	Type RetryTargetType
 }
 
-type RetryKind struct {
+type RetryAction struct {
 	Value       string `json:"value"`
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
@@ -46,14 +46,14 @@ type RetryToolCache struct {
 type RetryOptions struct {
 	Retryable         bool              `json:"retryable"`
 	UnavailableReason string            `json:"unavailable_reason,omitempty"`
-	Kinds             []RetryKind       `json:"kinds"`
+	Actions           []RetryAction     `json:"actions"`
 	Debug             RetryDebugOptions `json:"debug"`
 	ToolCaches        []RetryToolCache  `json:"tool_caches"`
 }
 
 type RequestRetryConfig struct {
 	Target         RetryTarget
-	Kind           string
+	Action         string
 	Debug          *bool
 	DebugPlacement string
 	ToolCacheNames []string
@@ -120,19 +120,19 @@ func (c Client) RequestRetry(cfg RequestRetryConfig) (RequestRetryResult, error)
 	if err != nil {
 		return RequestRetryResult{}, err
 	}
-	if cfg.Kind == "" {
-		return RequestRetryResult{}, badRetryRequest("missing retry kind")
+	if cfg.Action == "" {
+		return RequestRetryResult{}, badRetryRequest("missing retry action")
 	}
 
 	requestBody := struct {
 		Retry struct {
-			Kind           string   `json:"kind"`
+			Action         string   `json:"action"`
 			Debug          *bool    `json:"debug,omitempty"`
 			DebugPlacement string   `json:"debug_placement,omitempty"`
 			ToolCacheNames []string `json:"tool_cache_names,omitempty"`
 		} `json:"retry"`
 	}{}
-	requestBody.Retry.Kind = cfg.Kind
+	requestBody.Retry.Action = cfg.Action
 	requestBody.Retry.Debug = cfg.Debug
 	requestBody.Retry.DebugPlacement = cfg.DebugPlacement
 	requestBody.Retry.ToolCacheNames = cfg.ToolCacheNames

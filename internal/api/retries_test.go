@@ -38,7 +38,7 @@ func TestAPIClient_GetRetryOptions(t *testing.T) {
 						StatusCode: http.StatusOK,
 						Body: io.NopCloser(strings.NewReader(`{
 							"retryable": true,
-							"kinds": [{"value":"standard","label":"Retry all tasks","description":"Every task will run again."}],
+							"actions": [{"value":"standard","label":"Retry all tasks","description":"Every task will run again."}],
 							"debug": {"supported":true,"placements":["end","start"],"default_placement":"end"},
 							"tool_caches": [{"name":"bundler","scoped_task_keys":["test"],"usage_description":"Used by test"}]
 						}`)),
@@ -49,11 +49,11 @@ func TestAPIClient_GetRetryOptions(t *testing.T) {
 
 				require.NoError(t, err)
 				require.True(t, options.Retryable)
-				require.Equal(t, []api.RetryKind{{
+				require.Equal(t, []api.RetryAction{{
 					Value:       "standard",
 					Label:       "Retry all tasks",
 					Description: "Every task will run again.",
-				}}, options.Kinds)
+				}}, options.Actions)
 				require.Equal(t, api.RetryDebugOptions{
 					Supported:        true,
 					Placements:       []string{"end", "start"},
@@ -95,7 +95,7 @@ func TestAPIClient_RequestRetry(t *testing.T) {
 			require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
 			require.Equal(t, map[string]any{
 				"retry": map[string]any{
-					"kind":             "no-tool-cache",
+					"action":           "no-tool-cache",
 					"debug":            true,
 					"debug_placement":  "start",
 					"tool_cache_names": []any{"bundler", "golang"},
@@ -111,7 +111,7 @@ func TestAPIClient_RequestRetry(t *testing.T) {
 
 		result, err := client.RequestRetry(api.RequestRetryConfig{
 			Target:         api.RetryTarget{ID: "task-123", Type: api.RetryTargetTask},
-			Kind:           "no-tool-cache",
+			Action:         "no-tool-cache",
 			Debug:          &debug,
 			DebugPlacement: "start",
 			ToolCacheNames: []string{"bundler", "golang"},
@@ -130,7 +130,7 @@ func TestAPIClient_RequestRetry(t *testing.T) {
 			var body map[string]any
 			require.NoError(t, json.NewDecoder(req.Body).Decode(&body))
 			require.Equal(t, map[string]any{
-				"retry": map[string]any{"kind": "standard"},
+				"retry": map[string]any{"action": "standard"},
 			}, body)
 
 			return &http.Response{
@@ -142,7 +142,7 @@ func TestAPIClient_RequestRetry(t *testing.T) {
 
 		_, err := client.RequestRetry(api.RequestRetryConfig{
 			Target: api.RetryTarget{ID: "run-123", Type: api.RetryTargetRun},
-			Kind:   "standard",
+			Action: "standard",
 		})
 
 		require.NoError(t, err)
@@ -155,26 +155,26 @@ func TestAPIClient_RequestRetry(t *testing.T) {
 				StatusCode: http.StatusUnprocessableEntity,
 				Body: io.NopCloser(strings.NewReader(`{
 					"error":"This retry configuration is not supported.",
-					"errors":[{"field":"kind","message":"Choose \u0060standard\u0060."}],
-					"options":{"retryable":true,"kinds":[{"value":"standard","label":"Standard retry"}],"debug":{"supported":false,"placements":[]},"tool_caches":[]}
+					"errors":[{"field":"action","message":"Choose \u0060standard\u0060."}],
+					"options":{"retryable":true,"actions":[{"value":"standard","label":"Standard retry"}],"debug":{"supported":false,"placements":[]},"tool_caches":[]}
 				}`)),
 			}, nil
 		})
 
 		_, err := client.RequestRetry(api.RequestRetryConfig{
 			Target: api.RetryTarget{ID: "task-123", Type: api.RetryTargetTask},
-			Kind:   "clean",
+			Action: "clean",
 		})
 
 		var requestErr *api.RetryRequestError
 		require.ErrorAs(t, err, &requestErr)
-		require.EqualError(t, err, "This retry configuration is not supported.\n  kind: Choose `standard`.")
+		require.EqualError(t, err, "This retry configuration is not supported.\n  action: Choose `standard`.")
 		require.ErrorIs(t, err, internalErrors.ErrBadRequest)
-		require.Equal(t, []api.RetryFieldError{{Field: "kind", Message: "Choose `standard`."}}, requestErr.Errors)
-		require.Equal(t, "standard", requestErr.Options.Kinds[0].Value)
+		require.Equal(t, []api.RetryFieldError{{Field: "action", Message: "Choose `standard`."}}, requestErr.Errors)
+		require.Equal(t, "standard", requestErr.Options.Actions[0].Value)
 	})
 
-	t.Run("requires a retry kind", func(t *testing.T) {
+	t.Run("requires a retry action", func(t *testing.T) {
 		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
 			t.Fatal("the API must not be called")
 			return nil, nil
@@ -184,7 +184,7 @@ func TestAPIClient_RequestRetry(t *testing.T) {
 			Target: api.RetryTarget{ID: "run-123", Type: api.RetryTargetRun},
 		})
 
-		require.EqualError(t, err, "missing retry kind")
+		require.EqualError(t, err, "missing retry action")
 		require.ErrorIs(t, err, internalErrors.ErrBadRequest)
 	})
 }

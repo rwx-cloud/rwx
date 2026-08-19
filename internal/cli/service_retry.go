@@ -12,9 +12,8 @@ import (
 
 type RetryConfig struct {
 	Target           api.RetryTarget
-	Kind             string
+	Action           string
 	WithoutToolCache []string
-	Debug            *bool
 	DebugPlacement   string
 	OutputJSON       bool
 }
@@ -55,7 +54,7 @@ func (s Service) Retry(cfg RetryConfig) (*api.RequestRetryResult, error) {
 	if !errors.As(err, &requestErr) {
 		return nil, err
 	}
-	if interactive && cfg.bare() && requestErr.Options.Retryable && len(requestErr.Options.Kinds) > 0 {
+	if interactive && cfg.bare() && requestErr.Options.Retryable && len(requestErr.Options.Actions) > 0 {
 		fmt.Fprintln(s.Stdout, "The available retry options changed.")
 		fmt.Fprintln(s.Stdout)
 
@@ -91,27 +90,33 @@ func (s Service) selectRetryRequest(
 		return api.RequestRetryConfig{}, retryBadRequest(reason)
 	}
 
-	kind := cfg.Kind
-	if kind == "" {
+	action := cfg.Action
+	if action == "" && len(options.Actions) == 1 {
+		action = options.Actions[0].Value
+	}
+	if action == "" {
 		if !interactive {
-			return api.RequestRetryConfig{}, retryKindSelectionError("retry kind selection is required", cfg.Target, options.Kinds)
+			return api.RequestRetryConfig{}, retryActionSelectionError("retry action selection is required", cfg.Target, options.Actions)
 		}
-		selected, err := s.promptForRetryKind(input, options.Kinds)
+		selected, err := s.promptForRetryAction(input, options.Actions)
 		if err != nil {
 			return api.RequestRetryConfig{}, err
 		}
-		kind = selected
+		action = selected
 	}
-	if !retryKindAvailable(kind, options.Kinds) {
-		return api.RequestRetryConfig{}, retryKindSelectionError(fmt.Sprintf("retry kind %q is not available", kind), cfg.Target, options.Kinds)
+	if !retryActionAvailable(action, options.Actions) {
+		return api.RequestRetryConfig{}, retryActionSelectionError(fmt.Sprintf("retry action %q is not available", action), cfg.Target, options.Actions)
 	}
 
 	toolCacheNames := uniqueStrings(cfg.WithoutToolCache)
-	if kind == "no-tool-cache" {
+	if action == "no-tool-cache" {
+		if len(toolCacheNames) == 0 && len(options.ToolCaches) == 1 {
+			toolCacheNames = []string{options.ToolCaches[0].Name}
+		}
 		if len(toolCacheNames) == 0 {
 			if !interactive {
 				return api.RequestRetryConfig{}, retryToolCacheSelectionError(
-					"tool cache selection is required for retry kind \"no-tool-cache\"",
+					"tool cache selection is required for retry action \"no-tool-cache\"",
 					cfg.Target,
 					options.ToolCaches,
 				)
@@ -132,17 +137,17 @@ func (s Service) selectRetryRequest(
 			}
 		}
 	} else if len(toolCacheNames) > 0 {
-		return api.RequestRetryConfig{}, retryBadRequest("--without-tool-cache can only be used with --kind no-tool-cache")
+		return api.RequestRetryConfig{}, retryBadRequest("--without-tool-cache can only be used with --action no-tool-cache")
 	}
 
-	debug, debugPlacement, err := s.selectRetryDebugOptions(input, interactive, cfg.Debug, cfg.DebugPlacement, options.Debug)
+	debug, debugPlacement, err := selectRetryDebugOptions(cfg.DebugPlacement, options.Debug)
 	if err != nil {
 		return api.RequestRetryConfig{}, err
 	}
 
 	return api.RequestRetryConfig{
 		Target:         cfg.Target,
-		Kind:           kind,
+		Action:         action,
 		Debug:          debug,
 		DebugPlacement: debugPlacement,
 		ToolCacheNames: toolCacheNames,
@@ -150,32 +155,31 @@ func (s Service) selectRetryRequest(
 }
 
 func (c RetryConfig) bare() bool {
-	return c.Kind == "" &&
+	return c.Action == "" &&
 		len(c.WithoutToolCache) == 0 &&
-		c.Debug == nil &&
 		c.DebugPlacement == ""
 }
 
-func (s Service) promptForRetryKind(input *bufio.Reader, kinds []api.RetryKind) (string, error) {
-	if len(kinds) == 0 {
-		return "", retryBadRequest("no retry kinds are available")
+func (s Service) promptForRetryAction(input *bufio.Reader, actions []api.RetryAction) (string, error) {
+	if len(actions) == 0 {
+		return "", retryBadRequest("no retry actions are available")
 	}
 
-	fmt.Fprintln(s.Stdout, "Select a retry kind:")
-	for index, kind := range kinds {
-		fmt.Fprintf(s.Stdout, "  %d. %s (%s)\n", index+1, kind.Label, kind.Value)
-		if kind.Description != "" {
-			fmt.Fprintf(s.Stdout, "     %s\n", kind.Description)
+	fmt.Fprintln(s.Stdout, "Select a retry action:")
+	for index, action := range actions {
+		fmt.Fprintf(s.Stdout, "  %d. %s (%s)\n", index+1, action.Label, action.Value)
+		if action.Description != "" {
+			fmt.Fprintf(s.Stdout, "     %s\n", action.Description)
 		}
 	}
 	fmt.Fprintln(s.Stdout)
-	fmt.Fprintf(s.Stdout, "Enter a number (1-%d): ", len(kinds))
+	fmt.Fprintf(s.Stdout, "Enter a number (1-%d): ", len(actions))
 
-	choice, err := readRetryChoice(input, len(kinds), "retry kind")
+	choice, err := readRetryChoice(input, len(actions), "retry action")
 	if err != nil {
 		return "", err
 	}
-	return kinds[choice-1].Value, nil
+	return actions[choice-1].Value, nil
 }
 
 func (s Service) promptForRetryToolCaches(input *bufio.Reader, caches []api.RetryToolCache) ([]string, error) {
@@ -219,34 +223,9 @@ func (s Service) promptForRetryToolCaches(input *bufio.Reader, caches []api.Retr
 	return selected, nil
 }
 
-func (s Service) selectRetryDebugOptions(
-	input *bufio.Reader,
-	interactive bool,
-	debug *bool,
-	placement string,
-	options api.RetryDebugOptions,
-) (*bool, string, error) {
-	if debug == nil && placement != "" {
-		enabled := true
-		debug = &enabled
-	}
-
-	if debug == nil && interactive && options.Supported {
-		selected, err := s.promptForRetryDebug(input)
-		if err != nil {
-			return nil, "", err
-		}
-		debug = &selected
-	}
-
-	if debug == nil {
+func selectRetryDebugOptions(placement string, options api.RetryDebugOptions) (*bool, string, error) {
+	if placement == "" {
 		return nil, "", nil
-	}
-	if !*debug {
-		if placement != "" {
-			return nil, "", retryBadRequest("--debug-placement cannot be used with --debug=false")
-		}
-		return debug, "", nil
 	}
 	if !options.Supported {
 		reason := options.DisabledReason
@@ -256,62 +235,15 @@ func (s Service) selectRetryDebugOptions(
 		return nil, "", retryBadRequest(reason)
 	}
 
-	if placement == "" {
-		if interactive {
-			selected, err := s.promptForRetryDebugPlacement(input, options.Placements)
-			if err != nil {
-				return nil, "", err
-			}
-			placement = selected
-		} else {
-			placement = options.DefaultPlacement
-			if placement == "" && len(options.Placements) == 1 {
-				placement = options.Placements[0]
-			}
-		}
-	}
 	if !stringAvailable(placement, options.Placements) {
 		return nil, "", retryBadRequest(fmt.Sprintf(
-			"debug placement %q is not available; choose one of: %s",
+			"breakpoint placement %q is not available; choose one of: %s",
 			placement,
 			strings.Join(options.Placements, ", "),
 		))
 	}
-	return debug, placement, nil
-}
-
-func (s Service) promptForRetryDebug(input *bufio.Reader) (bool, error) {
-	fmt.Fprint(s.Stdout, "Open a breakpoint? [y/N]: ")
-	line, err := readRetryLine(input, "no breakpoint selection provided")
-	if err != nil {
-		return false, err
-	}
-	switch strings.ToLower(line) {
-	case "", "n", "no":
-		return false, nil
-	case "y", "yes":
-		return true, nil
-	default:
-		return false, retryBadRequest(fmt.Sprintf("invalid breakpoint selection: %s", line))
-	}
-}
-
-func (s Service) promptForRetryDebugPlacement(input *bufio.Reader, placements []string) (string, error) {
-	if len(placements) == 0 {
-		return "", retryBadRequest("no breakpoint placements are available")
-	}
-	fmt.Fprintln(s.Stdout, "Select breakpoint placement:")
-	for index, placement := range placements {
-		fmt.Fprintf(s.Stdout, "  %d. %s\n", index+1, placement)
-	}
-	fmt.Fprintln(s.Stdout)
-	fmt.Fprintf(s.Stdout, "Enter a number (1-%d): ", len(placements))
-
-	choice, err := readRetryChoice(input, len(placements), "breakpoint placement")
-	if err != nil {
-		return "", err
-	}
-	return placements[choice-1], nil
+	enabled := true
+	return &enabled, placement, nil
 }
 
 func readRetryChoice(input *bufio.Reader, count int, selectionName string) (int, error) {
@@ -334,9 +266,9 @@ func readRetryLine(input *bufio.Reader, emptyMessage string) (string, error) {
 	return strings.TrimSpace(line), nil
 }
 
-func retryKindAvailable(value string, kinds []api.RetryKind) bool {
-	for _, kind := range kinds {
-		if kind.Value == value {
+func retryActionAvailable(value string, actions []api.RetryAction) bool {
+	for _, action := range actions {
+		if action.Value == value {
 			return true
 		}
 	}
@@ -376,22 +308,22 @@ func uniqueStrings(values []string) []string {
 	return unique
 }
 
-func retryKindSelectionError(reason string, target api.RetryTarget, kinds []api.RetryKind) error {
+func retryActionSelectionError(reason string, target api.RetryTarget, actions []api.RetryAction) error {
 	var message strings.Builder
 	message.WriteString(reason)
-	message.WriteString("\n\nAvailable retry kinds:\n")
-	for _, kind := range kinds {
-		fmt.Fprintf(&message, "  %s - %s\n", kind.Value, kind.Label)
-		if kind.Description != "" {
-			fmt.Fprintf(&message, "    %s\n", kind.Description)
+	message.WriteString("\n\nAvailable retry actions:\n")
+	for _, action := range actions {
+		fmt.Fprintf(&message, "  %s - %s\n", action.Value, action.Label)
+		if action.Description != "" {
+			fmt.Fprintf(&message, "    %s\n", action.Description)
 		}
 	}
-	if len(kinds) > 0 {
+	if len(actions) > 0 {
 		fmt.Fprintf(
 			&message,
-			"\nChoose a kind and retry:\n  %s --kind %s %s",
+			"\nChoose an action and retry:\n  %s --action %s %s",
 			retryCommand(target.Type),
-			kinds[0].Value,
+			actions[0].Value,
 			target.ID,
 		)
 	}
@@ -411,7 +343,7 @@ func retryToolCacheSelectionError(reason string, target api.RetryTarget, caches 
 	if len(caches) > 0 {
 		fmt.Fprintf(
 			&message,
-			"\nChoose one or more tool caches and retry:\n  %s --kind no-tool-cache --without-tool-cache %s %s",
+			"\nChoose one or more tool caches and retry:\n  %s --action no-tool-cache --without-tool-cache %s %s",
 			retryCommand(target.Type),
 			caches[0].Name,
 			target.ID,
@@ -435,15 +367,15 @@ func retryEndpointError(requestErr *api.RetryRequestError, request api.RequestRe
 	var message strings.Builder
 	message.WriteString(requestErr.Message)
 
-	showKinds := false
+	showActions := false
 	showToolCaches := false
 	showDebugPlacements := false
 	showAll := len(requestErr.Errors) == 0
 	for _, fieldError := range requestErr.Errors {
 		switch fieldError.Field {
-		case "kind":
-			fmt.Fprintf(&message, "\n\nRetry kind: %s", fieldError.Message)
-			showKinds = true
+		case "action":
+			fmt.Fprintf(&message, "\n\nRetry action: %s", fieldError.Message)
+			showActions = true
 		case "tool_cache_names":
 			fmt.Fprintf(&message, "\n\nTool cache: %s", fieldError.Message)
 			showToolCaches = true
@@ -458,16 +390,16 @@ func retryEndpointError(requestErr *api.RetryRequestError, request api.RequestRe
 		}
 	}
 	if showAll {
-		showKinds = len(requestErr.Options.Kinds) > 0
+		showActions = len(requestErr.Options.Actions) > 0
 		showToolCaches = len(requestErr.Options.ToolCaches) > 0
 	}
 
-	if showKinds {
-		message.WriteString("\n\nAvailable retry kinds:\n")
-		for _, kind := range requestErr.Options.Kinds {
-			fmt.Fprintf(&message, "  %s - %s\n", kind.Value, kind.Label)
-			if kind.Description != "" {
-				fmt.Fprintf(&message, "    %s\n", kind.Description)
+	if showActions {
+		message.WriteString("\n\nAvailable retry actions:\n")
+		for _, action := range requestErr.Options.Actions {
+			fmt.Fprintf(&message, "  %s - %s\n", action.Value, action.Label)
+			if action.Description != "" {
+				fmt.Fprintf(&message, "    %s\n", action.Description)
 			}
 		}
 	}
@@ -511,26 +443,26 @@ func retryEndpointError(requestErr *api.RetryRequestError, request api.RequestRe
 	}
 
 	switch {
-	case showKinds && len(requestErr.Options.Kinds) > 0:
+	case showActions && len(requestErr.Options.Actions) > 0:
 		fmt.Fprintf(
 			&message,
-			"\nTry:\n  %s %s --kind %s",
+			"\nTry:\n  %s %s --action %s",
 			retryCommand(request.Target.Type),
 			request.Target.ID,
-			requestErr.Options.Kinds[0].Value,
+			requestErr.Options.Actions[0].Value,
 		)
 	case showToolCaches && len(requestErr.Options.ToolCaches) > 0:
 		fmt.Fprintf(
 			&message,
-			"\nTry:\n  %s %s --kind no-tool-cache --without-tool-cache %s",
+			"\nTry:\n  %s %s --action no-tool-cache --without-tool-cache %s",
 			retryCommand(request.Target.Type),
 			request.Target.ID,
 			requestErr.Options.ToolCaches[0].Name,
 		)
 	case showDebugPlacements && len(requestErr.Options.Debug.Placements) > 0:
-		kind := request.Kind
-		if !retryKindAvailable(kind, requestErr.Options.Kinds) && len(requestErr.Options.Kinds) > 0 {
-			kind = requestErr.Options.Kinds[0].Value
+		action := request.Action
+		if !retryActionAvailable(action, requestErr.Options.Actions) && len(requestErr.Options.Actions) > 0 {
+			action = requestErr.Options.Actions[0].Value
 		}
 		placement := requestErr.Options.Debug.DefaultPlacement
 		if placement == "" {
@@ -538,10 +470,10 @@ func retryEndpointError(requestErr *api.RetryRequestError, request api.RequestRe
 		}
 		fmt.Fprintf(
 			&message,
-			"\nTry:\n  %s %s --kind %s --debug --debug-placement %s",
+			"\nTry:\n  %s %s --action %s --debug %s",
 			retryCommand(request.Target.Type),
 			request.Target.ID,
-			kind,
+			action,
 			placement,
 		)
 	}
