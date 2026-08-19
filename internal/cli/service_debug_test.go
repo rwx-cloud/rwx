@@ -117,7 +117,7 @@ Choose a session and retry:
 
 	t.Run("when multiple sessions require selection in a TTY", func(t *testing.T) {
 		s := setupTestWithTTY(t)
-		_, err := s.mockStdin.WriteString("2\n")
+		_, err := s.mockStdin.WriteString("\x1b[B\r")
 		require.NoError(t, err)
 
 		calls := 0
@@ -154,10 +154,11 @@ Choose a session and retry:
 
 		require.NoError(t, err)
 		require.Equal(t, 2, calls)
-		require.Equal(t, `Select a debug session:
-  1. shell (aaaaaaaa)
-  2. bbbbbbbb
-
-Enter a number (1-2): `, s.mockStdout.String())
+		output := s.mockStdout.String()
+		require.Contains(t, output, "Select a debug session")
+		require.Contains(t, output, "shell (aaaaaaaa)")
+		require.Contains(t, output, "bbbbbbbb")
+		require.Contains(t, output, "↑/↓ move")
+		require.Contains(t, output, "enter select")
 	})
 }
