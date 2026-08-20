@@ -246,7 +246,7 @@ var sandboxSyncCmd = &cobra.Command{
 	Hidden: true,
 	Args:   cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
+		return requireExperimentalSandboxAccess()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
@@ -279,7 +279,7 @@ Local changes are synced before the process starts. When --port is provided,
 the port is forwarded locally and its localhost URL is printed.`,
 	Args: cobra.ArbitraryArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
+		return requireExperimentalSandboxAccess()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dashIndex := cmd.ArgsLenAtDash()
@@ -321,7 +321,7 @@ var sandboxBackgroundRestartCmd = &cobra.Command{
 	Hidden: true,
 	Args:   cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
+		return requireExperimentalSandboxAccess()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
@@ -350,7 +350,7 @@ var sandboxBackgroundStopCmd = &cobra.Command{
 	Hidden: true,
 	Args:   cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
+		return requireExperimentalSandboxAccess()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
@@ -379,7 +379,7 @@ var sandboxBackgroundLogsCmd = &cobra.Command{
 	Hidden: true,
 	Args:   cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
+		return requireExperimentalSandboxAccess()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
@@ -565,6 +565,13 @@ var (
 	sandboxBackgroundFollow    bool
 	sandboxInitParams          []string
 )
+
+func requireExperimentalSandboxAccess() error {
+	if os.Getenv("EXPERIMENTAL") != "true" {
+		return fmt.Errorf("this command is experimental; set EXPERIMENTAL=true to use it")
+	}
+	return requireAccessToken()
+}
 
 func init() {
 	sandboxCmd.AddCommand(sandboxInitCmd)

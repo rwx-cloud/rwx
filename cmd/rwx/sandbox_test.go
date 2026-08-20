@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,4 +32,33 @@ func TestSandboxBackgroundCommandIsHidden(t *testing.T) {
 	require.Equal(t, "logs", sandboxBackgroundLogsCmd.Use)
 	require.True(t, sandboxBackgroundLogsCmd.Hidden)
 	require.NotNil(t, sandboxBackgroundLogsCmd.Flags().Lookup("follow"))
+}
+
+func TestExperimentalSandboxCommandsRequireOptIn(t *testing.T) {
+	commands := []*cobra.Command{
+		sandboxSyncCmd,
+		sandboxBackgroundCmd,
+		sandboxBackgroundRestartCmd,
+		sandboxBackgroundStopCmd,
+		sandboxBackgroundLogsCmd,
+	}
+
+	for _, value := range []string{"", "false", "TRUE", "1"} {
+		t.Run("EXPERIMENTAL="+value, func(t *testing.T) {
+			t.Setenv("EXPERIMENTAL", value)
+			for _, command := range commands {
+				require.EqualError(t, command.PreRunE(command, nil), "this command is experimental; set EXPERIMENTAL=true to use it")
+			}
+		})
+	}
+
+	t.Run("EXPERIMENTAL=true", func(t *testing.T) {
+		t.Setenv("EXPERIMENTAL", "true")
+		originalAccessToken := AccessToken
+		AccessToken = "test-token"
+		t.Cleanup(func() { AccessToken = originalAccessToken })
+		for _, command := range commands {
+			require.NoError(t, command.PreRunE(command, nil))
+		}
+	})
 }
