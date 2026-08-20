@@ -22,12 +22,14 @@ type TunnelConfig struct {
 	PublicHostKey     string
 	LocalPort         int
 	TargetPort        int
+	Scheme            string
 	StateDirectory    string
 	RemoteDestination string
 }
 
 type TunnelResult struct {
 	LocalPort int
+	Scheme    string
 }
 
 type TunnelCloseConfig struct {
@@ -52,6 +54,7 @@ type tunnelState struct {
 	RunID      string `json:"runId"`
 	LocalPort  int    `json:"localPort"`
 	TargetPort int    `json:"targetPort"`
+	Scheme     string `json:"scheme"`
 	SocketPath string `json:"socketPath"`
 }
 
@@ -102,6 +105,17 @@ func (m tunnelManager) Open(cfg TunnelConfig) (TunnelResult, error) {
 	}
 	if state.SocketPath != "" {
 		_ = exec.Command(m.binary, "-F", "/dev/null", "-S", state.SocketPath, "-O", "exit", "rwx-preview").Run()
+	}
+
+	scheme := cfg.Scheme
+	if scheme == "" && state.Key == cfg.Key && state.RunID == cfg.RunID {
+		scheme = state.Scheme
+	}
+	if scheme == "" {
+		scheme = "http"
+	}
+	if scheme != "http" && scheme != "https" {
+		return TunnelResult{}, fmt.Errorf("scheme must be http or https")
 	}
 
 	localPort := cfg.LocalPort
@@ -191,6 +205,7 @@ func (m tunnelManager) Open(cfg TunnelConfig) (TunnelResult, error) {
 		RunID:      cfg.RunID,
 		LocalPort:  localPort,
 		TargetPort: cfg.TargetPort,
+		Scheme:     scheme,
 		SocketPath: socketPath,
 	}
 	data, err := json.MarshalIndent(state, "", "  ")
@@ -203,7 +218,7 @@ func (m tunnelManager) Open(cfg TunnelConfig) (TunnelResult, error) {
 		return TunnelResult{}, fmt.Errorf("unable to save background tunnel state: %w", err)
 	}
 
-	return TunnelResult{LocalPort: localPort}, nil
+	return TunnelResult{LocalPort: localPort, Scheme: scheme}, nil
 }
 
 func (m tunnelManager) Close(cfg TunnelCloseConfig) error {

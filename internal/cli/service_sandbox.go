@@ -77,6 +77,7 @@ type BackgroundSandboxConfig struct {
 	Name       string
 	TargetPort int
 	LocalPort  int
+	Scheme     string
 	RunID      string
 	Json       bool
 }
@@ -138,6 +139,7 @@ type SandboxBackgroundResult struct {
 	Status      string
 	TargetPort  int
 	LocalPort   int
+	Scheme      string
 	URL         string
 	PID         int
 	PGID        int
@@ -555,6 +557,17 @@ func (s Service) BackgroundSandbox(cfg BackgroundSandboxConfig) (*SandboxBackgro
 	if cfg.LocalPort != 0 && cfg.TargetPort == 0 {
 		return nil, fmt.Errorf("--local-port requires --port")
 	}
+	if cfg.Scheme != "" && cfg.TargetPort == 0 {
+		return nil, fmt.Errorf("--scheme requires --port")
+	}
+	if cfg.TargetPort != 0 {
+		if cfg.Scheme == "" {
+			cfg.Scheme = "http"
+		}
+		if cfg.Scheme != "http" && cfg.Scheme != "https" {
+			return nil, fmt.Errorf("--scheme must be http or https")
+		}
+	}
 	if len(cfg.Command) == 0 {
 		return nil, fmt.Errorf("background process command is required")
 	}
@@ -584,7 +597,7 @@ func (s Service) BackgroundSandbox(cfg BackgroundSandboxConfig) (*SandboxBackgro
 	}
 	process.Key = cfg.Name
 	process.TargetPort = cfg.TargetPort
-	return s.finishSandboxBackground(sandbox, process, cfg.LocalPort, cfg.Json, "Started")
+	return s.finishSandboxBackground(sandbox, process, cfg.LocalPort, cfg.Scheme, cfg.Json, "Started")
 }
 
 func (s Service) RestartSandboxBackground(cfg SandboxBackgroundConfig) (*SandboxBackgroundResult, error) {
@@ -609,7 +622,7 @@ func (s Service) RestartSandboxBackground(cfg SandboxBackgroundConfig) (*Sandbox
 		return nil, err
 	}
 	process.Key = cfg.Name
-	return s.finishSandboxBackground(sandbox, process, 0, cfg.Json, "Restarted")
+	return s.finishSandboxBackground(sandbox, process, 0, "", cfg.Json, "Restarted")
 }
 
 func (s Service) StopSandboxBackground(cfg SandboxBackgroundConfig) (*SandboxBackgroundResult, error) {
@@ -747,7 +760,7 @@ func (s Service) executeSandboxProcessDirective(directive string, request any, a
 	return process, nil
 }
 
-func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandboxProcessResponse, localPort int, jsonMode bool, action string) (*SandboxBackgroundResult, error) {
+func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandboxProcessResponse, localPort int, scheme string, jsonMode bool, action string) (*SandboxBackgroundResult, error) {
 	result := sandboxBackgroundResult(sandbox.runID, process)
 	if process.TargetPort != 0 {
 		stateDirectory, err := sandboxTunnelStateDirectory()
@@ -757,13 +770,14 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 		tunnel, err := s.SSHTunnelManager.Open(rwxssh.TunnelConfig{
 			Key: process.Key, RunID: sandbox.runID, Address: sandbox.connectionInfo.Address,
 			PrivateUserKey: sandbox.connectionInfo.PrivateUserKey, PublicHostKey: sandbox.connectionInfo.PublicHostKey,
-			LocalPort: localPort, TargetPort: process.TargetPort, StateDirectory: stateDirectory,
+			LocalPort: localPort, TargetPort: process.TargetPort, Scheme: scheme, StateDirectory: stateDirectory,
 		})
 		if err != nil {
 			return nil, err
 		}
 		result.LocalPort = tunnel.LocalPort
-		result.URL = fmt.Sprintf("http://127.0.0.1:%d", tunnel.LocalPort)
+		result.Scheme = tunnel.Scheme
+		result.URL = fmt.Sprintf("%s://127.0.0.1:%d", tunnel.Scheme, tunnel.LocalPort)
 
 		deadline := time.Now().Add(30 * time.Second)
 		for !s.SSHTunnelManager.IsReady(tunnel.LocalPort) {
@@ -785,7 +799,11 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 
 	if !jsonMode {
 		if result.URL != "" {
-			fmt.Fprintln(s.Stdout, result.URL)
+			fmt.Fprintf(s.Stdout, "Preview %q: %s\n\n", process.Key, result.URL)
+			fmt.Fprintln(s.Stdout, "After local edits:")
+			fmt.Fprintln(s.Stdout, "  Hot reload:    rwx sandbox sync")
+			fmt.Fprintf(s.Stdout, "  Hard restart:  rwx sandbox background restart --name %s\n\n", process.Key)
+			fmt.Fprintln(s.Stdout, "rwx sandbox exec -- <command> syncs local changes before it runs.")
 		} else {
 			fmt.Fprintf(s.Stdout, "%s background process %q.\n", action, process.Key)
 		}

@@ -296,6 +296,7 @@ the port is forwarded locally and its localhost URL is printed.`,
 			Name:       sandboxBackgroundName,
 			TargetPort: sandboxBackgroundPort,
 			LocalPort:  sandboxBackgroundLocalPort,
+			Scheme:     sandboxBackgroundScheme,
 			RunID:      sandboxRunID,
 			Json:       useJson,
 		})
@@ -560,6 +561,7 @@ var (
 	sandboxBackgroundName      string
 	sandboxBackgroundPort      int
 	sandboxBackgroundLocalPort int
+	sandboxBackgroundScheme    string
 	sandboxBackgroundFollow    bool
 	sandboxInitParams          []string
 )
@@ -603,6 +605,7 @@ func init() {
 	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxBackgroundName, "name", "", "Name of the managed sandbox process")
 	sandboxBackgroundCmd.Flags().IntVar(&sandboxBackgroundPort, "port", 0, "Sandbox port to forward locally")
 	sandboxBackgroundCmd.Flags().IntVar(&sandboxBackgroundLocalPort, "local-port", 0, "Local port to use (default: allocate or reuse one)")
+	sandboxBackgroundCmd.Flags().StringVar(&sandboxBackgroundScheme, "scheme", "", "URL scheme for the forwarded port: http or https (default: http)")
 	sandboxBackgroundLogsCmd.Flags().BoolVarP(&sandboxBackgroundFollow, "follow", "f", false, "Follow log output")
 	if err := sandboxBackgroundCmd.MarkPersistentFlagRequired("name"); err != nil {
 		panic(err)

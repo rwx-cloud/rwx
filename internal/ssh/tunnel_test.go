@@ -28,16 +28,20 @@ func TestTunnelManagerOpenRefreshesAndReusesLocalPort(t *testing.T) {
 		PrivateUserKey: "private key",
 		PublicHostKey:  "ssh-ed25519 public-key",
 		TargetPort:     3000,
+		Scheme:         "https",
 		StateDirectory: filepath.Join(tmp, "state"),
 	}
 
 	first, err := manager.Open(config)
 	require.NoError(t, err)
 	require.Greater(t, first.LocalPort, 0)
+	require.Equal(t, "https", first.Scheme)
 
+	config.Scheme = ""
 	second, err := manager.Open(config)
 	require.NoError(t, err)
 	require.Equal(t, first.LocalPort, second.LocalPort)
+	require.Equal(t, "https", second.Scheme)
 
 	logData, err := os.ReadFile(logPath)
 	require.NoError(t, err)
@@ -59,6 +63,14 @@ func TestTunnelManagerValidatesPorts(t *testing.T) {
 	require.EqualError(t, err, "local port must be between 1 and 65535")
 }
 
+func TestTunnelManagerValidatesScheme(t *testing.T) {
+	manager := tunnelManager{binary: "ssh"}
+	_, err := manager.Open(TunnelConfig{
+		Key: "web", RunID: "run-1", TargetPort: 3000, Scheme: "ftp", StateDirectory: t.TempDir(),
+	})
+	require.EqualError(t, err, "scheme must be http or https")
+}
+
 func TestTunnelManagerDoesNotReuseLocalPortAcrossRuns(t *testing.T) {
 	tmp := t.TempDir()
 	binary := filepath.Join(tmp, "ssh")
@@ -71,6 +83,7 @@ func TestTunnelManagerDoesNotReuseLocalPortAcrossRuns(t *testing.T) {
 	}
 	first, err := manager.Open(config)
 	require.NoError(t, err)
+	require.Equal(t, "http", first.Scheme)
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", first.LocalPort))
 	require.NoError(t, err)

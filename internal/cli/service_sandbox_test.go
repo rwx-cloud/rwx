@@ -1183,7 +1183,7 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		var tunnelConfig rwxssh.TunnelConfig
 		setup.mockTunnel.MockOpen = func(cfg rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
 			tunnelConfig = cfg
-			return rwxssh.TunnelResult{LocalPort: 8310}, nil
+			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: cfg.Scheme}, nil
 		}
 
 		result, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
@@ -1209,6 +1209,8 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		require.Equal(t, "192.168.1.1:22", tunnelConfig.Address)
 		require.Equal(t, 8310, tunnelConfig.LocalPort)
 		require.Equal(t, 3100, tunnelConfig.TargetPort)
+		require.Equal(t, "http", tunnelConfig.Scheme)
+		require.Equal(t, "http", result.Scheme)
 
 		processIndex := slices.IndexFunc(*commands, func(command string) bool {
 			return strings.HasPrefix(command, "__rwx_sandbox_process_start__ ")
@@ -1263,6 +1265,31 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		require.False(t, hasTargetPort)
 	})
 
+	t.Run("prints preview URL and update commands in text mode", func(t *testing.T) {
+		setup, _ := setupBackground(t)
+		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: "https"}, nil
+		}
+
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command:    []string{"bin/server"},
+			Name:       "web",
+			TargetPort: 3100,
+			Scheme:     "https",
+			RunID:      "run-preview",
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, `Preview "web": https://127.0.0.1:8310
+
+After local edits:
+  Hot reload:    rwx sandbox sync
+  Hard restart:  rwx sandbox background restart --name web
+
+rwx sandbox exec -- <command> syncs local changes before it runs.
+`, setup.mockStdout.String())
+	})
+
 	t.Run("rejects a local port without a sandbox port", func(t *testing.T) {
 		setup := setupTest(t)
 		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
@@ -1271,6 +1298,27 @@ func TestService_BackgroundSandbox(t *testing.T) {
 			LocalPort: 8310,
 		})
 		require.EqualError(t, err, "--local-port requires --port")
+	})
+
+	t.Run("rejects a scheme without a sandbox port", func(t *testing.T) {
+		setup := setupTest(t)
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command: []string{"bin/worker"},
+			Name:    "worker",
+			Scheme:  "https",
+		})
+		require.EqualError(t, err, "--scheme requires --port")
+	})
+
+	t.Run("rejects an unsupported URL scheme", func(t *testing.T) {
+		setup := setupTest(t)
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command:    []string{"bin/server"},
+			Name:       "web",
+			TargetPort: 3100,
+			Scheme:     "ftp",
+		})
+		require.EqualError(t, err, "--scheme must be http or https")
 	})
 
 	t.Run("syncs before restarting and reopens its tunnel", func(t *testing.T) {
@@ -1285,7 +1333,7 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		var tunnelConfig rwxssh.TunnelConfig
 		setup.mockTunnel.MockOpen = func(cfg rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
 			tunnelConfig = cfg
-			return rwxssh.TunnelResult{LocalPort: 8310}, nil
+			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: "https"}, nil
 		}
 
 		result, err := setup.service.RestartSandboxBackground(cli.SandboxBackgroundConfig{
@@ -1293,7 +1341,8 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		})
 
 		require.NoError(t, err)
-		require.Equal(t, "http://127.0.0.1:8310", result.URL)
+		require.Equal(t, "https://127.0.0.1:8310", result.URL)
+		require.Equal(t, "https", result.Scheme)
 		require.Equal(t, 0, tunnelConfig.LocalPort, "restart should let the tunnel manager reuse its saved local port")
 		checkoutIndex := sandboxCommandIndex(*commands, "checkout -f")
 		restartIndex := slices.IndexFunc(*commands, func(command string) bool {
