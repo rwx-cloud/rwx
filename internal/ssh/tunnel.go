@@ -91,7 +91,7 @@ func (m tunnelManager) Open(cfg TunnelConfig) (TunnelResult, error) {
 		return TunnelResult{}, fmt.Errorf("local port must be between 1 and 65535")
 	}
 
-	hash := sha256.Sum256([]byte(cfg.StateDirectory + "\x00" + cfg.Key))
+	hash := sha256.Sum256([]byte(cfg.StateDirectory + "\x00" + cfg.RunID + "\x00" + cfg.Key))
 	keyHash := hex.EncodeToString(hash[:8])
 	previewDir := filepath.Join(cfg.StateDirectory, keyHash)
 	if err := os.MkdirAll(previewDir, 0o700); err != nil {
@@ -226,7 +226,7 @@ func (m tunnelManager) Close(cfg TunnelCloseConfig) error {
 		return fmt.Errorf("background process key is required")
 	}
 
-	hash := sha256.Sum256([]byte(cfg.StateDirectory + "\x00" + cfg.Key))
+	hash := sha256.Sum256([]byte(cfg.StateDirectory + "\x00" + cfg.RunID + "\x00" + cfg.Key))
 	stateDirectory := filepath.Join(cfg.StateDirectory, hex.EncodeToString(hash[:8]))
 	statePath := filepath.Join(stateDirectory, "state.json")
 	data, err := os.ReadFile(statePath)

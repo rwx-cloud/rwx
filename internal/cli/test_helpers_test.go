@@ -68,6 +68,14 @@ func setupTest(t *testing.T) *testSetup {
 	setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
 		return 0, "", nil
 	}
+	setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
+		if strings.HasPrefix(command, "__rwx_sandbox_process_") {
+			exitCode, stdout, err := setup.mockSSH.ExecuteCommandWithOutput(command)
+			return exitCode, stdout, "", err
+		}
+		exitCode, err := setup.mockSSH.ExecuteCommand(command)
+		return exitCode, "", "", err
+	}
 	setup.mockGit = &mocks.Git{
 		MockIsInstalled:      true,
 		MockIsInsideWorkTree: true,

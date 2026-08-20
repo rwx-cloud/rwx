@@ -157,6 +157,35 @@ func (c *Client) ExecuteCommandWithOutput(command string) (int, string, error) {
 	return 0, stdout.String(), nil
 }
 
+// ExecuteCommandWithSeparateOutput runs a command non-interactively over SSH
+// and captures stdout and stderr independently.
+//
+// Return values:
+//   - (0, stdout, stderr, nil)   = command succeeded with exit code 0
+//   - (N, stdout, stderr, nil)   = command completed with non-zero exit code N
+//   - (-1, "", "", err)        = SSH/connection error (command may not have run)
+func (c *Client) ExecuteCommandWithSeparateOutput(command string) (int, string, string, error) {
+	session, err := c.Client.NewSession()
+	if err != nil {
+		return -1, "", "", errors.Wrap(err, "unable to create SSH session")
+	}
+	defer session.Close()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
+
+	err = session.Run(command)
+	if err != nil {
+		if exitErr, ok := err.(*ssh.ExitError); ok {
+			return exitErr.ExitStatus(), stdout.String(), stderr.String(), nil
+		}
+		return -1, "", "", errors.Wrap(err, "SSH command execution failed")
+	}
+	return 0, stdout.String(), stderr.String(), nil
+}
+
 // ExecuteCommandWithStdinAndCombinedOutput runs a command non-interactively over SSH,
 // piping data to stdin, and captures both stdout and stderr.
 //

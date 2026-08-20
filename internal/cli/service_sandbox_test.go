@@ -1239,9 +1239,14 @@ func TestService_BackgroundSandbox(t *testing.T) {
 
 	t.Run("starts without a tunnel when no port is requested", func(t *testing.T) {
 		setup, commands := setupBackground(t)
+		var closeConfig rwxssh.TunnelCloseConfig
 		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
 			require.Fail(t, "a portless process must not open a tunnel")
 			return rwxssh.TunnelResult{}, nil
+		}
+		setup.mockTunnel.MockClose = func(cfg rwxssh.TunnelCloseConfig) error {
+			closeConfig = cfg
+			return nil
 		}
 
 		result, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
@@ -1253,6 +1258,8 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, result.TargetPort)
 		require.Empty(t, result.URL)
+		require.Equal(t, "worker", closeConfig.Key)
+		require.Equal(t, "run-background", closeConfig.RunID)
 		require.Equal(t, "Started background process \"worker\".\n", setup.mockStdout.String())
 		processIndex := slices.IndexFunc(*commands, func(command string) bool {
 			return strings.HasPrefix(command, "__rwx_sandbox_process_start__ ")
@@ -1384,11 +1391,12 @@ rwx sandbox exec -- <command> syncs local changes before it runs.
 
 	t.Run("does not open a tunnel when the agent lacks process directives", func(t *testing.T) {
 		setup, _ := setupBackground(t)
-		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
 			if strings.HasPrefix(command, "__rwx_sandbox_process_start__ ") {
-				return 127, "", nil
+				return 127, "", "sh: " + command + ": command not found", nil
 			}
-			return 0, "", nil
+			exitCode, err := setup.mockSSH.ExecuteCommand(command)
+			return exitCode, "", "", err
 		}
 		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
 			require.Fail(t, "tunnel must not open when process directives are unavailable")
@@ -1404,7 +1412,27 @@ rwx sandbox exec -- <command> syncs local changes before it runs.
 		})
 
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "sandbox agent does not support managed processes yet")
+		require.EqualError(t, err, "background processes are not supported by this sandbox")
+		require.NotContains(t, err.Error(), "__rwx_sandbox_")
+		require.NotContains(t, setup.mockStderr.String(), "__rwx_sandbox_")
+	})
+
+	t.Run("returns managed process diagnostics without exposing directives", func(t *testing.T) {
+		setup, _ := setupBackground(t)
+		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
+			if strings.HasPrefix(command, "__rwx_sandbox_process_restart__ ") {
+				return 1, "", `sandbox process "web" has no stored definition`, nil
+			}
+			exitCode, err := setup.mockSSH.ExecuteCommand(command)
+			return exitCode, "", "", err
+		}
+
+		_, err := setup.service.RestartSandboxBackground(cli.SandboxBackgroundConfig{
+			Name: "web", RunID: "run-background", Json: true,
+		})
+
+		require.EqualError(t, err, `sandbox agent failed to restart managed process: sandbox process "web" has no stored definition`)
+		require.NotContains(t, err.Error(), "__rwx_sandbox_")
 	})
 
 	t.Run("requires an already-running sandbox", func(t *testing.T) {
@@ -5352,6 +5380,11 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 		}
 
 		sshEndSent := false
+		closedTunnelRunID := ""
+		setup.mockTunnel.MockCloseAll = func(runID, stateDirectory string) error {
+			closedTunnelRunID = runID
+			return nil
+		}
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			if cmd == "__rwx_sandbox_end__" {
@@ -5372,6 +5405,7 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 
 		require.NoError(t, err)
 		require.True(t, sshEndSent, "expected __rwx_sandbox_end__ to be sent to old sandbox")
+		require.Equal(t, "run-existing", closedTunnelRunID)
 		require.Equal(t, "run-new", result.RunID)
 
 		storage, loadErr := cli.LoadSandboxStorage()

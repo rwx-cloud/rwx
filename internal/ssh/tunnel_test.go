@@ -92,6 +92,9 @@ func TestTunnelManagerDoesNotReuseLocalPortAcrossRuns(t *testing.T) {
 	second, err := manager.Open(config)
 	require.NoError(t, err)
 	require.NotEqual(t, first.LocalPort, second.LocalPort)
+	entries, err := os.ReadDir(config.StateDirectory)
+	require.NoError(t, err)
+	require.Len(t, entries, 2, "same-key tunnels from different runs should have independent state")
 }
 
 func TestTunnelManagerCloseMatchesRun(t *testing.T) {

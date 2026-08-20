@@ -69,6 +69,7 @@ type SSHClient interface {
 	ExecuteCommand(command string) (int, error)
 	ExecuteCommandWithStdin(command string, stdin io.Reader) (int, error)
 	ExecuteCommandWithOutput(command string) (int, string, error)
+	ExecuteCommandWithSeparateOutput(command string) (int, string, string, error)
 	ExecuteCommandWithStdinAndCombinedOutput(command string, stdin io.Reader) (int, string, error)
 }
 

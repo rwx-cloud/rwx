@@ -743,14 +743,18 @@ func (s Service) executeSandboxProcessDirective(directive string, request any, a
 	if err != nil {
 		return sandboxProcessResponse{}, errors.Wrap(err, "unable to encode sandbox process request")
 	}
-	exitCode, output, err := s.SSHClient.ExecuteCommandWithOutput(directive + " " + string(payload))
+	exitCode, output, stderr, err := s.SSHClient.ExecuteCommandWithSeparateOutput(directive + " " + string(payload))
 	if err != nil {
 		return sandboxProcessResponse{}, errors.Wrapf(err, "failed to %s managed sandbox process", action)
 	}
 	if exitCode == 127 {
-		return sandboxProcessResponse{}, fmt.Errorf("the sandbox agent does not support managed processes yet; update the Mint sandbox agent before using 'rwx sandbox background'")
+		return sandboxProcessResponse{}, fmt.Errorf("background processes are not supported by this sandbox")
 	}
 	if exitCode != 0 {
+		stderr = strings.TrimSpace(stderr)
+		if stderr != "" && !strings.Contains(stderr, "__rwx_sandbox_") {
+			return sandboxProcessResponse{}, fmt.Errorf("sandbox agent failed to %s managed process: %s", action, stderr)
+		}
 		return sandboxProcessResponse{}, fmt.Errorf("sandbox agent failed to %s managed process (exit code %d)", action, exitCode)
 	}
 	var process sandboxProcessResponse
@@ -762,11 +766,17 @@ func (s Service) executeSandboxProcessDirective(directive string, request any, a
 
 func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandboxProcessResponse, localPort int, scheme string, jsonMode bool, action string) (*SandboxBackgroundResult, error) {
 	result := sandboxBackgroundResult(sandbox.runID, process)
-	if process.TargetPort != 0 {
-		stateDirectory, err := sandboxTunnelStateDirectory()
-		if err != nil {
-			return nil, err
+	stateDirectory, err := sandboxTunnelStateDirectory()
+	if err != nil {
+		return nil, err
+	}
+	if process.TargetPort == 0 {
+		if err := s.SSHTunnelManager.Close(rwxssh.TunnelCloseConfig{
+			Key: process.Key, RunID: sandbox.runID, StateDirectory: stateDirectory,
+		}); err != nil {
+			return nil, errors.Wrap(err, "failed to close local tunnel")
 		}
+	} else {
 		tunnel, err := s.SSHTunnelManager.Open(rwxssh.TunnelConfig{
 			Key: process.Key, RunID: sandbox.runID, Address: sandbox.connectionInfo.Address,
 			PrivateUserKey: sandbox.connectionInfo.PrivateUserKey, PublicHostKey: sandbox.connectionInfo.PublicHostKey,
@@ -1076,6 +1086,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 				}
 			}
 			s.waitForSandboxCompletion(runID, scopedToken)
+			s.closeSandboxTunnels(runID)
 			storage.DeleteSession(branch, configFile)
 			if saveErr := storage.Save(); saveErr != nil {
 				fmt.Fprintf(s.Stderr, "Warning: unable to save sandbox sessions: %v\n", saveErr)
