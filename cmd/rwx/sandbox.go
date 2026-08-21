@@ -567,8 +567,8 @@ var (
 )
 
 func requireExperimentalSandboxAccess() error {
-	if os.Getenv("EXPERIMENTAL") != "true" {
-		return fmt.Errorf("this command is experimental; set EXPERIMENTAL=true to use it")
+	if os.Getenv("RWX_EXPERIMENTAL") != "true" {
+		return fmt.Errorf("this command is experimental; set RWX_EXPERIMENTAL=true to use it")
 	}
 	return requireAccessToken()
 }

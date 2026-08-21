@@ -44,16 +44,16 @@ func TestExperimentalSandboxCommandsRequireOptIn(t *testing.T) {
 	}
 
 	for _, value := range []string{"", "false", "TRUE", "1"} {
-		t.Run("EXPERIMENTAL="+value, func(t *testing.T) {
-			t.Setenv("EXPERIMENTAL", value)
+		t.Run("RWX_EXPERIMENTAL="+value, func(t *testing.T) {
+			t.Setenv("RWX_EXPERIMENTAL", value)
 			for _, command := range commands {
-				require.EqualError(t, command.PreRunE(command, nil), "this command is experimental; set EXPERIMENTAL=true to use it")
+				require.EqualError(t, command.PreRunE(command, nil), "this command is experimental; set RWX_EXPERIMENTAL=true to use it")
 			}
 		})
 	}
 
-	t.Run("EXPERIMENTAL=true", func(t *testing.T) {
-		t.Setenv("EXPERIMENTAL", "true")
+	t.Run("RWX_EXPERIMENTAL=true", func(t *testing.T) {
+		t.Setenv("RWX_EXPERIMENTAL", "true")
 		originalAccessToken := AccessToken
 		AccessToken = "test-token"
 		t.Cleanup(func() { AccessToken = originalAccessToken })

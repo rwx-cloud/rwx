@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/sandbox-helpers.sh"
 
-export EXPERIMENTAL=true
+export RWX_EXPERIMENTAL=true
 
 preview_name="web"
 preview_port=3000
