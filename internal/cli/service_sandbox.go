@@ -798,7 +798,14 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 				return nil, statusErr
 			}
 			if status.Status != "running" {
-				return nil, fmt.Errorf("background process %q stopped before port %d became ready (status: %s; stdout: %s; stderr: %s)", process.Key, process.TargetPort, status.Status, status.StdoutPath, status.StderrPath)
+				processErr := fmt.Errorf("background process %q stopped before port %d became ready (status: %s; stdout: %s; stderr: %s)", process.Key, process.TargetPort, status.Status, status.StdoutPath, status.StderrPath)
+				closeErr := s.SSHTunnelManager.Close(rwxssh.TunnelCloseConfig{
+					Key: process.Key, RunID: sandbox.runID, StateDirectory: stateDirectory,
+				})
+				if closeErr != nil {
+					return nil, fmt.Errorf("%w; additionally failed to close local tunnel: %v", processErr, closeErr)
+				}
+				return nil, processErr
 			}
 			if time.Now().After(deadline) {
 				return nil, fmt.Errorf("timed out waiting for background process %q on %s; the process and tunnel are still running", process.Key, result.URL)

@@ -103,9 +103,6 @@ func (m tunnelManager) Open(cfg TunnelConfig) (TunnelResult, error) {
 	if data, err := os.ReadFile(statePath); err == nil {
 		_ = json.Unmarshal(data, &state)
 	}
-	if state.SocketPath != "" {
-		_ = exec.Command(m.binary, "-F", "/dev/null", "-S", state.SocketPath, "-O", "exit", "rwx-preview").Run()
-	}
 
 	scheme := cfg.Scheme
 	if scheme == "" && state.Key == cfg.Key && state.RunID == cfg.RunID {
@@ -116,6 +113,11 @@ func (m tunnelManager) Open(cfg TunnelConfig) (TunnelResult, error) {
 	}
 	if scheme != "http" && scheme != "https" {
 		return TunnelResult{}, fmt.Errorf("scheme must be http or https")
+	}
+	if state.SocketPath != "" {
+		if err := m.closeControlMaster(state.SocketPath); err != nil {
+			return TunnelResult{}, fmt.Errorf("unable to replace existing background tunnel: %w", err)
+		}
 	}
 
 	localPort := cfg.LocalPort
@@ -214,7 +216,9 @@ func (m tunnelManager) Open(cfg TunnelConfig) (TunnelResult, error) {
 	}
 	data = append(data, '\n')
 	if err := os.WriteFile(statePath, data, 0o600); err != nil {
-		_ = exec.Command(m.binary, "-F", "/dev/null", "-S", socketPath, "-O", "exit", "rwx-preview").Run()
+		if closeErr := m.closeControlMaster(socketPath); closeErr != nil {
+			return TunnelResult{}, fmt.Errorf("unable to save background tunnel state: %w; additionally failed to close tunnel: %v", err, closeErr)
+		}
 		return TunnelResult{}, fmt.Errorf("unable to save background tunnel state: %w", err)
 	}
 
@@ -246,14 +250,33 @@ func (m tunnelManager) Close(cfg TunnelCloseConfig) error {
 	}
 
 	if state.SocketPath != "" {
-		_ = exec.Command(m.binary, "-F", "/dev/null", "-S", state.SocketPath, "-O", "exit", "rwx-preview").Run()
-		_ = os.Remove(state.SocketPath)
+		if err := m.closeControlMaster(state.SocketPath); err != nil {
+			return err
+		}
+		if err := os.Remove(state.SocketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("unable to remove background tunnel control socket: %w", err)
+		}
 	}
 	if err := os.Remove(statePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("unable to remove background tunnel state: %w", err)
 	}
 	_ = os.Remove(stateDirectory)
 	return nil
+}
+
+func (m tunnelManager) closeControlMaster(socketPath string) error {
+	output, err := exec.Command(m.binary, "-F", "/dev/null", "-S", socketPath, "-O", "exit", "rwx-preview").CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	if _, statErr := os.Stat(socketPath); errors.Is(statErr, os.ErrNotExist) {
+		return nil
+	}
+	message := strings.TrimSpace(string(output))
+	if message != "" {
+		return fmt.Errorf("unable to close SSH background process tunnel: %s", message)
+	}
+	return fmt.Errorf("unable to close SSH background process tunnel: %w", err)
 }
 
 func (m tunnelManager) CloseAll(runID, stateDirectory string) error {

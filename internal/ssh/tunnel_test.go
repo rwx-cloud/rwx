@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -120,6 +121,55 @@ func TestTunnelManagerCloseMatchesRun(t *testing.T) {
 	require.FileExists(t, statePath)
 	require.NoError(t, manager.Close(TunnelCloseConfig{Key: "web", RunID: "run-1", StateDirectory: config.StateDirectory}))
 	require.NoFileExists(t, statePath)
+}
+
+func TestTunnelManagerClosePreservesStateWhenControlMasterShutdownFails(t *testing.T) {
+	manager, config, statePath, state := openTunnelWithFailingShutdown(t)
+
+	err := manager.Close(TunnelCloseConfig{Key: config.Key, RunID: config.RunID, StateDirectory: config.StateDirectory})
+
+	require.ErrorContains(t, err, "control exit failed")
+	require.FileExists(t, statePath)
+	require.FileExists(t, state.SocketPath)
+}
+
+func TestTunnelManagerOpenPreservesStateWhenExistingControlMasterShutdownFails(t *testing.T) {
+	manager, config, statePath, state := openTunnelWithFailingShutdown(t)
+
+	_, err := manager.Open(config)
+
+	require.ErrorContains(t, err, "unable to replace existing background tunnel")
+	require.ErrorContains(t, err, "control exit failed")
+	require.FileExists(t, statePath)
+	require.FileExists(t, state.SocketPath)
+}
+
+func openTunnelWithFailingShutdown(t *testing.T) (tunnelManager, TunnelConfig, string, tunnelState) {
+	t.Helper()
+	tmp := t.TempDir()
+	binary := filepath.Join(tmp, "ssh")
+	script := "#!/bin/sh\ncase \"$*\" in *\"-O exit\"*) echo 'control exit failed' >&2; exit 1;; esac\nexit 0\n"
+	require.NoError(t, os.WriteFile(binary, []byte(script), 0o700))
+	manager := tunnelManager{binary: binary}
+	config := TunnelConfig{
+		Key: "web", RunID: "run-1", Address: "192.0.2.10:22",
+		PrivateUserKey: "private key", PublicHostKey: "ssh-ed25519 public-key",
+		TargetPort: 3000, StateDirectory: filepath.Join(tmp, "state"),
+	}
+	_, err := manager.Open(config)
+	require.NoError(t, err)
+
+	entries, err := os.ReadDir(config.StateDirectory)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	statePath := filepath.Join(config.StateDirectory, entries[0].Name(), "state.json")
+	data, err := os.ReadFile(statePath)
+	require.NoError(t, err)
+	var state tunnelState
+	require.NoError(t, json.Unmarshal(data, &state))
+	require.NoError(t, os.WriteFile(state.SocketPath, []byte("control socket"), 0o600))
+	t.Cleanup(func() { _ = os.Remove(state.SocketPath) })
+	return manager, config, statePath, state
 }
 
 func TestTunnelManagerReadinessRequiresConnectionToStayOpen(t *testing.T) {

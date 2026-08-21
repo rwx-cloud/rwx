@@ -1360,6 +1360,40 @@ rwx sandbox exec -- <command> syncs local changes before it runs.
 		require.Less(t, checkoutIndex, restartIndex)
 	})
 
+	t.Run("closes the tunnel when the process stops before becoming ready", func(t *testing.T) {
+		setup, _ := setupBackground(t)
+		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
+			switch {
+			case strings.HasPrefix(command, "__rwx_sandbox_process_start__ "):
+				return 0, `{"key":"web","status":"running","targetPort":3100}`, "", nil
+			case strings.HasPrefix(command, "__rwx_sandbox_process_status__ "):
+				return 0, `{"key":"web","status":"stopped","targetPort":3100,"stdoutPath":"/tmp/web.stdout","stderrPath":"/tmp/web.stderr"}`, "", nil
+			default:
+				return 0, "", "", nil
+			}
+		}
+		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: "http"}, nil
+		}
+		setup.mockTunnel.MockIsReady = func(int) bool { return false }
+		var closeConfig rwxssh.TunnelCloseConfig
+		setup.mockTunnel.MockClose = func(cfg rwxssh.TunnelCloseConfig) error {
+			closeConfig = cfg
+			return fmt.Errorf("control exit failed")
+		}
+
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command: []string{"bin/server"}, Name: "web", TargetPort: 3100, RunID: "run-background", Json: true,
+		})
+
+		require.ErrorContains(t, err, `background process "web" stopped before port 3100 became ready`)
+		require.ErrorContains(t, err, "stdout: /tmp/web.stdout; stderr: /tmp/web.stderr")
+		require.ErrorContains(t, err, "additionally failed to close local tunnel: control exit failed")
+		require.Equal(t, "web", closeConfig.Key)
+		require.Equal(t, "run-background", closeConfig.RunID)
+		require.NotEmpty(t, closeConfig.StateDirectory)
+	})
+
 	t.Run("stop closes the matching tunnel without syncing", func(t *testing.T) {
 		setup, commands := setupBackground(t)
 		setup.mockGit.MockGetHeadError = fmt.Errorf("git should not be consulted")
