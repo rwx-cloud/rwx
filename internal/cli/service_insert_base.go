@@ -184,6 +184,11 @@ func (s Service) getFilesForBaseInsert(entries []RwxDirectoryEntry) ([]BaseLayer
 			return false
 		}
 
+		// Skip package definitions; bases are not valid in them
+		if doc.HasPackage() {
+			return false
+		}
+
 		// Skip if all tasks in this file are embedded runs
 		if doc.AllTasksAreEmbeddedRuns() {
 			return false
