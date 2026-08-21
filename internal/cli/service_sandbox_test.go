@@ -20,6 +20,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/git"
+	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
@@ -1007,6 +1008,486 @@ func TestService_ExecSandbox(t *testing.T) {
 	})
 }
 
+func TestService_SyncSandbox(t *testing.T) {
+	t.Run("requires an already-running sandbox", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{}, nil
+		}
+
+		_, err := setup.service.SyncSandbox(cli.SyncSandboxConfig{Json: true})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "No active sandbox found")
+		require.Contains(t, err.Error(), "rwx sandbox start")
+	})
+
+	t.Run("reuses exec preparation without running a command or pulling changes", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-sync"
+		address := "192.168.1.1:22"
+		localHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		localPatch := []byte("diff --git a/file.txt b/file.txt\n")
+		setup.mockGit.MockGetHead = localHead
+		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+			return git.DirtyPatches{Unstaged: localPatch, Files: []string{"file.txt"}}, nil
+		}
+
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			require.Equal(t, runID, id)
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			require.Equal(t, address, addr)
+			return nil
+		}
+
+		var commands []string
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			commands = append(commands, cmd)
+			return 0, nil
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			commands = append(commands, cmd)
+			return 0, "", nil
+		}
+		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
+			commands = append(commands, command)
+			patch, err := io.ReadAll(stdin)
+			require.NoError(t, err)
+			require.Equal(t, localPatch, patch)
+			return 0, "", nil
+		}
+
+		result, err := setup.service.SyncSandbox(cli.SyncSandboxConfig{
+			RunID: runID,
+			Json:  true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, runID, result.RunID)
+		require.Empty(t, setup.mockStdout.String())
+		require.Equal(t, "__rwx_sandbox_lock_requested__", commands[0])
+		require.Contains(t, commands, "__rwx_sandbox_lock_released__")
+
+		checkoutIndex := sandboxCommandIndex(commands, "checkout -f")
+		cleanIndex := sandboxCommandIndex(commands, "/usr/bin/git clean -fd >/dev/null")
+		applyIndex := sandboxCommandIndex(commands, "/usr/bin/git apply --allow-empty -")
+		require.NotEqual(t, -1, checkoutIndex)
+		require.NotEqual(t, -1, cleanIndex)
+		require.NotEqual(t, -1, applyIndex)
+		require.Less(t, checkoutIndex, cleanIndex)
+		require.Less(t, cleanIndex, applyIndex)
+
+		for _, cmd := range commands {
+			require.NotContains(t, cmd, "git diff --binary --full-index", "sync should not pull sandbox changes locally")
+		}
+
+		require.Nil(t, findEvent(setup.drainEvents(), "sandbox.exec"))
+	})
+
+	t.Run("prints success without running a foreground command", func(t *testing.T) {
+		setup := setupTest(t)
+
+		runID := "run-sync-output"
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) { return 0, "", nil }
+
+		_, err := setup.service.SyncSandbox(cli.SyncSandboxConfig{RunID: runID})
+
+		require.NoError(t, err)
+		require.Equal(t, "Pushed local changes to sandbox.\n", setup.mockStdout.String())
+	})
+}
+
+func TestService_BackgroundSandbox(t *testing.T) {
+	setupBackground := func(t *testing.T) (*testSetup, *[]string) {
+		t.Helper()
+		setup := setupTest(t)
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
+		commands := []string{}
+		setup.mockSSH.MockExecuteCommand = func(command string) (int, error) {
+			commands = append(commands, command)
+			return 0, nil
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+			commands = append(commands, command)
+			if strings.HasPrefix(command, "__rwx_sandbox_process_start__ ") {
+				return 0, `{"key":"web","status":"running","targetPort":3100,"pid":243,"pgid":243}`, nil
+			}
+			return 0, "", nil
+		}
+		return setup, &commands
+	}
+
+	t.Run("validates names before contacting the sandbox", func(t *testing.T) {
+		setup := setupTest(t)
+		invalidName := "../web"
+		for action, run := range map[string]func() error{
+			"start": func() error {
+				_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{Name: invalidName, Command: []string{"bin/server"}})
+				return err
+			},
+			"restart": func() error {
+				_, err := setup.service.RestartSandboxBackground(cli.SandboxBackgroundConfig{Name: invalidName})
+				return err
+			},
+			"stop": func() error {
+				_, err := setup.service.StopSandboxBackground(cli.SandboxBackgroundConfig{Name: invalidName})
+				return err
+			},
+			"logs": func() error {
+				_, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{Name: invalidName})
+				return err
+			},
+		} {
+			t.Run(action, func(t *testing.T) {
+				require.EqualError(t, run(), "background process name may contain only letters, numbers, underscores, and hyphens")
+			})
+		}
+
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{Command: []string{"bin/server"}})
+		require.EqualError(t, err, "background process name is required")
+
+		_, err = setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Name: strings.Repeat("a", 256), Command: []string{"bin/server"},
+		})
+		require.EqualError(t, err, "background process name must be at most 255 bytes")
+	})
+
+	t.Run("syncs, starts a managed process, and opens a local tunnel", func(t *testing.T) {
+		setup, commands := setupBackground(t)
+		var tunnelConfig rwxssh.TunnelConfig
+		setup.mockTunnel.MockOpen = func(cfg rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			tunnelConfig = cfg
+			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: cfg.Scheme}, nil
+		}
+
+		result, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command: []string{
+				"/bin/sh",
+				"-lc",
+				`mkdir -p /tmp/rwx-preview && printf "ok\n" > /tmp/rwx-preview/index.html && python3 -m http.server 3100`,
+			},
+			Name:       "web",
+			TargetPort: 3100,
+			LocalPort:  8310,
+			RunID:      "run-preview",
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-preview", result.RunID)
+		require.Equal(t, "web", result.Name)
+		require.Equal(t, 8310, result.LocalPort)
+		require.Equal(t, "http://127.0.0.1:8310", result.URL)
+		require.Equal(t, "web", tunnelConfig.Key)
+		require.Equal(t, "run-preview", tunnelConfig.RunID)
+		require.Equal(t, "192.168.1.1:22", tunnelConfig.Address)
+		require.Equal(t, 8310, tunnelConfig.LocalPort)
+		require.Equal(t, 3100, tunnelConfig.TargetPort)
+		require.Equal(t, "http", tunnelConfig.Scheme)
+		require.Equal(t, "http", result.Scheme)
+
+		processIndex := slices.IndexFunc(*commands, func(command string) bool {
+			return strings.HasPrefix(command, "__rwx_sandbox_process_start__ ")
+		})
+		require.NotEqual(t, -1, processIndex)
+		var processRequest struct {
+			Key        string `json:"key"`
+			Command    string `json:"command"`
+			TargetPort int    `json:"targetPort"`
+		}
+		payload := strings.TrimPrefix((*commands)[processIndex], "__rwx_sandbox_process_start__ ")
+		require.NoError(t, json.Unmarshal([]byte(payload), &processRequest))
+		require.Equal(t, "web", processRequest.Key)
+		require.Equal(t, 3100, processRequest.TargetPort)
+		require.Contains(t, processRequest.Command, "python3 -m http.server 3100")
+		checkoutIndex := sandboxCommandIndex(*commands, "checkout -f")
+		require.NotEqual(t, -1, checkoutIndex)
+		require.Less(t, checkoutIndex, processIndex)
+		require.Equal(t, "__rwx_sandbox_lock_requested__", (*commands)[0])
+		require.Equal(t, "__rwx_sandbox_lock_released__", (*commands)[len(*commands)-1])
+		for _, command := range *commands {
+			require.NotContains(t, command, "__rwx_sandbox_preview_")
+			require.False(t, isSandboxPullDiffCommand(command), "preview must not pull changes back")
+		}
+	})
+
+	t.Run("starts without a tunnel when no port is requested", func(t *testing.T) {
+		setup, commands := setupBackground(t)
+		var closeConfig rwxssh.TunnelCloseConfig
+		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			require.Fail(t, "a portless process must not open a tunnel")
+			return rwxssh.TunnelResult{}, nil
+		}
+		setup.mockTunnel.MockClose = func(cfg rwxssh.TunnelCloseConfig) error {
+			closeConfig = cfg
+			return nil
+		}
+
+		result, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command: []string{"bin/worker"},
+			Name:    "worker",
+			RunID:   "run-background",
+		})
+
+		require.NoError(t, err)
+		require.Zero(t, result.TargetPort)
+		require.Empty(t, result.URL)
+		require.Equal(t, "worker", closeConfig.Key)
+		require.Equal(t, "run-background", closeConfig.RunID)
+		require.Equal(t, "Started background process \"worker\".\n", setup.mockStdout.String())
+		processIndex := slices.IndexFunc(*commands, func(command string) bool {
+			return strings.HasPrefix(command, "__rwx_sandbox_process_start__ ")
+		})
+		require.NotEqual(t, -1, processIndex)
+		var request map[string]any
+		require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix((*commands)[processIndex], "__rwx_sandbox_process_start__ ")), &request))
+		require.Equal(t, "worker", request["key"])
+		_, hasTargetPort := request["targetPort"]
+		require.False(t, hasTargetPort)
+	})
+
+	t.Run("prints preview URL and update commands in text mode", func(t *testing.T) {
+		setup, _ := setupBackground(t)
+		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: "https"}, nil
+		}
+
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command:    []string{"bin/server"},
+			Name:       "web",
+			TargetPort: 3100,
+			Scheme:     "https",
+			RunID:      "run-preview",
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, `Preview "web": https://127.0.0.1:8310
+
+After local edits:
+  Hot reload:    rwx sandbox push
+  Hard restart:  rwx sandbox background restart --name web
+
+rwx sandbox exec -- <command> syncs local changes before it runs.
+`, setup.mockStdout.String())
+	})
+
+	t.Run("rejects a local port without a sandbox port", func(t *testing.T) {
+		setup := setupTest(t)
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command:   []string{"bin/worker"},
+			Name:      "worker",
+			LocalPort: 8310,
+		})
+		require.EqualError(t, err, "--local-port requires --port")
+	})
+
+	t.Run("rejects a scheme without a sandbox port", func(t *testing.T) {
+		setup := setupTest(t)
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command: []string{"bin/worker"},
+			Name:    "worker",
+			Scheme:  "https",
+		})
+		require.EqualError(t, err, "--scheme requires --port")
+	})
+
+	t.Run("rejects an unsupported URL scheme", func(t *testing.T) {
+		setup := setupTest(t)
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command:    []string{"bin/server"},
+			Name:       "web",
+			TargetPort: 3100,
+			Scheme:     "ftp",
+		})
+		require.EqualError(t, err, "--scheme must be http or https")
+	})
+
+	t.Run("syncs before restarting and reopens its tunnel", func(t *testing.T) {
+		setup, commands := setupBackground(t)
+		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+			*commands = append(*commands, command)
+			if strings.HasPrefix(command, "__rwx_sandbox_process_restart__ ") {
+				return 0, `{"key":"web","status":"running","targetPort":3100}`, nil
+			}
+			return 0, "", nil
+		}
+		var tunnelConfig rwxssh.TunnelConfig
+		setup.mockTunnel.MockOpen = func(cfg rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			tunnelConfig = cfg
+			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: "https"}, nil
+		}
+
+		result, err := setup.service.RestartSandboxBackground(cli.SandboxBackgroundConfig{
+			Name: "web", RunID: "run-background", Json: true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "https://127.0.0.1:8310", result.URL)
+		require.Equal(t, "https", result.Scheme)
+		require.Equal(t, 0, tunnelConfig.LocalPort, "restart should let the tunnel manager reuse its saved local port")
+		checkoutIndex := sandboxCommandIndex(*commands, "checkout -f")
+		restartIndex := slices.IndexFunc(*commands, func(command string) bool {
+			return strings.HasPrefix(command, "__rwx_sandbox_process_restart__ ")
+		})
+		require.NotEqual(t, -1, checkoutIndex)
+		require.NotEqual(t, -1, restartIndex)
+		require.Less(t, checkoutIndex, restartIndex)
+	})
+
+	t.Run("closes the tunnel when the process stops before becoming ready", func(t *testing.T) {
+		setup, _ := setupBackground(t)
+		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
+			switch {
+			case strings.HasPrefix(command, "__rwx_sandbox_process_start__ "):
+				return 0, `{"key":"web","status":"running","targetPort":3100}`, "", nil
+			case strings.HasPrefix(command, "__rwx_sandbox_process_status__ "):
+				return 0, `{"key":"web","status":"stopped","targetPort":3100,"stdoutPath":"/tmp/web.stdout","stderrPath":"/tmp/web.stderr"}`, "", nil
+			default:
+				return 0, "", "", nil
+			}
+		}
+		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: "http"}, nil
+		}
+		setup.mockTunnel.MockIsReady = func(int) bool { return false }
+		var closeConfig rwxssh.TunnelCloseConfig
+		setup.mockTunnel.MockClose = func(cfg rwxssh.TunnelCloseConfig) error {
+			closeConfig = cfg
+			return fmt.Errorf("control exit failed")
+		}
+
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command: []string{"bin/server"}, Name: "web", TargetPort: 3100, RunID: "run-background", Json: true,
+		})
+
+		require.ErrorContains(t, err, `background process "web" stopped before port 3100 became ready`)
+		require.ErrorContains(t, err, "stdout: /tmp/web.stdout; stderr: /tmp/web.stderr")
+		require.ErrorContains(t, err, "additionally failed to close local tunnel: control exit failed")
+		require.Equal(t, "web", closeConfig.Key)
+		require.Equal(t, "run-background", closeConfig.RunID)
+		require.NotEmpty(t, closeConfig.StateDirectory)
+	})
+
+	t.Run("stop closes the matching tunnel without syncing", func(t *testing.T) {
+		setup, commands := setupBackground(t)
+		setup.mockGit.MockGetHeadError = fmt.Errorf("git should not be consulted")
+		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+			*commands = append(*commands, command)
+			return 0, `{"key":"web","status":"stopped"}`, nil
+		}
+		var closeConfig rwxssh.TunnelCloseConfig
+		setup.mockTunnel.MockClose = func(cfg rwxssh.TunnelCloseConfig) error {
+			closeConfig = cfg
+			return nil
+		}
+
+		result, err := setup.service.StopSandboxBackground(cli.SandboxBackgroundConfig{
+			Name: "web", RunID: "run-background", Json: true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "stopped", result.Status)
+		require.Equal(t, "web", closeConfig.Key)
+		require.Equal(t, "run-background", closeConfig.RunID)
+		require.True(t, slices.ContainsFunc(*commands, func(command string) bool {
+			return strings.HasPrefix(command, "__rwx_sandbox_process_stop__ ")
+		}))
+		for _, command := range *commands {
+			require.NotContains(t, command, "checkout -f")
+		}
+	})
+
+	t.Run("does not open a tunnel when the agent lacks process directives", func(t *testing.T) {
+		setup, _ := setupBackground(t)
+		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
+			if strings.HasPrefix(command, "__rwx_sandbox_process_start__ ") {
+				return 127, "", "sh: " + command + ": command not found", nil
+			}
+			exitCode, err := setup.mockSSH.ExecuteCommand(command)
+			return exitCode, "", "", err
+		}
+		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			require.Fail(t, "tunnel must not open when process directives are unavailable")
+			return rwxssh.TunnelResult{}, nil
+		}
+
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command:    []string{"bin/server"},
+			Name:       "web",
+			TargetPort: 3000,
+			RunID:      "run-preview-old-agent",
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.EqualError(t, err, "background processes are not supported by this sandbox")
+		require.NotContains(t, err.Error(), "__rwx_sandbox_")
+		require.NotContains(t, setup.mockStderr.String(), "__rwx_sandbox_")
+	})
+
+	t.Run("returns managed process diagnostics without exposing directives", func(t *testing.T) {
+		setup, _ := setupBackground(t)
+		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
+			if strings.HasPrefix(command, "__rwx_sandbox_process_restart__ ") {
+				return 1, "", `sandbox process "web" has no stored definition`, nil
+			}
+			exitCode, err := setup.mockSSH.ExecuteCommand(command)
+			return exitCode, "", "", err
+		}
+
+		_, err := setup.service.RestartSandboxBackground(cli.SandboxBackgroundConfig{
+			Name: "web", RunID: "run-background", Json: true,
+		})
+
+		require.EqualError(t, err, `sandbox agent failed to restart managed process: sandbox process "web" has no stored definition`)
+		require.NotContains(t, err.Error(), "__rwx_sandbox_")
+	})
+
+	t.Run("requires an already-running sandbox", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{}, nil
+		}
+
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command:    []string{"bin/server"},
+			Name:       "web",
+			TargetPort: 3000,
+			Json:       true,
+		})
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "No active sandbox found")
+		require.Contains(t, err.Error(), "rwx sandbox start")
+	})
+}
+
 func TestService_ExecSandbox_Sync(t *testing.T) {
 	t.Run("returns clear error when local HEAD is unavailable", func(t *testing.T) {
 		setup := setupTest(t)
@@ -1038,7 +1519,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		})
 
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "sandbox sync requires a git repository with a valid HEAD")
+		require.Contains(t, err.Error(), "sandbox push requires a git repository with a valid HEAD")
 		require.Contains(t, err.Error(), "not a git repository")
 	})
 
@@ -3391,15 +3872,16 @@ func TestService_ExecSandbox_ConcurrentAutoCreate(t *testing.T) {
 		stdout2 := &strings.Builder{}
 		stderr2 := &strings.Builder{}
 		service2, err := cli.NewService(cli.Config{
-			APIClient:   setup.mockAPI,
-			SSHClient:   setup.mockSSH,
-			GitClient:   setup.mockGit,
-			DockerCLI:   setup.mockDocker,
-			Stdin:       &bytes.Buffer{},
-			Stdout:      stdout2,
-			StdoutIsTTY: false,
-			Stderr:      stderr2,
-			StderrIsTTY: false,
+			APIClient:        setup.mockAPI,
+			SSHClient:        setup.mockSSH,
+			SSHTunnelManager: setup.mockTunnel,
+			GitClient:        setup.mockGit,
+			DockerCLI:        setup.mockDocker,
+			Stdin:            &bytes.Buffer{},
+			Stdout:           stdout2,
+			StdoutIsTTY:      false,
+			Stderr:           stderr2,
+			StderrIsTTY:      false,
 		})
 		require.NoError(t, err)
 
@@ -4932,6 +5414,11 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 		}
 
 		sshEndSent := false
+		closedTunnelRunID := ""
+		setup.mockTunnel.MockCloseAll = func(runID, stateDirectory string) error {
+			closedTunnelRunID = runID
+			return nil
+		}
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			if cmd == "__rwx_sandbox_end__" {
@@ -4952,6 +5439,7 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 
 		require.NoError(t, err)
 		require.True(t, sshEndSent, "expected __rwx_sandbox_end__ to be sent to old sandbox")
+		require.Equal(t, "run-existing", closedTunnelRunID)
 		require.Equal(t, "run-new", result.RunID)
 
 		storage, loadErr := cli.LoadSandboxStorage()

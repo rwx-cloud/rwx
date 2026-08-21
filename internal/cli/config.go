@@ -8,6 +8,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/docs"
 	"github.com/rwx-cloud/rwx/internal/docstoken"
 	"github.com/rwx-cloud/rwx/internal/errors"
+	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
 	"github.com/rwx-cloud/rwx/internal/telemetry"
 	"github.com/rwx-cloud/rwx/internal/versions"
 )
@@ -15,6 +16,7 @@ import (
 type Config struct {
 	APIClient            APIClient
 	SSHClient            SSHClient
+	SSHTunnelManager     rwxssh.TunnelManager
 	GitClient            GitClient
 	DockerCLI            docker.Client
 	DocsClient           docs.Client
@@ -38,6 +40,10 @@ func (c Config) Validate() error {
 
 	if c.SSHClient == nil {
 		return errors.New("missing SSH client constructor")
+	}
+
+	if c.SSHTunnelManager == nil {
+		return errors.New("missing SSH tunnel manager")
 	}
 
 	if c.GitClient == nil {

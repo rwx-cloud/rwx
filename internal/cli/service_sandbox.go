@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -14,14 +15,21 @@ import (
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/git"
+	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
 
 	"golang.org/x/crypto/ssh"
 )
 
 const (
-	sandboxDirectiveLockRequested = "__rwx_sandbox_lock_requested__"
-	sandboxDirectiveLockReleased  = "__rwx_sandbox_lock_released__"
-	rwxCLISSHUser                 = "rwx-cli"
+	sandboxDirectiveLockRequested  = "__rwx_sandbox_lock_requested__"
+	sandboxDirectiveLockReleased   = "__rwx_sandbox_lock_released__"
+	sandboxDirectiveProcessStart   = "__rwx_sandbox_process_start__"
+	sandboxDirectiveProcessRestart = "__rwx_sandbox_process_restart__"
+	sandboxDirectiveProcessStop    = "__rwx_sandbox_process_stop__"
+	sandboxDirectiveProcessStatus  = "__rwx_sandbox_process_status__"
+	sandboxDirectiveProcessLogs    = "__rwx_sandbox_process_logs__"
+	sandboxBackgroundNameSizeLimit = 255
+	rwxCLISSHUser                  = "rwx-cli"
 	// Reuse one fixed ref (force-pushed) rather than a unique ref per push so the
 	// sandbox's ref namespace doesn't accumulate dangling refs.
 	sandboxPushRef = "refs/rwx/sync-push"
@@ -59,6 +67,34 @@ type ExecSandboxConfig struct {
 	Reset          bool
 }
 
+type SyncSandboxConfig struct {
+	RunID string
+	Json  bool
+}
+
+type BackgroundSandboxConfig struct {
+	Command    []string
+	Name       string
+	TargetPort int
+	LocalPort  int
+	Scheme     string
+	RunID      string
+	Json       bool
+}
+
+type SandboxBackgroundConfig struct {
+	Name  string
+	RunID string
+	Json  bool
+}
+
+type SandboxBackgroundLogsConfig struct {
+	Name   string
+	RunID  string
+	Json   bool
+	Follow bool
+}
+
 type ListSandboxesConfig struct {
 	Json bool
 }
@@ -90,6 +126,61 @@ type ExecSandboxResult struct {
 	ExitCode    int
 	RunURL      string
 	PulledFiles []string
+}
+
+type SyncSandboxResult struct {
+	RunID  string
+	RunURL string
+}
+
+type SandboxBackgroundResult struct {
+	RunID       string
+	Name        string
+	Status      string
+	TargetPort  int
+	LocalPort   int
+	Scheme      string
+	URL         string
+	PID         int
+	PGID        int
+	StartedAt   string
+	CompletedAt string
+	ExitCode    *int
+	Signal      string
+	StdoutPath  string
+	StderrPath  string
+}
+
+type sandboxOperationConfig struct {
+	ConfigFile           string
+	RunID                string
+	RwxDirectory         string
+	Json                 bool
+	InitParameters       map[string]string
+	Reset                bool
+	RequireExisting      bool
+	SkipSync             bool
+	ShowReconnectionHint bool
+	LockWaitMessage      string
+}
+
+type syncedSandbox struct {
+	cwd                string
+	branch             string
+	runID              string
+	configFile         string
+	runURL             string
+	syncPushMs         int64
+	syncPushPatchBytes int
+	connectionInfo     api.SandboxConnectionInfo
+	release            func()
+}
+
+func (sandbox *syncedSandbox) close() {
+	if sandbox.release != nil {
+		sandbox.release()
+		sandbox.release = nil
+	}
 }
 
 type ListSandboxesResult struct {
@@ -434,17 +525,355 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 	return result, nil
 }
 
-func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) {
-	execStart := time.Now()
+func (s Service) SyncSandbox(cfg SyncSandboxConfig) (*SyncSandboxResult, error) {
+	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		RunID:           cfg.RunID,
+		Json:            cfg.Json,
+		RequireExisting: true,
+		LockWaitMessage: "Waiting for another sandbox operation to complete...",
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer sandbox.close()
+
+	if !cfg.Json {
+		fmt.Fprintln(s.Stdout, "Pushed local changes to sandbox.")
+	}
+
+	return &SyncSandboxResult{RunID: sandbox.runID, RunURL: sandbox.runURL}, nil
+}
+
+func (s Service) BackgroundSandbox(cfg BackgroundSandboxConfig) (*SandboxBackgroundResult, error) {
+	if err := validateSandboxBackgroundName(cfg.Name); err != nil {
+		return nil, err
+	}
+	if cfg.TargetPort < 0 || cfg.TargetPort > 65535 {
+		return nil, fmt.Errorf("background process port must be between 1 and 65535")
+	}
+	if cfg.LocalPort < 0 || cfg.LocalPort > 65535 {
+		return nil, fmt.Errorf("local background process port must be between 1 and 65535")
+	}
+	if cfg.LocalPort != 0 && cfg.TargetPort == 0 {
+		return nil, fmt.Errorf("--local-port requires --port")
+	}
+	if cfg.Scheme != "" && cfg.TargetPort == 0 {
+		return nil, fmt.Errorf("--scheme requires --port")
+	}
+	if cfg.TargetPort != 0 {
+		if cfg.Scheme == "" {
+			cfg.Scheme = "http"
+		}
+		if cfg.Scheme != "http" && cfg.Scheme != "https" {
+			return nil, fmt.Errorf("--scheme must be http or https")
+		}
+	}
+	if len(cfg.Command) == 0 {
+		return nil, fmt.Errorf("background process command is required")
+	}
+
+	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		RunID:           cfg.RunID,
+		Json:            cfg.Json,
+		RequireExisting: true,
+		LockWaitMessage: "Waiting for another sandbox operation to complete...",
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer sandbox.close()
+
+	process, err := s.executeSandboxProcessDirective(sandboxDirectiveProcessStart, struct {
+		Key        string `json:"key"`
+		Command    string `json:"command"`
+		TargetPort int    `json:"targetPort,omitempty"`
+	}{
+		Key:        cfg.Name,
+		Command:    shellescape.QuoteCommand(cfg.Command),
+		TargetPort: cfg.TargetPort,
+	}, "start")
+	if err != nil {
+		return nil, err
+	}
+	process.Key = cfg.Name
+	process.TargetPort = cfg.TargetPort
+	return s.finishSandboxBackground(sandbox, process, cfg.LocalPort, cfg.Scheme, cfg.Json, "Started")
+}
+
+func (s Service) RestartSandboxBackground(cfg SandboxBackgroundConfig) (*SandboxBackgroundResult, error) {
+	if err := validateSandboxBackgroundName(cfg.Name); err != nil {
+		return nil, err
+	}
+	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		RunID:           cfg.RunID,
+		Json:            cfg.Json,
+		RequireExisting: true,
+		LockWaitMessage: "Waiting for another sandbox operation to complete...",
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer sandbox.close()
+
+	process, err := s.executeSandboxProcessDirective(sandboxDirectiveProcessRestart, struct {
+		Key string `json:"key"`
+	}{Key: cfg.Name}, "restart")
+	if err != nil {
+		return nil, err
+	}
+	process.Key = cfg.Name
+	return s.finishSandboxBackground(sandbox, process, 0, "", cfg.Json, "Restarted")
+}
+
+func (s Service) StopSandboxBackground(cfg SandboxBackgroundConfig) (*SandboxBackgroundResult, error) {
+	if err := validateSandboxBackgroundName(cfg.Name); err != nil {
+		return nil, err
+	}
+	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		RunID:           cfg.RunID,
+		Json:            cfg.Json,
+		RequireExisting: true,
+		SkipSync:        true,
+		LockWaitMessage: "Waiting for another sandbox operation to complete...",
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer sandbox.close()
+
+	stateDirectory, stateErr := sandboxTunnelStateDirectory()
+	if stateErr == nil {
+		stateErr = s.SSHTunnelManager.Close(rwxssh.TunnelCloseConfig{
+			Key: cfg.Name, RunID: sandbox.runID, StateDirectory: stateDirectory,
+		})
+	}
+	process, processErr := s.executeSandboxProcessDirective(sandboxDirectiveProcessStop, struct {
+		Key string `json:"key"`
+	}{Key: cfg.Name}, "stop")
+	if processErr != nil && stateErr != nil {
+		return nil, fmt.Errorf("%v; also failed to close local tunnel: %v", processErr, stateErr)
+	}
+	if processErr != nil {
+		return nil, processErr
+	}
+	if stateErr != nil {
+		return nil, errors.Wrap(stateErr, "failed to close local tunnel")
+	}
+
+	result := sandboxBackgroundResult(sandbox.runID, process)
+	if !cfg.Json {
+		fmt.Fprintf(s.Stdout, "Stopped background process %q.\n", cfg.Name)
+	}
+	return result, nil
+}
+
+func (s Service) LogsSandboxBackground(cfg SandboxBackgroundLogsConfig) (*SandboxBackgroundResult, error) {
+	if err := validateSandboxBackgroundName(cfg.Name); err != nil {
+		return nil, err
+	}
+	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		RunID:           cfg.RunID,
+		Json:            cfg.Json,
+		RequireExisting: true,
+		SkipSync:        true,
+		LockWaitMessage: "Waiting for another sandbox operation to complete...",
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer sandbox.close()
+
+	process, err := s.executeSandboxProcessDirective(sandboxDirectiveProcessLogs, struct {
+		Key string `json:"key"`
+	}{Key: cfg.Name}, "get logs for")
+	if err != nil {
+		return nil, err
+	}
+	result := sandboxBackgroundResult(sandbox.runID, process)
+	if cfg.Json {
+		return result, nil
+	}
+
+	sandbox.close()
+	if err := s.connectSSH(&sandbox.connectionInfo); err != nil {
+		return nil, errors.Wrap(err, "failed to reconnect for sandbox process logs")
+	}
+	defer s.SSHClient.Close()
+	if cfg.Follow {
+		command := fmt.Sprintf("tail -n +1 -F -- %s %s", quoteShellArg(process.StdoutPath), quoteShellArg(process.StderrPath))
+		exitCode, err := s.SSHClient.ExecuteCommand(command)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to follow sandbox process logs")
+		}
+		if exitCode != 0 {
+			return nil, fmt.Errorf("failed to follow sandbox process logs (exit code %d)", exitCode)
+		}
+		return result, nil
+	}
+	command := fmt.Sprintf(
+		"printf '%%s\\n' '--- stdout ---'; tail -n +1 -- %s; printf '%%s\\n' '--- stderr ---'; tail -n +1 -- %s",
+		quoteShellArg(process.StdoutPath), quoteShellArg(process.StderrPath),
+	)
+	exitCode, err := s.SSHClient.ExecuteCommand(command)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to read sandbox process logs")
+	}
+	if exitCode != 0 {
+		return nil, fmt.Errorf("failed to read sandbox process logs (exit code %d)", exitCode)
+	}
+	return result, nil
+}
+
+type sandboxProcessResponse struct {
+	Key         string `json:"key"`
+	Status      string `json:"status"`
+	TargetPort  int    `json:"targetPort"`
+	PID         int    `json:"pid"`
+	PGID        int    `json:"pgid"`
+	StartedAt   string `json:"startedAt"`
+	CompletedAt string `json:"completedAt"`
+	ExitCode    *int   `json:"exitCode"`
+	Signal      string `json:"signal"`
+	StdoutPath  string `json:"stdoutPath"`
+	StderrPath  string `json:"stderrPath"`
+}
+
+func (s Service) executeSandboxProcessDirective(directive string, request any, action string) (sandboxProcessResponse, error) {
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return sandboxProcessResponse{}, errors.Wrap(err, "unable to encode sandbox process request")
+	}
+	exitCode, output, stderr, err := s.SSHClient.ExecuteCommandWithSeparateOutput(directive + " " + string(payload))
+	if err != nil {
+		return sandboxProcessResponse{}, errors.Wrapf(err, "failed to %s managed sandbox process", action)
+	}
+	if exitCode == 127 {
+		return sandboxProcessResponse{}, fmt.Errorf("background processes are not supported by this sandbox")
+	}
+	if exitCode != 0 {
+		stderr = strings.TrimSpace(stderr)
+		if stderr != "" && !strings.Contains(stderr, "__rwx_sandbox_") {
+			return sandboxProcessResponse{}, fmt.Errorf("sandbox agent failed to %s managed process: %s", action, stderr)
+		}
+		return sandboxProcessResponse{}, fmt.Errorf("sandbox agent failed to %s managed process (exit code %d)", action, exitCode)
+	}
+	var process sandboxProcessResponse
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &process); err != nil {
+		return sandboxProcessResponse{}, errors.Wrap(err, "unable to decode sandbox process response")
+	}
+	return process, nil
+}
+
+func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandboxProcessResponse, localPort int, scheme string, jsonMode bool, action string) (*SandboxBackgroundResult, error) {
+	result := sandboxBackgroundResult(sandbox.runID, process)
+	stateDirectory, err := sandboxTunnelStateDirectory()
+	if err != nil {
+		return nil, err
+	}
+	if process.TargetPort == 0 {
+		if err := s.SSHTunnelManager.Close(rwxssh.TunnelCloseConfig{
+			Key: process.Key, RunID: sandbox.runID, StateDirectory: stateDirectory,
+		}); err != nil {
+			return nil, errors.Wrap(err, "failed to close local tunnel")
+		}
+	} else {
+		tunnel, err := s.SSHTunnelManager.Open(rwxssh.TunnelConfig{
+			Key: process.Key, RunID: sandbox.runID, Address: sandbox.connectionInfo.Address,
+			PrivateUserKey: sandbox.connectionInfo.PrivateUserKey, PublicHostKey: sandbox.connectionInfo.PublicHostKey,
+			LocalPort: localPort, TargetPort: process.TargetPort, Scheme: scheme, StateDirectory: stateDirectory,
+		})
+		if err != nil {
+			return nil, err
+		}
+		result.LocalPort = tunnel.LocalPort
+		result.Scheme = tunnel.Scheme
+		result.URL = fmt.Sprintf("%s://127.0.0.1:%d", tunnel.Scheme, tunnel.LocalPort)
+
+		deadline := time.Now().Add(30 * time.Second)
+		for !s.SSHTunnelManager.IsReady(tunnel.LocalPort) {
+			status, statusErr := s.executeSandboxProcessDirective(sandboxDirectiveProcessStatus, struct {
+				Key string `json:"key"`
+			}{Key: process.Key}, "get status for")
+			if statusErr != nil {
+				return nil, statusErr
+			}
+			if status.Status != "running" {
+				processErr := fmt.Errorf("background process %q stopped before port %d became ready (status: %s; stdout: %s; stderr: %s)", process.Key, process.TargetPort, status.Status, status.StdoutPath, status.StderrPath)
+				closeErr := s.SSHTunnelManager.Close(rwxssh.TunnelCloseConfig{
+					Key: process.Key, RunID: sandbox.runID, StateDirectory: stateDirectory,
+				})
+				if closeErr != nil {
+					return nil, fmt.Errorf("%w; additionally failed to close local tunnel: %v", processErr, closeErr)
+				}
+				return nil, processErr
+			}
+			if time.Now().After(deadline) {
+				return nil, fmt.Errorf("timed out waiting for background process %q on %s; the process and tunnel are still running", process.Key, result.URL)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+
+	if !jsonMode {
+		if result.URL != "" {
+			fmt.Fprintf(s.Stdout, "Preview %q: %s\n\n", process.Key, result.URL)
+			fmt.Fprintln(s.Stdout, "After local edits:")
+			fmt.Fprintln(s.Stdout, "  Hot reload:    rwx sandbox push")
+			fmt.Fprintf(s.Stdout, "  Hard restart:  rwx sandbox background restart --name %s\n\n", process.Key)
+			fmt.Fprintln(s.Stdout, "rwx sandbox exec -- <command> syncs local changes before it runs.")
+		} else {
+			fmt.Fprintf(s.Stdout, "%s background process %q.\n", action, process.Key)
+		}
+	}
+	return result, nil
+}
+
+func sandboxBackgroundResult(runID string, process sandboxProcessResponse) *SandboxBackgroundResult {
+	return &SandboxBackgroundResult{
+		RunID: runID, Name: process.Key, Status: process.Status, TargetPort: process.TargetPort,
+		PID: process.PID, PGID: process.PGID, StartedAt: process.StartedAt, CompletedAt: process.CompletedAt,
+		ExitCode: process.ExitCode, Signal: process.Signal, StdoutPath: process.StdoutPath, StderrPath: process.StderrPath,
+	}
+}
+
+func validateSandboxBackgroundName(name string) error {
+	if name == "" {
+		return fmt.Errorf("background process name is required")
+	}
+	if len(name) > sandboxBackgroundNameSizeLimit {
+		return fmt.Errorf("background process name must be at most %d bytes", sandboxBackgroundNameSizeLimit)
+	}
+	for _, char := range name {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-' || char == '_' {
+			continue
+		}
+		return fmt.Errorf("background process name may contain only letters, numbers, underscores, and hyphens")
+	}
+	return nil
+}
+
+func sandboxTunnelStateDirectory() (string, error) {
+	storagePath, err := sandboxStoragePath()
+	if err != nil {
+		return "", errors.Wrap(err, "unable to determine background tunnel state directory")
+	}
+	return filepath.Join(filepath.Dir(storagePath), "previews"), nil
+}
+
+func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSandbox, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get current directory")
 	}
 	branch := GetCurrentGitBranch(cwd)
 
-	localHeadForSync, headErr := s.GitClient.GetHeadCommit()
-	if headErr != nil {
-		return nil, errors.Wrap(headErr, "sandbox sync requires a git repository with a valid HEAD")
+	var localHeadForSync string
+	if !cfg.SkipSync {
+		localHeadForSync, err = s.GitClient.GetHeadCommit()
+		if err != nil {
+			return nil, errors.Wrap(err, "sandbox push requires a git repository with a valid HEAD")
+		}
 	}
 
 	var runID string
@@ -480,7 +909,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	} else {
 		// Serialize sandbox resolution across concurrent CLI processes.
 		// The lock is released as soon as a run ID is determined so that
-		// the actual SSH exec can proceed concurrently (serialized by the
+		// the actual SSH operation can proceed concurrently (serialized by the
 		// agent-side lock instead).
 		lockFile, lockErr := s.lockSandboxStorageWithInfo(cfg.Json)
 		if lockErr != nil {
@@ -567,6 +996,9 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 				found = true
 			} else if len(activeSessions) > 1 {
 				UnlockSandboxStorage(lockFile)
+				if cfg.RequireExisting {
+					return nil, fmt.Errorf("Multiple active sandboxes found for branch %s.\nUse --id to select one.", branch)
+				}
 				return nil, fmt.Errorf("Multiple active sandboxes found for branch %s.\nSpecify a config file to select one, or use --id to specify a run ID.", branch)
 			}
 		}
@@ -639,6 +1071,11 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 			}
 		}
 
+		if !found && cfg.RequireExisting {
+			UnlockSandboxStorage(lockFile)
+			return nil, fmt.Errorf("No active sandbox found for branch %s.\nStart one with 'rwx sandbox start' or use --id to select an existing run.", branch)
+		}
+
 		if found && cfg.Reset {
 			connInfo, connErr := s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
 			if connErr == nil && connInfo.Sandboxable {
@@ -656,6 +1093,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 				}
 			}
 			s.waitForSandboxCompletion(runID, scopedToken)
+			s.closeSandboxTunnels(runID)
 			storage.DeleteSession(branch, configFile)
 			if saveErr := storage.Save(); saveErr != nil {
 				fmt.Fprintf(s.Stderr, "Warning: unable to save sandbox sessions: %v\n", saveErr)
@@ -694,13 +1132,13 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 				}
 			}
 		} else {
-			// Resolution complete — release the file lock so concurrent execs
+			// Resolution complete — release the file lock so concurrent operations
 			// can proceed. The agent-side lock serializes from here.
 			UnlockSandboxStorage(lockFile)
 		}
 	}
 
-	if !isNewSandbox && execCount >= 1 && !resetNagShown {
+	if cfg.ShowReconnectionHint && !isNewSandbox && execCount >= 1 && !resetNagShown {
 		fmt.Fprintf(s.Stderr, "Reconnecting to existing sandbox. To re-run setup tasks, use: rwx sandbox exec --reset -- <command>\n")
 		if nagLock, nagLockErr := s.lockSandboxStorageWithInfo(cfg.Json); nagLockErr == nil {
 			if nagStorage, nagLoadErr := LoadSandboxStorage(); nagLoadErr == nil {
@@ -741,11 +1179,10 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 		}
 		return nil, fmt.Errorf("Failed to connect to sandbox '%s': %v\nThe sandbox may have timed out. Run 'rwx sandbox reset %s' to restart.", runID, err, configFile)
 	}
-	defer s.SSHClient.Close()
 
-	// Acquire the distributed lock so concurrent exec calls on the same
+	// Acquire the distributed lock so concurrent operations on the same
 	// sandbox are serialized by the agent. Blocks until the lock is granted.
-	// Show a spinner if another exec is holding the lock.
+	// Show a spinner if another operation is holding the lock.
 	lockDone := make(chan struct{})
 	if !cfg.Json {
 		go func() {
@@ -755,7 +1192,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 			case <-lockDone:
 				return
 			case <-t.C:
-				stopSpinner := Spin("Waiting for another sandbox exec to complete...", s.StderrIsTTY, s.Stderr)
+				stopSpinner := Spin(cfg.LockWaitMessage, s.StderrIsTTY, s.Stderr)
 				<-lockDone
 				stopSpinner()
 			}
@@ -764,19 +1201,32 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	_, lockErr := s.SSHClient.ExecuteCommand(sandboxDirectiveLockRequested)
 	close(lockDone)
 	if lockErr != nil {
+		s.SSHClient.Close()
 		return nil, errors.Wrap(lockErr, "failed to acquire sandbox lock")
 	}
-	defer func() {
-		_, _ = s.SSHClient.ExecuteCommand(sandboxDirectiveLockReleased)
-	}()
 
-	// Sync local changes to sandbox
-	var syncPushMs int64
-	var syncPushPatchBytes int
+	result := &syncedSandbox{
+		cwd:            cwd,
+		branch:         branch,
+		runID:          runID,
+		configFile:     configFile,
+		runURL:         s.sandboxRunURL(&SandboxSession{RunURL: sessionRunURL}),
+		connectionInfo: *connInfo,
+		release: func() {
+			_, _ = s.SSHClient.ExecuteCommand(sandboxDirectiveLockReleased)
+			s.SSHClient.Close()
+		},
+	}
+
+	if cfg.SkipSync {
+		return result, nil
+	}
+
+	// Sync local changes to sandbox.
 	syncPushStart := time.Now()
-	patchBytes, err := s.prepareSandboxForExec(cfg.Json, isNewSandbox, localHeadForSync, connInfo)
-	syncPushMs = time.Since(syncPushStart).Milliseconds()
-	syncPushPatchBytes = patchBytes
+	patchBytes, err := s.syncLocalChangesToSandbox(cfg.Json, isNewSandbox, localHeadForSync, connInfo)
+	result.syncPushMs = time.Since(syncPushStart).Milliseconds()
+	result.syncPushPatchBytes = patchBytes
 	if err != nil {
 		if errors.Is(err, errors.ErrSandboxNoGitDir) {
 			// Stop the sandbox so the user gets a fresh one on retry
@@ -797,8 +1247,29 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 				fmt.Fprintf(s.Stderr, "Warning: failed to lock sandbox storage: %v\n", lockErr)
 			}
 		}
+		result.close()
 		return nil, errors.Wrap(err, "failed to sync changes to sandbox")
 	}
+
+	return result, nil
+}
+
+func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) {
+	execStart := time.Now()
+	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		ConfigFile:           cfg.ConfigFile,
+		RunID:                cfg.RunID,
+		RwxDirectory:         cfg.RwxDirectory,
+		Json:                 cfg.Json,
+		InitParameters:       cfg.InitParameters,
+		Reset:                cfg.Reset,
+		ShowReconnectionHint: true,
+		LockWaitMessage:      "Waiting for another sandbox exec to complete...",
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer sandbox.close()
 
 	// Execute command — shell-quote each argument so the remote shell
 	// preserves the original grouping (e.g. bash -c "cat README.md").
@@ -822,11 +1293,11 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	var syncPullSuccess bool
 	var syncPullRejCount int
 	pullStart := time.Now()
-	pulled, pullPatchBytes, pullErr := s.pullChangesFromSandbox(cwd, cfg.Json)
+	pulled, pullPatchBytes, pullErr := s.pullChangesFromSandbox(sandbox.cwd, cfg.Json)
 	syncPullMs = time.Since(pullStart).Milliseconds()
 	syncPullPatchBytes = pullPatchBytes
 	if pullErr != nil {
-		syncPullRejCount = len(findRejFiles(cwd, pulled))
+		syncPullRejCount = len(findRejFiles(sandbox.cwd, pulled))
 		s.recordTelemetry("sandbox.sync_pull", map[string]any{
 			"patch_bytes":    pullPatchBytes,
 			"duration_ms":    syncPullMs,
@@ -852,10 +1323,10 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	execNow := time.Now().UTC()
 	if lockFile, lockErr := s.lockSandboxStorageWithInfo(cfg.Json); lockErr == nil {
 		if storage, loadErr := LoadSandboxStorage(); loadErr == nil {
-			if session, ok := storage.GetSession(branch, configFile); ok {
+			if session, ok := storage.GetSession(sandbox.branch, sandbox.configFile); ok {
 				session.LastExecAt = &execNow
 				session.ExecCount++
-				storage.SetSession(branch, configFile, *session)
+				storage.SetSession(sandbox.branch, sandbox.configFile, *session)
 				_ = storage.Save()
 			}
 		}
@@ -865,14 +1336,13 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	s.recordTelemetry("sandbox.exec", map[string]any{
 		"duration_ms":      time.Since(execStart).Milliseconds(),
 		"exit_code":        exitCode,
-		"sync_push_ms":     syncPushMs,
+		"sync_push_ms":     sandbox.syncPushMs,
 		"sync_pull_ms":     syncPullMs,
-		"push_patch_bytes": syncPushPatchBytes,
+		"push_patch_bytes": sandbox.syncPushPatchBytes,
 		"pull_patch_bytes": syncPullPatchBytes,
 	})
 
-	runURL := s.sandboxRunURL(&SandboxSession{RunURL: sessionRunURL})
-	return &ExecSandboxResult{RunID: runID, ExitCode: exitCode, RunURL: runURL, PulledFiles: pulledFiles}, nil
+	return &ExecSandboxResult{RunID: sandbox.runID, ExitCode: exitCode, RunURL: sandbox.runURL, PulledFiles: pulledFiles}, nil
 }
 
 func (s Service) ListSandboxes(cfg ListSandboxesConfig) (*ListSandboxesResult, error) {
@@ -1090,6 +1560,7 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 		if wasRunning {
 			s.waitForSandboxCompletion(session.RunID, session.ScopedToken)
 		}
+		s.closeSandboxTunnels(session.RunID)
 
 		// Remove from storage
 		delete(storage.Sandboxes, keys[i])
@@ -1158,6 +1629,16 @@ func (s Service) waitForSandboxCompletion(runID, scopedToken string) {
 	fmt.Fprintf(s.Stderr, "Warning: timed out waiting for sandbox %s to fully stop\n", runID)
 }
 
+func (s Service) closeSandboxTunnels(runID string) {
+	stateDirectory, err := sandboxTunnelStateDirectory()
+	if err == nil {
+		err = s.SSHTunnelManager.CloseAll(runID, stateDirectory)
+	}
+	if err != nil {
+		fmt.Fprintf(s.Stderr, "Warning: failed to close local tunnels for sandbox %s: %v\n", runID, err)
+	}
+}
+
 func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -1215,6 +1696,7 @@ func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, erro
 			if cancelMethod != "" {
 				s.waitForSandboxCompletion(session.RunID, session.ScopedToken)
 			}
+			s.closeSandboxTunnels(session.RunID)
 
 			// Remove old session
 			storage.DeleteSession(branch, cfg.ConfigFile)
@@ -1379,9 +1861,9 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 	return files, patchBytes, nil
 }
 
-func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
+func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
 	if localHead == "" {
-		return 0, fmt.Errorf("sandbox sync requires a git repository with a valid HEAD")
+		return 0, fmt.Errorf("sandbox push requires a git repository with a valid HEAD")
 	}
 
 	s.warnUnresolvedRejectFiles()
@@ -1442,9 +1924,9 @@ func (s Service) prepareSandboxForExec(jsonMode bool, isNewSandbox bool, localHe
 		return patchBytes, syncPushErr
 	}
 	// A reused sandbox may still contain untracked files from the previous exec.
-	// Remove them before applying local dirty state so the command starts from a
-	// known baseline. A new sandbox may contain files prepared by its setup tasks,
-	// so preserve those on its first exec.
+	// Remove them before applying local dirty state so every operation starts from
+	// the same known baseline. A new sandbox may contain setup-created files, so
+	// preserve those on its first operation.
 	if !isNewSandbox {
 		exitCode, cleanErr := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand("/usr/bin/git clean -fd >/dev/null 2>&1"))
 		if cleanErr != nil {
