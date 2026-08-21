@@ -1488,6 +1488,133 @@ rwx sandbox exec -- <command> syncs local changes before it runs.
 	})
 }
 
+func TestService_LogsSandboxBackground(t *testing.T) {
+	setupLogs := func(t *testing.T, processResponse string) (*testSetup, *[]string, *int) {
+		t.Helper()
+		setup := setupTest(t)
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		connectCount := 0
+		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error {
+			connectCount++
+			return nil
+		}
+		commands := []string{}
+		setup.mockSSH.MockExecuteCommand = func(command string) (int, error) {
+			commands = append(commands, command)
+			return 0, nil
+		}
+		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
+			commands = append(commands, command)
+			if strings.HasPrefix(command, "__rwx_sandbox_process_logs__ ") {
+				return 0, processResponse, "", nil
+			}
+			return 0, "", "", nil
+		}
+		return setup, &commands, &connectCount
+	}
+
+	t.Run("prefers the combined log for a one-shot read", func(t *testing.T) {
+		setup, commands, connectCount := setupLogs(t, `{
+			"key":"web",
+			"stdoutPath":"/tmp/web.stdout",
+			"stderrPath":"/tmp/web.stderr",
+			"logPath":"/tmp/web.log"
+		}`)
+
+		_, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
+			Name: "web", RunID: "run-background",
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 2, *connectCount, "logs should reconnect after releasing the sandbox lock")
+		require.Equal(t, "tail -n +1 -- '/tmp/web.log'", (*commands)[len(*commands)-1])
+		require.NotContains(t, (*commands)[len(*commands)-1], "/tmp/web.stdout")
+		require.NotContains(t, (*commands)[len(*commands)-1], "/tmp/web.stderr")
+	})
+
+	for _, testCase := range []struct {
+		name            string
+		processResponse string
+	}{
+		{
+			name:            "uses legacy logs when logPath is absent",
+			processResponse: `{"key":"web","stdoutPath":"/tmp/web.stdout","stderrPath":"/tmp/web.stderr"}`,
+		},
+		{
+			name:            "uses legacy logs when logPath is empty",
+			processResponse: `{"key":"web","stdoutPath":"/tmp/web.stdout","stderrPath":"/tmp/web.stderr","logPath":""}`,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			setup, commands, _ := setupLogs(t, testCase.processResponse)
+
+			_, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
+				Name: "web", RunID: "run-background",
+			})
+
+			require.NoError(t, err)
+			require.Equal(t,
+				"printf '%s\\n' '--- stdout ---'; tail -n +1 -- '/tmp/web.stdout'; printf '%s\\n' '--- stderr ---'; tail -n +1 -- '/tmp/web.stderr'",
+				(*commands)[len(*commands)-1],
+			)
+		})
+	}
+
+	t.Run("follows the combined log after reconnecting", func(t *testing.T) {
+		setup, commands, connectCount := setupLogs(t, `{
+			"key":"web",
+			"stdoutPath":"/tmp/web.stdout",
+			"stderrPath":"/tmp/web.stderr",
+			"logPath":"/tmp/web.log"
+		}`)
+
+		_, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
+			Name: "web", RunID: "run-background", Follow: true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 2, *connectCount, "follow should resume on a fresh SSH connection")
+		require.Equal(t, "tail -n +1 -F -- '/tmp/web.log'", (*commands)[len(*commands)-1])
+		require.NotContains(t, (*commands)[len(*commands)-1], "/tmp/web.stdout")
+		require.NotContains(t, (*commands)[len(*commands)-1], "/tmp/web.stderr")
+	})
+
+	t.Run("returns a combined log read failure without falling back", func(t *testing.T) {
+		setup, commands, _ := setupLogs(t, `{
+			"key":"web",
+			"stdoutPath":"/tmp/web.stdout",
+			"stderrPath":"/tmp/web.stderr",
+			"logPath":"/tmp/web.log"
+		}`)
+		setup.mockSSH.MockExecuteCommand = func(command string) (int, error) {
+			*commands = append(*commands, command)
+			if strings.HasPrefix(command, "tail -n +1 -- ") {
+				return -1, fmt.Errorf("remote read failed: permission denied")
+			}
+			return 0, nil
+		}
+
+		_, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
+			Name: "web", RunID: "run-background",
+		})
+
+		require.EqualError(t, err, "failed to read sandbox process logs: remote read failed: permission denied")
+		logReadCommands := slices.DeleteFunc(slices.Clone(*commands), func(command string) bool {
+			return !strings.HasPrefix(command, "tail -n +1 -- ")
+		})
+		require.Equal(t, []string{"tail -n +1 -- '/tmp/web.log'"}, logReadCommands)
+		require.NotContains(t, strings.Join(*commands, "\n"), "/tmp/web.stdout")
+		require.NotContains(t, strings.Join(*commands, "\n"), "/tmp/web.stderr")
+	})
+}
+
 func TestService_ExecSandbox_Sync(t *testing.T) {
 	t.Run("returns clear error when local HEAD is unavailable", func(t *testing.T) {
 		setup := setupTest(t)
