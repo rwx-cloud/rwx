@@ -58,7 +58,7 @@ func runMint(t *testing.T, input input) result {
 func TestSandboxExperimentalGate(t *testing.T) {
 	t.Setenv("EXPERIMENTAL", "")
 	result := runMint(t, input{
-		args: []string{"sandbox", "sync", "--access-token", "fake-for-test"},
+		args: []string{"sandbox", "push", "--access-token", "fake-for-test"},
 	})
 
 	require.Equal(t, 1, result.exitCode)

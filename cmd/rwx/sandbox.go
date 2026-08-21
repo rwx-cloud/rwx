@@ -240,9 +240,9 @@ CONFIG FILE
 	},
 }
 
-var sandboxSyncCmd = &cobra.Command{
-	Use:    "sync",
-	Short:  "Sync local changes to a sandbox",
+var sandboxPushCmd = &cobra.Command{
+	Use:    "push",
+	Short:  "Push local changes to a sandbox",
 	Hidden: true,
 	Args:   cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -577,7 +577,7 @@ func init() {
 	sandboxCmd.AddCommand(sandboxInitCmd)
 	sandboxCmd.AddCommand(sandboxStartCmd)
 	sandboxCmd.AddCommand(sandboxExecCmd)
-	sandboxCmd.AddCommand(sandboxSyncCmd)
+	sandboxCmd.AddCommand(sandboxPushCmd)
 	sandboxBackgroundCmd.AddCommand(sandboxBackgroundRestartCmd)
 	sandboxBackgroundCmd.AddCommand(sandboxBackgroundStopCmd)
 	sandboxBackgroundCmd.AddCommand(sandboxBackgroundLogsCmd)
@@ -604,8 +604,8 @@ func init() {
 	sandboxExecCmd.Flags().BoolVar(&sandboxReset, "reset", false, "Reset the sandbox before executing")
 	sandboxExecCmd.Flags().StringArrayVar(&sandboxInitParams, "init", []string{}, "initialization parameters for the sandbox run, available in the `init` context. Can be specified multiple times")
 
-	// sync flags
-	sandboxSyncCmd.Flags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")
+	// push flags
+	sandboxPushCmd.Flags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")
 
 	// background flags
 	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")

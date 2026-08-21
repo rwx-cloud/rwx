@@ -1111,7 +1111,7 @@ func TestService_SyncSandbox(t *testing.T) {
 		_, err := setup.service.SyncSandbox(cli.SyncSandboxConfig{RunID: runID})
 
 		require.NoError(t, err)
-		require.Equal(t, "Synced local changes to sandbox.\n", setup.mockStdout.String())
+		require.Equal(t, "Pushed local changes to sandbox.\n", setup.mockStdout.String())
 	})
 }
 
@@ -1290,7 +1290,7 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		require.Equal(t, `Preview "web": https://127.0.0.1:8310
 
 After local edits:
-  Hot reload:    rwx sandbox sync
+  Hot reload:    rwx sandbox push
   Hard restart:  rwx sandbox background restart --name web
 
 rwx sandbox exec -- <command> syncs local changes before it runs.
@@ -1485,7 +1485,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		})
 
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "sandbox sync requires a git repository with a valid HEAD")
+		require.Contains(t, err.Error(), "sandbox push requires a git repository with a valid HEAD")
 		require.Contains(t, err.Error(), "not a git repository")
 	})
 

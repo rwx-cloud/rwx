@@ -46,11 +46,11 @@ if [ "$initial_content" != "initial preview" ]; then
 fi
 
 printf 'updated preview\n' > "$preview_file"
-"${RWX_CLI}" sandbox sync --id "$SANDBOX_RUN_ID" >/dev/null
+"${RWX_CLI}" sandbox push --id "$SANDBOX_RUN_ID" >/dev/null
 
 updated_content=$(curl --fail --silent --show-error --max-time 10 "$preview_url/$preview_file")
 if [ "$updated_content" != "updated preview" ]; then
-  echo "sandbox sync did not update preview content: $updated_content"
+  echo "sandbox push did not update preview content: $updated_content"
   exit 1
 fi
 
@@ -99,4 +99,4 @@ fi
 
 "${RWX_CLI}" sandbox background stop --id "$SANDBOX_RUN_ID" --name "$preview_name" --json >/dev/null
 
-echo "PASS: sandbox background process, sync, restart, logs, and tunnel cleanup"
+echo "PASS: sandbox background process, push, restart, logs, and tunnel cleanup"

@@ -538,7 +538,7 @@ func (s Service) SyncSandbox(cfg SyncSandboxConfig) (*SyncSandboxResult, error) 
 	defer sandbox.close()
 
 	if !cfg.Json {
-		fmt.Fprintln(s.Stdout, "Synced local changes to sandbox.")
+		fmt.Fprintln(s.Stdout, "Pushed local changes to sandbox.")
 	}
 
 	return &SyncSandboxResult{RunID: sandbox.runID, RunURL: sandbox.runURL}, nil
@@ -811,7 +811,7 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 		if result.URL != "" {
 			fmt.Fprintf(s.Stdout, "Preview %q: %s\n\n", process.Key, result.URL)
 			fmt.Fprintln(s.Stdout, "After local edits:")
-			fmt.Fprintln(s.Stdout, "  Hot reload:    rwx sandbox sync")
+			fmt.Fprintln(s.Stdout, "  Hot reload:    rwx sandbox push")
 			fmt.Fprintf(s.Stdout, "  Hard restart:  rwx sandbox background restart --name %s\n\n", process.Key)
 			fmt.Fprintln(s.Stdout, "rwx sandbox exec -- <command> syncs local changes before it runs.")
 		} else {
@@ -865,7 +865,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 	if !cfg.SkipSync {
 		localHeadForSync, err = s.GitClient.GetHeadCommit()
 		if err != nil {
-			return nil, errors.Wrap(err, "sandbox sync requires a git repository with a valid HEAD")
+			return nil, errors.Wrap(err, "sandbox push requires a git repository with a valid HEAD")
 		}
 	}
 
@@ -1856,7 +1856,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 
 func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
 	if localHead == "" {
-		return 0, fmt.Errorf("sandbox sync requires a git repository with a valid HEAD")
+		return 0, fmt.Errorf("sandbox push requires a git repository with a valid HEAD")
 	}
 
 	s.warnUnresolvedRejectFiles()

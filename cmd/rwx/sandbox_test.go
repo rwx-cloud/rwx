@@ -7,14 +7,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSandboxSyncCommandIsHidden(t *testing.T) {
-	require.True(t, sandboxSyncCmd.Hidden)
-	require.Equal(t, "sync", sandboxSyncCmd.Use)
-	require.NotNil(t, sandboxSyncCmd.Flags().Lookup("id"))
-	require.Nil(t, sandboxSyncCmd.Flags().Lookup("dir"))
-	require.Nil(t, sandboxSyncCmd.Flags().Lookup("init"))
-	require.NoError(t, sandboxSyncCmd.Args(sandboxSyncCmd, nil))
-	require.Error(t, sandboxSyncCmd.Args(sandboxSyncCmd, []string{".rwx/sandbox.yml"}))
+func TestSandboxPushCommandIsHidden(t *testing.T) {
+	require.True(t, sandboxPushCmd.Hidden)
+	require.Equal(t, "push", sandboxPushCmd.Use)
+	require.NotNil(t, sandboxPushCmd.Flags().Lookup("id"))
+	require.Nil(t, sandboxPushCmd.Flags().Lookup("dir"))
+	require.Nil(t, sandboxPushCmd.Flags().Lookup("init"))
+	require.NoError(t, sandboxPushCmd.Args(sandboxPushCmd, nil))
+	require.Error(t, sandboxPushCmd.Args(sandboxPushCmd, []string{".rwx/sandbox.yml"}))
 }
 
 func TestSandboxBackgroundCommandIsHidden(t *testing.T) {
@@ -36,7 +36,7 @@ func TestSandboxBackgroundCommandIsHidden(t *testing.T) {
 
 func TestExperimentalSandboxCommandsRequireOptIn(t *testing.T) {
 	commands := []*cobra.Command{
-		sandboxSyncCmd,
+		sandboxPushCmd,
 		sandboxBackgroundCmd,
 		sandboxBackgroundRestartCmd,
 		sandboxBackgroundStopCmd,
