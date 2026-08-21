@@ -700,7 +700,12 @@ func (s Service) LogsSandboxBackground(cfg SandboxBackgroundLogsConfig) (*Sandbo
 	}
 	defer s.SSHClient.Close()
 	if cfg.Follow {
-		command := fmt.Sprintf("tail -n +1 -F -- %s %s", quoteShellArg(process.StdoutPath), quoteShellArg(process.StderrPath))
+		var command string
+		if process.LogPath != "" {
+			command = fmt.Sprintf("tail -n +1 -F -- %s", quoteShellArg(process.LogPath))
+		} else {
+			command = fmt.Sprintf("tail -n +1 -F -- %s %s", quoteShellArg(process.StdoutPath), quoteShellArg(process.StderrPath))
+		}
 		exitCode, err := s.SSHClient.ExecuteCommand(command)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to follow sandbox process logs")
@@ -710,10 +715,15 @@ func (s Service) LogsSandboxBackground(cfg SandboxBackgroundLogsConfig) (*Sandbo
 		}
 		return result, nil
 	}
-	command := fmt.Sprintf(
-		"printf '%%s\\n' '--- stdout ---'; tail -n +1 -- %s; printf '%%s\\n' '--- stderr ---'; tail -n +1 -- %s",
-		quoteShellArg(process.StdoutPath), quoteShellArg(process.StderrPath),
-	)
+	var command string
+	if process.LogPath != "" {
+		command = fmt.Sprintf("tail -n +1 -- %s", quoteShellArg(process.LogPath))
+	} else {
+		command = fmt.Sprintf(
+			"printf '%%s\\n' '--- stdout ---'; tail -n +1 -- %s; printf '%%s\\n' '--- stderr ---'; tail -n +1 -- %s",
+			quoteShellArg(process.StdoutPath), quoteShellArg(process.StderrPath),
+		)
+	}
 	exitCode, err := s.SSHClient.ExecuteCommand(command)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read sandbox process logs")
@@ -736,6 +746,7 @@ type sandboxProcessResponse struct {
 	Signal      string `json:"signal"`
 	StdoutPath  string `json:"stdoutPath"`
 	StderrPath  string `json:"stderrPath"`
+	LogPath     string `json:"logPath"`
 }
 
 func (s Service) executeSandboxProcessDirective(directive string, request any, action string) (sandboxProcessResponse, error) {
