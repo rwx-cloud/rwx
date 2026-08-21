@@ -71,6 +71,10 @@ func (doc *YAMLDoc) HasTasks() bool {
 	return doc.hasPath("$.tasks")
 }
 
+func (doc *YAMLDoc) HasPackage() bool {
+	return doc.hasPath("$.package")
+}
+
 // packagesDirCallRe matches calls into the local packages directory, eg.
 // `call: ${{ run.dir }}/packages/my-package`
 var packagesDirCallRe = regexp.MustCompile(`^\$\{\{\s*run\.dir\s*\}\}/packages/`)

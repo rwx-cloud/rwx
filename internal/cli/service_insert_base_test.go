@@ -449,6 +449,40 @@ tasks:
 		})
 	})
 
+	t.Run("when yaml file has a top-level package key and doesn't include base", func(t *testing.T) {
+		bl := setupBaseLayer(t)
+
+		err := os.WriteFile(filepath.Join(bl.mintDir, "foo.yaml"), []byte(`
+package:
+  name: my-package
+  version: 1.0.0
+
+tasks:
+  - key: a
+    run: /bin/true
+`), 0o644)
+		require.NoError(t, err)
+
+		t.Run("does not add base to file", func(t *testing.T) {
+			_, err = bl.s.service.InsertBase(cli.InsertBaseConfig{})
+			require.NoError(t, err)
+
+			var contents []byte
+
+			contents, err = os.ReadFile(filepath.Join(bl.mintDir, "foo.yaml"))
+			require.NoError(t, err)
+			require.Equal(t, `
+package:
+  name: my-package
+  version: 1.0.0
+
+tasks:
+  - key: a
+    run: /bin/true
+`, string(contents))
+		})
+	})
+
 	t.Run("when yaml file calls into the packages directory and doesn't include base", func(t *testing.T) {
 		bl := setupBaseLayer(t)
 

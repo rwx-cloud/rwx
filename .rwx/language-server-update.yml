@@ -4,11 +4,11 @@ on:
 
 base:
   image: ubuntu:24.04
-  config: rwx/base 1.1.1
+  config: rwx/base 1.2.0
 
 tasks:
   - key: code
-    call: git/clone 2.0.8
+    call: git/clone 2.1.0
     with:
       repository: https://github.com/rwx-cloud/rwx.git
       ref: main
@@ -16,7 +16,7 @@ tasks:
       preserve-git-dir: true
 
   - key: gh-cli
-    call: github/install-cli 1.0.11
+    call: github/install-cli 1.1.0
 
   - key: update-ref
     use: [code, gh-cli]
@@ -45,7 +45,7 @@ tasks:
       GITHUB_TOKEN: ${{ github['rwx-cloud'].token }}
 
   - key: create-pull-request
-    call: github/create-pull-request 1.0.7
+    call: github/create-pull-request 1.1.0
     use: update-ref
     with:
       github-token: ${{ github-apps.rwx-cloud-bot.token }}
