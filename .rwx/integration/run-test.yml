@@ -5,11 +5,11 @@ on:
 
 base:
   image: ubuntu:24.04
-  config: rwx/base 1.1.1
+  config: rwx/base 1.2.0
 
 tasks:
   - key: rwx-testing-code
-    call: git/clone 2.0.8
+    call: git/clone 2.1.0
     with:
       repository: https://github.com/rwx-cloud/rwx-testing.git
       ref: main
@@ -28,7 +28,7 @@ tasks:
       cli: ${{ init.cli }}
 
   - key: rwx-cli-code
-    call: git/clone 2.0.8
+    call: git/clone 2.1.0
     with:
       repository: https://github.com/rwx-cloud/rwx.git
       ref: ${{ init.cli }}
