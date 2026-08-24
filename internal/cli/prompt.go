@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/rwx-cloud/rwx/internal/errors"
 )
 
@@ -53,7 +53,7 @@ func (m selectionPromptModel) Init() tea.Cmd {
 }
 
 func (m selectionPromptModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
-	key, ok := message.(tea.KeyMsg)
+	key, ok := message.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
@@ -67,7 +67,7 @@ func (m selectionPromptModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cursor < len(m.choices)-1 {
 			m.cursor++
 		}
-	case " ":
+	case "space":
 		if m.multiple {
 			m.selected[m.cursor] = !m.selected[m.cursor]
 			m.validation = ""
@@ -99,7 +99,7 @@ func (m selectionPromptModel) hasSelection() bool {
 	return false
 }
 
-func (m selectionPromptModel) View() string {
+func (m selectionPromptModel) View() tea.View {
 	var view strings.Builder
 	view.WriteString(m.title)
 	view.WriteString("\n")
@@ -137,7 +137,7 @@ func (m selectionPromptModel) View() string {
 		view.WriteString("enter select")
 	}
 	view.WriteString(" • esc cancel\n")
-	return view.String()
+	return tea.NewView(view.String())
 }
 
 func (p bubbleTeaChoicePicker) PickOne(title string, choices []Choice) (int, error) {

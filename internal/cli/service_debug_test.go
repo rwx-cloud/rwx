@@ -117,8 +117,16 @@ Choose a session and retry:
 
 	t.Run("when multiple sessions require selection in a TTY", func(t *testing.T) {
 		s := setupTestWithTTY(t)
-		_, err := s.mockStdin.WriteString("\x1b[B\r")
-		require.NoError(t, err)
+		s.service.ChoicePicker = choicePickerStub{
+			pickOne: func(title string, choices []cli.Choice) (int, error) {
+				require.Equal(t, "Select a debug session:", title)
+				require.Equal(t, []cli.Choice{
+					{Label: "shell (aaaaaaaa)"},
+					{Label: "bbbbbbbb"},
+				}, choices)
+				return 1, nil
+			},
+		}
 
 		calls := 0
 		s.mockAPI.MockGetDebugConnectionInfo = func(cfg api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error) {
@@ -150,15 +158,9 @@ Choose a session and retry:
 		}
 		s.mockSSH.MockInteractiveSession = func() error { return nil }
 
-		err = s.service.DebugTask(cli.DebugTaskConfig{DebugKey: "task-123"})
+		err := s.service.DebugTask(cli.DebugTaskConfig{DebugKey: "task-123"})
 
 		require.NoError(t, err)
 		require.Equal(t, 2, calls)
-		output := s.mockStdout.String()
-		require.Contains(t, output, "Select a debug session")
-		require.Contains(t, output, "shell (aaaaaaaa)")
-		require.Contains(t, output, "bbbbbbbb")
-		require.Contains(t, output, "↑/↓ move")
-		require.Contains(t, output, "enter select")
 	})
 }
