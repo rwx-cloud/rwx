@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,6 +14,17 @@ func TestBubbleTeaChoicePicker(t *testing.T) {
 		{Label: "bundler", Description: "Used by test"},
 		{Label: "golang", Description: "Used by build and test"},
 	}
+
+	t.Run("selects one choice with an arrow key", func(t *testing.T) {
+		input := bytes.NewBufferString("\x1b[B\r")
+		output := new(strings.Builder)
+		picker := newBubbleTeaChoicePicker(input, output)
+
+		selected, err := picker.PickOne("Select a tool cache:", choices)
+
+		require.NoError(t, err)
+		require.Equal(t, 1, selected)
+	})
 
 	t.Run("selects multiple choices with space and arrow keys", func(t *testing.T) {
 		input := bytes.NewBufferString(" \x1b[B \r")
@@ -24,18 +35,20 @@ func TestBubbleTeaChoicePicker(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, []int{0, 1}, selected)
-		require.Contains(t, output.String(), "space toggle")
-		require.Contains(t, output.String(), "enter confirm")
+
+		view := newSelectionPromptModel("Select tool caches:", choices, true).View()
+		require.Contains(t, view.Content, "space toggle")
+		require.Contains(t, view.Content, "enter confirm")
 	})
 
 	t.Run("keeps the prompt open after an empty multi-selection", func(t *testing.T) {
 		model := newSelectionPromptModel("Select tool caches:", choices, true)
 
-		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		updated, command := model.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		result := updated.(selectionPromptModel)
 
 		require.Nil(t, command)
 		require.False(t, result.submitted)
-		require.Contains(t, result.View(), "Select at least one option.")
+		require.Contains(t, result.View().Content, "Select at least one option.")
 	})
 }
