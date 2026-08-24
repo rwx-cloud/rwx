@@ -28,19 +28,6 @@ install_system_packages() {
   sudo apt-get install -y "${packages[@]}"
 }
 
-remove_legacy_development_tools() {
-  local profile_marker="# rwx mise tools"
-
-  if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
-    echo "Legacy orb development tools are already absent."
-    return
-  fi
-
-  sed -i '/^# rwx mise tools$/,+1d' "$HOME/.bash_profile"
-  rm -f "$HOME/.local/bin/mise"
-  rm -rf "$HOME/.local/share/mise" "$HOME/.cache/mise" "$HOME/.local/state/mise"
-}
-
 install_latest_rwx() (
   local temp_dir
   temp_dir="$(mktemp -d)"
@@ -54,5 +41,4 @@ install_latest_rwx() (
 )
 
 run_step "Install required system packages" install_system_packages
-run_step "Remove legacy orb development tools" remove_legacy_development_tools
 run_step "Install the latest RWX CLI from GitHub" install_latest_rwx
