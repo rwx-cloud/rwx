@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# RWX authenticates from the current orb environment and starts the sandbox lazily.
+exit 0

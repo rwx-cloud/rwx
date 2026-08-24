@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+run_step() {
+  local label="$1"
+  shift
+  local started_at=$SECONDS
+
+  printf '\n==> %s\n' "$label"
+  "$@"
+  printf '<== %s (%ss)\n' "$label" "$((SECONDS - started_at))"
+}
+
+install_system_packages() {
+  local packages=()
+
+  command -v curl >/dev/null || packages+=(curl)
+
+  if ((${#packages[@]} == 0)); then
+    echo "System packages are already installed."
+    return
+  fi
+
+  sudo apt-get update
+  sudo apt-get install -y "${packages[@]}"
+}
+
+install_latest_rwx() (
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "$temp_dir"' EXIT
+
+  curl -fsSL \
+    https://github.com/rwx-cloud/rwx/releases/download/latest/rwx-linux-x86_64 \
+    -o "$temp_dir/rwx"
+  sudo install -m 0755 "$temp_dir/rwx" /usr/local/bin/rwx
+  /usr/local/bin/rwx --version
+)
+
+run_step "Install required system packages" install_system_packages
+run_step "Install the latest RWX CLI from GitHub" install_latest_rwx
