@@ -149,6 +149,7 @@ type SandboxBackgroundResult struct {
 	Signal      string
 	StdoutPath  string
 	StderrPath  string
+	LogPath     string `json:"logPath,omitempty"`
 }
 
 type sandboxOperationConfig struct {
@@ -809,7 +810,12 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 				return nil, statusErr
 			}
 			if status.Status != "running" {
-				processErr := fmt.Errorf("background process %q stopped before port %d became ready (status: %s; stdout: %s; stderr: %s)", process.Key, process.TargetPort, status.Status, status.StdoutPath, status.StderrPath)
+				var processErr error
+				if status.LogPath != "" {
+					processErr = fmt.Errorf("background process %q stopped before port %d became ready (status: %s; log: %s)", process.Key, process.TargetPort, status.Status, status.LogPath)
+				} else {
+					processErr = fmt.Errorf("background process %q stopped before port %d became ready (status: %s; stdout: %s; stderr: %s)", process.Key, process.TargetPort, status.Status, status.StdoutPath, status.StderrPath)
+				}
 				closeErr := s.SSHTunnelManager.Close(rwxssh.TunnelCloseConfig{
 					Key: process.Key, RunID: sandbox.runID, StateDirectory: stateDirectory,
 				})
@@ -844,6 +850,7 @@ func sandboxBackgroundResult(runID string, process sandboxProcessResponse) *Sand
 		RunID: runID, Name: process.Key, Status: process.Status, TargetPort: process.TargetPort,
 		PID: process.PID, PGID: process.PGID, StartedAt: process.StartedAt, CompletedAt: process.CompletedAt,
 		ExitCode: process.ExitCode, Signal: process.Signal, StdoutPath: process.StdoutPath, StderrPath: process.StderrPath,
+		LogPath: process.LogPath,
 	}
 }
 
