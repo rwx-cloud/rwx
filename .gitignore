@@ -1,4 +1,5 @@
 /.direnv
 /.language-server
+/.amp/portals/*
 /rwx
 /tmp/
