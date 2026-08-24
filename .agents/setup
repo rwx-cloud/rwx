@@ -18,12 +18,6 @@ install_system_packages() {
   local packages=()
 
   command -v curl >/dev/null || packages+=(curl)
-  command -v git >/dev/null || packages+=(git)
-  command -v git-lfs >/dev/null || packages+=(git-lfs)
-  command -v make >/dev/null || packages+=(make)
-  command -v tar >/dev/null || packages+=(tar)
-  command -v unzip >/dev/null || packages+=(unzip)
-  command -v xz >/dev/null || packages+=(xz-utils)
 
   if ((${#packages[@]} == 0)); then
     echo "System packages are already installed."
@@ -34,13 +28,17 @@ install_system_packages() {
   sudo apt-get install -y "${packages[@]}"
 }
 
-install_mise() {
-  if [[ -x "$HOME/.local/bin/mise" ]]; then
-    echo "mise is already installed."
+remove_legacy_development_tools() {
+  local profile_marker="# rwx mise tools"
+
+  if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+    echo "Legacy orb development tools are already absent."
     return
   fi
 
-  curl -fsSL https://mise.run | sh
+  sed -i '/^# rwx mise tools$/,+1d' "$HOME/.bash_profile"
+  rm -f "$HOME/.local/bin/mise"
+  rm -rf "$HOME/.local/share/mise" "$HOME/.cache/mise" "$HOME/.local/state/mise"
 }
 
 install_latest_rwx() (
@@ -55,35 +53,6 @@ install_latest_rwx() (
   /usr/local/bin/rwx --version
 )
 
-configure_login_shell() {
-  local profile_marker="# rwx mise tools"
-
-  touch "$HOME/.bash_profile"
-  if grep -Fqx "$profile_marker" "$HOME/.bash_profile"; then
-    echo "Login shell is already configured for mise."
-    return
-  fi
-
-  cat >> "$HOME/.bash_profile" <<'EOF'
-
-# rwx mise tools
-export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
-EOF
-}
-
-configure_git() {
-  git config --global init.defaultBranch main
-  git lfs install --skip-repo
-}
-
 run_step "Install required system packages" install_system_packages
+run_step "Remove legacy orb development tools" remove_legacy_development_tools
 run_step "Install the latest RWX CLI from GitHub" install_latest_rwx
-run_step "Install mise" install_mise
-run_step "Configure mise for login shells" configure_login_shell
-
-export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
-
-run_step "Install pinned development tools" mise install --yes
-run_step "Download Go dependencies" mise exec -- go mod download
-run_step "Configure Git" configure_git
-run_step "Build the CLI and embedded language server" mise exec -- make build

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# This repository has no per-thread services or authentication to restore.
+# RWX authenticates from the current orb environment and starts the sandbox lazily.
 exit 0
