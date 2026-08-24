@@ -1115,6 +1115,22 @@ func TestService_SyncSandbox(t *testing.T) {
 	})
 }
 
+func TestSandboxBackgroundResultJSON(t *testing.T) {
+	data, err := json.Marshal(cli.SandboxBackgroundResult{LogPath: "/tmp/web.log"})
+	require.NoError(t, err)
+
+	var output map[string]any
+	require.NoError(t, json.Unmarshal(data, &output))
+	require.Equal(t, "/tmp/web.log", output["logPath"])
+	require.NotContains(t, output, "LogPath")
+
+	data, err = json.Marshal(cli.SandboxBackgroundResult{})
+	require.NoError(t, err)
+	output = nil
+	require.NoError(t, json.Unmarshal(data, &output))
+	require.NotContains(t, output, "logPath")
+}
+
 func TestService_BackgroundSandbox(t *testing.T) {
 	setupBackground := func(t *testing.T) (*testSetup, *[]string) {
 		t.Helper()
@@ -1360,7 +1376,34 @@ rwx sandbox exec -- <command> syncs local changes before it runs.
 		require.Less(t, checkoutIndex, restartIndex)
 	})
 
-	t.Run("closes the tunnel when the process stops before becoming ready", func(t *testing.T) {
+	t.Run("reports the combined log when the process stops before becoming ready", func(t *testing.T) {
+		setup, _ := setupBackground(t)
+		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
+			switch {
+			case strings.HasPrefix(command, "__rwx_sandbox_process_start__ "):
+				return 0, `{"key":"web","status":"running","targetPort":3100}`, "", nil
+			case strings.HasPrefix(command, "__rwx_sandbox_process_status__ "):
+				return 0, `{"key":"web","status":"stopped","targetPort":3100,"stdoutPath":"/tmp/web.stdout","stderrPath":"/tmp/web.stderr","logPath":"/tmp/web.log"}`, "", nil
+			default:
+				return 0, "", "", nil
+			}
+		}
+		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: "http"}, nil
+		}
+		setup.mockTunnel.MockIsReady = func(int) bool { return false }
+
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command: []string{"bin/server"}, Name: "web", TargetPort: 3100, RunID: "run-background", Json: true,
+		})
+
+		require.ErrorContains(t, err, `background process "web" stopped before port 3100 became ready`)
+		require.ErrorContains(t, err, "log: /tmp/web.log")
+		require.NotContains(t, err.Error(), "/tmp/web.stdout")
+		require.NotContains(t, err.Error(), "/tmp/web.stderr")
+	})
+
+	t.Run("reports legacy log paths when the process stops before becoming ready", func(t *testing.T) {
 		setup, _ := setupBackground(t)
 		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
 			switch {
@@ -1519,6 +1562,29 @@ func TestService_LogsSandboxBackground(t *testing.T) {
 		}
 		return setup, &commands, &connectCount
 	}
+
+	t.Run("returns the combined log path in JSON mode", func(t *testing.T) {
+		setup, _, connectCount := setupLogs(t, `{
+			"key":"web",
+			"stdoutPath":"/tmp/web.stdout",
+			"stderrPath":"/tmp/web.stderr",
+			"logPath":"/tmp/web.log"
+		}`)
+
+		result, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
+			Name: "web", RunID: "run-background", Json: true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 1, *connectCount, "JSON logs should not reconnect to read the log file")
+		require.Equal(t, "/tmp/web.log", result.LogPath)
+
+		data, err := json.Marshal(result)
+		require.NoError(t, err)
+		var output map[string]any
+		require.NoError(t, json.Unmarshal(data, &output))
+		require.Equal(t, "/tmp/web.log", output["logPath"])
+	})
 
 	t.Run("prefers the combined log for a one-shot read", func(t *testing.T) {
 		setup, commands, connectCount := setupLogs(t, `{
