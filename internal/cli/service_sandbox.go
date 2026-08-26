@@ -959,11 +959,8 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 				// Polling.Completed=true with Sandboxable=true is a ready sandbox,
 				// not an expired one; only prune when the run finished without becoming sandboxable.
 				connInfo, err := s.APIClient.GetSandboxConnectionInfo(session.RunID, session.ScopedToken)
-				if err != nil {
-					storage.DeleteSession(branch, cfg.ConfigFile)
-					_ = storage.Save()
-					found = false
-				} else if connInfo.Polling.Completed && !connInfo.Sandboxable {
+				if err != nil || (connInfo.Polling.Completed && !connInfo.Sandboxable) {
+					s.closeSandboxTunnels(session.RunID)
 					storage.DeleteSession(branch, cfg.ConfigFile)
 					_ = storage.Save()
 					found = false
@@ -998,6 +995,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 					activeSessions = append(activeSessions, sess)
 				} else {
 					// Clean up expired session
+					s.closeSandboxTunnels(sess.RunID)
 					storage.DeleteSession(branch, sess.ConfigFile)
 				}
 			}
@@ -1448,6 +1446,7 @@ func (s Service) ListSandboxes(cfg ListSandboxesConfig) (*ListSandboxesResult, e
 
 	if len(expiredKeys) > 0 {
 		for _, key := range expiredKeys {
+			s.closeSandboxTunnels(storage.Sandboxes[key].RunID)
 			delete(storage.Sandboxes, key)
 		}
 		storageChanged = true

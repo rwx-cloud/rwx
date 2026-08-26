@@ -46,6 +46,36 @@ func (e *netTimeoutError) Error() string   { return e.msg }
 func (e *netTimeoutError) Timeout() bool   { return true }
 func (e *netTimeoutError) Temporary() bool { return false }
 
+func TestService_CheckExistingSandbox_DoesNotCloseInactiveTunnels(t *testing.T) {
+	setup := setupTest(t)
+	configFile := setup.absConfig(".rwx/sandbox.yml")
+	seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+		"detached:" + configFile: {
+			RunID:      "run-inactive",
+			ConfigFile: configFile,
+		},
+	})
+	setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, scopedToken string) (api.SandboxConnectionInfo, error) {
+		return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
+	}
+	tunnelCleanupCalled := false
+	setup.mockTunnel.MockCloseAll = func(runID, stateDirectory string) error {
+		tunnelCleanupCalled = true
+		return nil
+	}
+
+	result, err := setup.service.CheckExistingSandbox(configFile)
+
+	require.NoError(t, err)
+	require.True(t, result.Exists)
+	require.False(t, result.Active)
+	require.False(t, tunnelCleanupCalled, "read-only status checks must not close tunnels")
+	storage, err := cli.LoadSandboxStorage()
+	require.NoError(t, err)
+	_, _, found := storage.FindByRunID("run-inactive")
+	require.True(t, found, "read-only status checks must not prune sessions")
+}
+
 func TestService_ListSandboxes(t *testing.T) {
 	t.Run("returns list without error", func(t *testing.T) {
 		setup := setupTest(t)
@@ -361,6 +391,15 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 			}
 			return api.SandboxConnectionInfo{}, nil
 		}
+		var closedRunIDs []string
+		setup.mockTunnel.MockCloseAll = func(runID, stateDirectory string) error {
+			closedRunIDs = append(closedRunIDs, runID)
+			storage, err := cli.LoadSandboxStorage()
+			require.NoError(t, err)
+			_, _, found := storage.FindByRunID(runID)
+			require.True(t, found, "tunnels should close before the expired session is pruned")
+			return nil
+		}
 
 		result, err := setup.service.ListSandboxes(cli.ListSandboxesConfig{
 			Json: true,
@@ -370,6 +409,7 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		require.Len(t, result.Sandboxes, 1)
 		require.Equal(t, "run-active", result.Sandboxes[0].RunID)
 		require.Equal(t, "active", result.Sandboxes[0].Status)
+		require.Equal(t, []string{"run-expired"}, closedRunIDs)
 
 		// Verify storage was pruned
 		storage, err := cli.LoadSandboxStorage()
@@ -4284,6 +4324,67 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		}
 	}
 
+	configureExpiredSandboxAutoCreate := func(t *testing.T, setup *testSetup, staleRunID string) string {
+		t.Helper()
+
+		rwxDir := filepath.Join(setup.tmp, ".rwx")
+		require.NoError(t, os.MkdirAll(rwxDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+			"detached:" + configFile: {
+				RunID:       staleRunID,
+				ConfigFile:  configFile,
+				ScopedToken: "token-stale",
+			},
+		})
+
+		connCalls := atomic.Int32{}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			if connCalls.Add(1) == 1 {
+				require.Equal(t, staleRunID, id)
+				return api.SandboxConnectionInfo{
+					Sandboxable:   false,
+					Polling:       api.PollingResult{Completed: true},
+					FailureReason: "failed",
+				}, nil
+			}
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		setup.mockGit.MockGetBranch = "main"
+		setup.mockGit.MockGetCommit = "abc123"
+		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
+			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
+		}
+		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{LatestMajor: map[string]string{}, LatestMinor: map[string]map[string]string{}}, nil
+		}
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
+		}
+		setup.mockAPI.MockInitiateRun = func(api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			return &api.InitiateRunResult{RunID: "run-fresh", RunURL: "https://cloud.rwx.com/mint/runs/run-fresh"}, nil
+		}
+		setup.mockAPI.MockCreateSandboxToken = func(api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
+			return &api.CreateSandboxTokenResult{Token: "token-fresh"}, nil
+		}
+		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
+		setup.mockSSH.MockExecuteCommand = func(string) (int, error) { return 0, nil }
+		setup.mockGit.MockGeneratePatch = func([]string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+
+		return configFile
+	}
+
 	t.Run("config-provided lookup reuses ready sandbox (Polling.Completed=true, Sandboxable=true)", func(t *testing.T) {
 		setup := setupTest(t)
 
@@ -4346,36 +4447,27 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		require.True(t, found, "session should not have been pruned")
 	})
 
-	t.Run("config-provided lookup prunes session when run finished without becoming sandboxable", func(t *testing.T) {
+	t.Run("branch-only lookup closes only the expired sandbox tunnels before pruning", func(t *testing.T) {
 		setup := setupTest(t)
 
-		// Provide a config file on disk so auto-create can succeed after pruning.
-		rwxDir := filepath.Join(setup.tmp, ".rwx")
-		require.NoError(t, os.MkdirAll(rwxDir, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
-
-		configFile := setup.absConfig(".rwx/sandbox.yml")
-		staleRunID := "run-finished"
+		expiredConfig := setup.absConfig(".rwx/expired.yml")
+		activeConfig := setup.absConfig(".rwx/active.yml")
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
-			"detached:" + configFile: {
-				RunID:       staleRunID,
-				ConfigFile:  configFile,
-				ScopedToken: "token-stale",
+			"detached:" + expiredConfig: {
+				RunID:      "run-expired",
+				ConfigFile: expiredConfig,
+			},
+			"detached:" + activeConfig: {
+				RunID:      "run-active",
+				ConfigFile: activeConfig,
 			},
 		})
 
-		// Return stale-run connection info on the first call (for the session
-		// health check) and a fresh sandbox on subsequent calls (auto-create).
-		connCalls := atomic.Int32{}
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
-			if connCalls.Add(1) == 1 {
-				require.Equal(t, staleRunID, id)
-				return api.SandboxConnectionInfo{
-					Sandboxable:   false,
-					Polling:       api.PollingResult{Completed: true},
-					FailureReason: "failed",
-				}, nil
+			if id == "run-expired" {
+				return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
 			}
+			require.Equal(t, "run-active", id)
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -4383,30 +4475,50 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 				PublicHostKey:  sandboxPublicTestKey,
 			}, nil
 		}
-
-		// Auto-create mocks
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
-			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
-		}
-		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
-			return &api.PackageVersionsResult{LatestMajor: map[string]string{}, LatestMinor: map[string]map[string]string{}}, nil
-		}
-		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
-		}
-		setup.mockAPI.MockInitiateRun = func(api.InitiateRunConfig) (*api.InitiateRunResult, error) {
-			return &api.InitiateRunResult{RunID: "run-fresh", RunURL: "https://cloud.rwx.com/mint/runs/run-fresh"}, nil
-		}
-		setup.mockAPI.MockCreateSandboxToken = func(api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "token-fresh"}, nil
+		var closedRunIDs []string
+		setup.mockTunnel.MockCloseAll = func(runID, stateDirectory string) error {
+			closedRunIDs = append(closedRunIDs, runID)
+			storage, err := cli.LoadSandboxStorage()
+			require.NoError(t, err)
+			_, _, found := storage.FindByRunID(runID)
+			require.True(t, found, "tunnels should close before the expired session is pruned")
+			return nil
 		}
 		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(string) (int, error) { return 0, nil }
 		setup.mockGit.MockGeneratePatch = func([]string) ([]byte, *git.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			Command: []string{"echo", "hello"},
+			Json:    true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-active", result.RunID)
+		require.Equal(t, []string{"run-expired"}, closedRunIDs)
+
+		storage, err := cli.LoadSandboxStorage()
+		require.NoError(t, err)
+		_, _, foundExpired := storage.FindByRunID("run-expired")
+		require.False(t, foundExpired)
+		_, _, foundActive := storage.FindByRunID("run-active")
+		require.True(t, foundActive)
+	})
+
+	t.Run("config-provided lookup prunes session when run finished without becoming sandboxable", func(t *testing.T) {
+		setup := setupTest(t)
+		staleRunID := "run-finished"
+		configFile := configureExpiredSandboxAutoCreate(t, setup, staleRunID)
+		var closedRunIDs []string
+		setup.mockTunnel.MockCloseAll = func(runID, stateDirectory string) error {
+			closedRunIDs = append(closedRunIDs, runID)
+			storage, err := cli.LoadSandboxStorage()
+			require.NoError(t, err)
+			_, _, found := storage.FindByRunID(runID)
+			require.True(t, found, "tunnels should close before the expired session is pruned")
+			return nil
 		}
 
 		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
@@ -4417,6 +4529,41 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, "run-fresh", result.RunID, "stale session should be pruned and a new run created")
+		require.Equal(t, []string{staleRunID}, closedRunIDs)
+
+		storage, err := cli.LoadSandboxStorage()
+		require.NoError(t, err)
+		_, _, foundOld := storage.FindByRunID(staleRunID)
+		require.False(t, foundOld, "fresh sandbox should not retain the expired session")
+		_, _, foundFresh := storage.FindByRunID("run-fresh")
+		require.True(t, foundFresh)
+	})
+
+	t.Run("tunnel cleanup failure warns without blocking prune or fresh sandbox creation", func(t *testing.T) {
+		setup := setupTest(t)
+		staleRunID := "run-close-fails"
+		configFile := configureExpiredSandboxAutoCreate(t, setup, staleRunID)
+		setup.mockTunnel.MockCloseAll = func(runID, stateDirectory string) error {
+			require.Equal(t, staleRunID, runID)
+			return fmt.Errorf("control socket unavailable")
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-fresh", result.RunID)
+		require.Contains(t, setup.mockStderr.String(), "Warning: failed to close local tunnels for sandbox run-close-fails: control socket unavailable")
+
+		storage, err := cli.LoadSandboxStorage()
+		require.NoError(t, err)
+		_, _, foundOld := storage.FindByRunID(staleRunID)
+		require.False(t, foundOld)
+		_, _, foundFresh := storage.FindByRunID("run-fresh")
+		require.True(t, foundFresh)
 	})
 }
 
