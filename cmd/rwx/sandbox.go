@@ -277,8 +277,42 @@ var sandboxBackgroundCmd = &cobra.Command{
 	Short:  "Start or replace a sandbox background process",
 	Hidden: true,
 	Long: `Start or replace a named managed process in an existing sandbox.
-Local changes are synced before the process starts. When --port is provided,
-the port is forwarded locally and its localhost URL is printed.`,
+
+The sandbox must already be running. By default, RWX uses the sandbox for the
+current directory and git branch; use --id to target a specific sandbox run.
+
+EXPERIMENTAL
+  Background process commands are experimental. Set RWX_EXPERIMENTAL=true to
+  use them.
+
+PROCESS LIFECYCLE
+  --name identifies the managed process. Names may contain letters, numbers,
+  underscores, and hyphens. Starting an existing name replaces that process.
+  The process continues running after this command returns and stops when the
+  sandbox stops.
+
+  Use the restart, stop, and logs subcommands to manage the process later.
+
+FILE SYNCING
+  Local staged, unstaged, and untracked changes are synced to the sandbox
+  before the process starts. Changes made in the sandbox are not pulled back
+  to the local working directory.
+
+  Use "rwx sandbox push" to sync later local edits without restarting the
+  process, or "rwx sandbox background restart" to sync and restart it.
+
+PORT FORWARDING
+  --port forwards a sandbox port to localhost and waits for it to become
+  available. By default, RWX allocates a local port; use --local-port to
+  request one. --scheme controls whether the printed URL uses http or https.`,
+	Example: `  # Start a development server and forward its port
+  RWX_EXPERIMENTAL=true rwx sandbox background --name web --port 3000 -- npm run dev
+
+  # Start a worker without forwarding a port
+  RWX_EXPERIMENTAL=true rwx sandbox background --name worker -- bin/worker
+
+  # Target an existing sandbox by run ID
+  RWX_EXPERIMENTAL=true rwx sandbox background --id run_123 --name web --port 3000 -- npm run dev`,
 	Args: cobra.ArbitraryArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireExperimentalSandboxAccess()
@@ -321,7 +355,19 @@ var sandboxBackgroundRestartCmd = &cobra.Command{
 	Use:    "restart",
 	Short:  "Sync changes and restart a sandbox background process",
 	Hidden: true,
-	Args:   cobra.NoArgs,
+	Long: `Sync local changes and restart a named managed process.
+
+The process must have been started with "rwx sandbox background". RWX reuses
+its saved command and sandbox port. If the process had a forwarded port, RWX
+reopens the local tunnel and prints its URL.
+
+Local staged, unstaged, and untracked changes are synced before the restart.
+Changes made in the sandbox are not pulled back to the local working
+directory. Use --id to target a specific sandbox run.`,
+	Example: `  RWX_EXPERIMENTAL=true rwx sandbox background restart --name web
+
+  RWX_EXPERIMENTAL=true rwx sandbox background restart --id run_123 --name web`,
+	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireExperimentalSandboxAccess()
 	},
@@ -350,7 +396,13 @@ var sandboxBackgroundStopCmd = &cobra.Command{
 	Use:    "stop",
 	Short:  "Stop a sandbox background process",
 	Hidden: true,
-	Args:   cobra.NoArgs,
+	Long: `Stop a named managed process and close its local port-forwarding tunnel.
+
+This command does not sync files. Use --id to target a specific sandbox run.`,
+	Example: `  RWX_EXPERIMENTAL=true rwx sandbox background stop --name web
+
+  RWX_EXPERIMENTAL=true rwx sandbox background stop --id run_123 --name web`,
+	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireExperimentalSandboxAccess()
 	},
@@ -379,7 +431,24 @@ var sandboxBackgroundLogsCmd = &cobra.Command{
 	Use:    "logs",
 	Short:  "Show logs for a sandbox background process",
 	Hidden: true,
-	Args:   cobra.NoArgs,
+	Long: `Print logs for a named sandbox background process.
+
+The name may identify a managed process started with "rwx sandbox background"
+or a process declared under background-processes in the sandbox task. Without
+--follow, RWX prints the available logs and exits. With --follow, RWX prints
+existing logs, streams new output, and runs until interrupted.
+
+This command does not sync files. Use --id to target a specific sandbox run.
+With --json, RWX returns process metadata instead of printing log contents.`,
+	Example: `  # Print the current logs
+  RWX_EXPERIMENTAL=true rwx sandbox background logs --name web
+
+  # Follow logs until interrupted
+  RWX_EXPERIMENTAL=true rwx sandbox background logs --name web --follow
+
+  # Read logs for a process declared in the sandbox configuration
+  RWX_EXPERIMENTAL=true rwx sandbox background logs --name start-databases`,
+	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireExperimentalSandboxAccess()
 	},
