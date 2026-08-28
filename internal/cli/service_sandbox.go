@@ -2,9 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -89,10 +93,11 @@ type SandboxBackgroundConfig struct {
 }
 
 type SandboxBackgroundLogsConfig struct {
-	Name   string
-	RunID  string
-	Json   bool
-	Follow bool
+	Context context.Context
+	Name    string
+	RunID   string
+	Json    bool
+	Follow  bool
 }
 
 type ListSandboxesConfig struct {
@@ -150,6 +155,7 @@ type SandboxBackgroundResult struct {
 	StdoutPath  string
 	StderrPath  string
 	LogPath     string `json:"logPath,omitempty"`
+	LogsID      string `json:"-"`
 }
 
 type sandboxOperationConfig struct {
@@ -691,7 +697,60 @@ func (s Service) LogsSandboxBackground(cfg SandboxBackgroundLogsConfig) (*Sandbo
 		return nil, err
 	}
 	result := sandboxBackgroundResult(sandbox.runID, process)
+	if process.LogsID == "" && process.LogPath == "" && process.StdoutPath == "" && process.StderrPath == "" {
+		return nil, fmt.Errorf("logs for background process %q are unavailable", cfg.Name)
+	}
 	if cfg.Json {
+		return result, nil
+	}
+	if process.LogsID != "" {
+		sandbox.close()
+		logDownloadRequest, err := s.APIClient.GetLogDownloadRequest(sandbox.runID)
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to authorize configured sandbox process logs")
+		}
+
+		archiveEndpoint, err := url.Parse(logDownloadRequest.URL)
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to parse configured sandbox process logs endpoint")
+		}
+		logsEndpoint := *archiveEndpoint
+		logsEndpoint.Path = ""
+		logsEndpoint.RawPath = ""
+		logsEndpoint.RawQuery = ""
+		logsEndpoint.Fragment = ""
+		pathElements := []string{"api", "logs", url.PathEscape(process.LogsID)}
+		if !cfg.Follow {
+			pathElements = append(pathElements, "download")
+		}
+		individualEndpoint := logsEndpoint.JoinPath(pathElements...)
+
+		if cfg.Context == nil {
+			cfg.Context = context.Background()
+		}
+		req, err := http.NewRequestWithContext(cfg.Context, http.MethodGet, individualEndpoint.String(), nil)
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to create configured sandbox process logs request")
+		}
+		req.Header.Set("Authorization", "Bearer "+logDownloadRequest.Token)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			if cfg.Context.Err() != nil {
+				return result, nil
+			}
+			return nil, errors.Wrap(err, "unable to read configured sandbox process logs")
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			return nil, fmt.Errorf("unable to read configured sandbox process logs: logs server returned %s", resp.Status)
+		}
+		if _, err := io.Copy(s.Stdout, resp.Body); err != nil {
+			if cfg.Context.Err() != nil {
+				return result, nil
+			}
+			return nil, errors.Wrap(err, "unable to stream configured sandbox process logs")
+		}
 		return result, nil
 	}
 
@@ -748,6 +807,7 @@ type sandboxProcessResponse struct {
 	StdoutPath  string `json:"stdoutPath"`
 	StderrPath  string `json:"stderrPath"`
 	LogPath     string `json:"logPath"`
+	LogsID      string `json:"logsId,omitempty"`
 }
 
 func (s Service) executeSandboxProcessDirective(directive string, request any, action string) (sandboxProcessResponse, error) {
@@ -850,7 +910,7 @@ func sandboxBackgroundResult(runID string, process sandboxProcessResponse) *Sand
 		RunID: runID, Name: process.Key, Status: process.Status, TargetPort: process.TargetPort,
 		PID: process.PID, PGID: process.PGID, StartedAt: process.StartedAt, CompletedAt: process.CompletedAt,
 		ExitCode: process.ExitCode, Signal: process.Signal, StdoutPath: process.StdoutPath, StderrPath: process.StderrPath,
-		LogPath: process.LogPath,
+		LogPath: process.LogPath, LogsID: process.LogsID,
 	}
 }
 

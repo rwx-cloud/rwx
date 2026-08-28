@@ -2,9 +2,12 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1624,6 +1627,195 @@ func TestService_LogsSandboxBackground(t *testing.T) {
 		var output map[string]any
 		require.NoError(t, json.Unmarshal(data, &output))
 		require.Equal(t, "/tmp/web.log", output["logPath"])
+	})
+
+	t.Run("decodes configured logs in JSON mode", func(t *testing.T) {
+		setup, _, connectCount := setupLogs(t, `{
+			"key":"api",
+			"status":"available",
+			"logsId":"configured-process-logs-id"
+		}`)
+
+		result, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
+			Name: "api", RunID: "run-background", Json: true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 1, *connectCount, "JSON logs should not reconnect or contact the logs server")
+		require.Equal(t, "configured-process-logs-id", result.LogsID)
+	})
+
+	t.Run("returns a clear error when the response has no log source", func(t *testing.T) {
+		setup, _, connectCount := setupLogs(t, `{
+			"key":"api",
+			"status":"not_found",
+			"observedAt":"2026-08-27T19:00:00Z"
+		}`)
+
+		_, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
+			Name: "api", RunID: "run-background",
+		})
+
+		require.EqualError(t, err, `logs for background process "api" are unavailable`)
+		require.Equal(t, 1, *connectCount)
+	})
+
+	t.Run("streams a configured log snapshot with authorization and an escaped ID", func(t *testing.T) {
+		logsID := "configured/process ?#"
+		requestCount := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestCount++
+			require.Equal(t, http.MethodGet, r.Method)
+			require.Equal(t, "/api/logs/configured%2Fprocess%20%3F%23/download", r.URL.EscapedPath())
+			require.Empty(t, r.URL.RawQuery)
+			require.Equal(t, "Bearer signed-logs-token", r.Header.Get("Authorization"))
+			_, err := io.WriteString(w, "historical\ncurrent\n")
+			require.NoError(t, err)
+		}))
+		defer server.Close()
+
+		setup, commands, connectCount := setupLogs(t, fmt.Sprintf(`{
+			"key":"api",
+			"status":"available",
+			"logsId":%q,
+			"logPath":"/tmp/ad-hoc.log"
+		}`, logsID))
+		setup.mockAPI.MockGetLogDownloadRequest = func(runID string) (api.LogDownloadRequestResult, error) {
+			require.Equal(t, "run-background", runID)
+			return api.LogDownloadRequestResult{
+				URL:   server.URL + "/archive/download?archive=true",
+				Token: "signed-logs-token",
+			}, nil
+		}
+
+		result, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
+			Name: "api", RunID: "run-background",
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, logsID, result.LogsID)
+		require.Equal(t, "historical\ncurrent\n", setup.mockStdout.String())
+		require.Equal(t, 1, requestCount)
+		require.Equal(t, 1, *connectCount, "configured logs should not reconnect over SSH")
+		require.NotContains(t, strings.Join(*commands, "\n"), "tail -n +1")
+	})
+
+	t.Run("returns a Cloud authorization failure", func(t *testing.T) {
+		setup, _, connectCount := setupLogs(t, `{
+			"key":"api",
+			"status":"available",
+			"logsId":"configured-process-logs-id"
+		}`)
+		setup.mockAPI.MockGetLogDownloadRequest = func(runID string) (api.LogDownloadRequestResult, error) {
+			require.Equal(t, "run-background", runID)
+			return api.LogDownloadRequestResult{}, fmt.Errorf("authorization denied")
+		}
+
+		_, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
+			Name: "api", RunID: "run-background",
+		})
+
+		require.EqualError(t, err, "unable to authorize configured sandbox process logs: authorization denied")
+		require.Equal(t, 1, *connectCount)
+	})
+
+	t.Run("returns a logs-server failure", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusBadGateway)
+		}))
+		defer server.Close()
+
+		setup, _, _ := setupLogs(t, `{
+			"key":"api",
+			"status":"available",
+			"logsId":"configured-process-logs-id"
+		}`)
+		setup.mockAPI.MockGetLogDownloadRequest = func(string) (api.LogDownloadRequestResult, error) {
+			return api.LogDownloadRequestResult{URL: server.URL + "/archive/download", Token: "signed-logs-token"}, nil
+		}
+
+		_, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
+			Name: "api", RunID: "run-background",
+		})
+
+		require.EqualError(t, err, "unable to read configured sandbox process logs: logs server returned 502 Bad Gateway")
+	})
+
+	t.Run("follows configured logs until its context is canceled", func(t *testing.T) {
+		requestStarted := make(chan struct{})
+		requestCanceled := make(chan struct{})
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, "/api/logs/configured-process-logs-id", r.URL.EscapedPath())
+			require.Equal(t, "Bearer signed-logs-token", r.Header.Get("Authorization"))
+			flusher, ok := w.(http.Flusher)
+			require.True(t, ok)
+			_, err := io.WriteString(w, "historical\n")
+			require.NoError(t, err)
+			flusher.Flush()
+			_, err = io.WriteString(w, "live\n")
+			require.NoError(t, err)
+			flusher.Flush()
+			close(requestStarted)
+			<-r.Context().Done()
+			close(requestCanceled)
+		}))
+		defer server.Close()
+
+		setup, _, connectCount := setupLogs(t, `{
+			"key":"api",
+			"status":"available",
+			"logsId":"configured-process-logs-id"
+		}`)
+		setup.mockAPI.MockGetLogDownloadRequest = func(string) (api.LogDownloadRequestResult, error) {
+			return api.LogDownloadRequestResult{URL: server.URL + "/archive/download", Token: "signed-logs-token"}, nil
+		}
+		stdoutReader, stdoutWriter := io.Pipe()
+		defer stdoutReader.Close()
+		defer stdoutWriter.Close()
+		setup.service.Stdout = stdoutWriter
+		streamedOutput := make(chan string, 1)
+		go func() {
+			output := make([]byte, len("historical\nlive\n"))
+			_, err := io.ReadFull(stdoutReader, output)
+			if err != nil {
+				streamedOutput <- ""
+				return
+			}
+			streamedOutput <- string(output)
+		}()
+		ctx, cancel := context.WithCancel(context.Background())
+		resultCh := make(chan error, 1)
+		go func() {
+			_, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
+				Context: ctx, Name: "api", RunID: "run-background", Follow: true,
+			})
+			resultCh <- err
+		}()
+
+		select {
+		case <-requestStarted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for configured log stream")
+		}
+		select {
+		case output := <-streamedOutput:
+			require.Equal(t, "historical\nlive\n", output)
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for historical configured log output")
+		}
+		cancel()
+		select {
+		case err := <-resultCh:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("configured log follow did not stop after cancellation")
+		}
+		select {
+		case <-requestCanceled:
+		case <-time.After(5 * time.Second):
+			t.Fatal("logs-server request context was not canceled")
+		}
+		require.Equal(t, 1, *connectCount, "configured follow should not reconnect over SSH")
 	})
 
 	t.Run("prefers the combined log for a one-shot read", func(t *testing.T) {

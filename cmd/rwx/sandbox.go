@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/manifoldco/promptui"
 	"github.com/rwx-cloud/rwx/internal/cli"
@@ -383,11 +385,14 @@ var sandboxBackgroundLogsCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
+		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
 		result, err := service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
-			Name:   sandboxBackgroundName,
-			RunID:  sandboxRunID,
-			Json:   useJson,
-			Follow: sandboxBackgroundFollow,
+			Context: ctx,
+			Name:    sandboxBackgroundName,
+			RunID:   sandboxRunID,
+			Json:    useJson,
+			Follow:  sandboxBackgroundFollow,
 		})
 		if err != nil {
 			return err
