@@ -1,0 +1,50 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.0.0
+
+tasks:
+  - key: code
+    call: git/clone 2.0.7
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+      preserve-git-dir: true
+      fetch-full-depth: true
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: python
+    run: |
+      sudo apt-get update
+      sudo apt-get install --yes python3
+      sudo apt-get clean
+
+  - key: sandbox
+    use: [code, rwx-cli, python]
+    background-processes:
+      - key: configured-web
+        run: |
+          echo "configured-background-process-started"
+          python3 -u -m http.server 3001 --bind 127.0.0.1
+        ready-check: python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:3001", timeout=1)'
+    run: rwx-sandbox
+    env:
+      UUID: ${{ run.id }}
+      RWX_ACCESS_TOKEN: ""
