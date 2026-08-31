@@ -4,8 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/sandbox-helpers.sh"
 
-export RWX_EXPERIMENTAL=true
-
 start_sandbox "${SCRIPT_DIR}/definitions/sandbox-background.yml"
 trap stop_sandbox EXIT
 
