@@ -1615,7 +1615,7 @@ func TestService_TunnelSandbox(t *testing.T) {
 	setupTunnel := func(t *testing.T) (*testSetup, *[]string) {
 		t.Helper()
 		setup := setupTest(t)
-		setup.mockGit.MockGetHeadError = fmt.Errorf("git should not be consulted")
+		setup.mockVCS.MockGetHeadError = fmt.Errorf("git should not be consulted")
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
