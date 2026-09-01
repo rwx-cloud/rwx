@@ -13,7 +13,7 @@ require (
 	github.com/docker/cli v28.5.2+incompatible
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/goccy/go-yaml v1.19.2
-	github.com/gofrs/flock v0.13.0
+	github.com/gofrs/flock v0.13.1
 	github.com/kopoli/go-terminal-size v0.0.0-20170219200355-5c97524c8b54
 	github.com/manifoldco/promptui v0.9.0
 	github.com/moby/moby v28.5.2+incompatible
