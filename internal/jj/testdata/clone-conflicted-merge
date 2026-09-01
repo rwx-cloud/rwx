@@ -1,0 +1,30 @@
+#!/bin/bash
+set -euo pipefail
+
+git init -q -b main origin
+cd origin
+printf 'hello\n' > base.txt
+git add -A
+git commit -qm "base commit"
+
+# The base commit patches are expected to be based on.
+git rev-parse HEAD
+cd ..
+
+jj git clone $COLOCATE origin repo
+cd repo
+
+head_commit() {
+  jj log -r @ --no-graph -T commit_id
+}
+
+# Two siblings edit the same line; merging both leaves @ conflicted.
+jj new main -m side-a
+printf 'aaa\n' > base.txt
+side_a=$(head_commit)
+
+jj new main -m side-b
+printf 'bbb\n' > base.txt
+side_b=$(head_commit)
+
+jj new "$side_a" "$side_b" -m merge
