@@ -18,7 +18,19 @@ if [ "$marker" != "sentinel" ]; then
 fi
 
 # exec --reset should stop the existing sandbox, start a fresh one, and run the command
-"${RWX_CLI}" sandbox exec --reset --init ref=main --init "cli=${COMMIT_SHA}" "${SCRIPT_DIR}/definitions/sandbox.yml" -- sh -c 'echo "exec-reset-complete"'
+exec_result=$("${RWX_CLI}" sandbox exec \
+  --json \
+  --reset \
+  --init ref=main \
+  --init "cli=${COMMIT_SHA}" \
+  "${SCRIPT_DIR}/definitions/sandbox.yml" \
+  -- sh -c 'echo "exec-reset-complete" >&2')
+SANDBOX_RUN_ID=$(echo "$exec_result" | jq -r '.RunID // empty')
+if [ -z "$SANDBOX_RUN_ID" ]; then
+  echo "exec --reset did not return a run ID"
+  echo "$exec_result"
+  exit 1
+fi
 
 # In the fresh sandbox, the sentinel file should not exist
 exit_code=0

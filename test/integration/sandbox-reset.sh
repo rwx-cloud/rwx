@@ -26,6 +26,7 @@ if [ -z "$new_run_id" ]; then
   echo "$reset_output"
   exit 1
 fi
+export SANDBOX_RUN_ID="$new_run_id"
 
 # After reset, the marker file should not exist in the fresh sandbox
 exit_code=0

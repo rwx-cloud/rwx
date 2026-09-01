@@ -19,12 +19,19 @@ preview_url=$(echo "$background_result" | jq -r '.URL')
 
 curl --fail --silent --show-error --max-time 10 "$preview_url" >/dev/null
 
-"${RWX_CLI}" sandbox exec \
+exec_result=$("${RWX_CLI}" sandbox exec \
+  --json \
   --reset \
   --init ref=main \
   --init "cli=${COMMIT_SHA}" \
   "${SCRIPT_DIR}/definitions/sandbox-background.yml" \
-  -- true
+  -- true)
+SANDBOX_RUN_ID=$(echo "$exec_result" | jq -r '.RunID // empty')
+if [ -z "$SANDBOX_RUN_ID" ]; then
+  echo "exec --reset did not return a run ID"
+  echo "$exec_result"
+  exit 1
+fi
 
 if curl --fail --silent --max-time 2 "$preview_url" >/dev/null 2>&1; then
   echo "ERROR: Preview tunnel remained reachable after exec --reset"
