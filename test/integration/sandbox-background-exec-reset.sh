@@ -11,7 +11,7 @@ trap stop_sandbox EXIT
 
 background_result=$("${RWX_CLI}" sandbox background \
   --id "$SANDBOX_RUN_ID" \
-  --name reset-preview \
+  --key reset-preview \
   --port 3000 \
   --json \
   -- python3 -u -m http.server 3000 --bind 127.0.0.1)

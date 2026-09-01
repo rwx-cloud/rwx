@@ -20,7 +20,13 @@ func TestSandboxPushCommandIsHidden(t *testing.T) {
 func TestSandboxBackgroundCommandIsHidden(t *testing.T) {
 	require.True(t, sandboxBackgroundCmd.Hidden)
 	require.Equal(t, "background -- <command>", sandboxBackgroundCmd.Use)
-	require.NotNil(t, sandboxBackgroundCmd.PersistentFlags().Lookup("name"))
+	nameFlag := sandboxBackgroundCmd.PersistentFlags().Lookup("name")
+	keyFlag := sandboxBackgroundCmd.PersistentFlags().Lookup("key")
+	require.NotNil(t, nameFlag)
+	require.True(t, nameFlag.Hidden)
+	require.Equal(t, "use --key instead", nameFlag.Deprecated)
+	require.NotNil(t, keyFlag)
+	require.False(t, keyFlag.Hidden)
 	require.NotNil(t, sandboxBackgroundCmd.Flags().Lookup("port"))
 	require.NotNil(t, sandboxBackgroundCmd.Flags().Lookup("local-port"))
 	require.Nil(t, sandboxBackgroundCmd.Flags().Lookup("dir"))
@@ -32,6 +38,44 @@ func TestSandboxBackgroundCommandIsHidden(t *testing.T) {
 	require.Equal(t, "logs", sandboxBackgroundLogsCmd.Use)
 	require.True(t, sandboxBackgroundLogsCmd.Hidden)
 	require.NotNil(t, sandboxBackgroundLogsCmd.Flags().Lookup("follow"))
+}
+
+func TestSandboxBackgroundNameAndKeyFlags(t *testing.T) {
+	nameFlag := sandboxBackgroundCmd.PersistentFlags().Lookup("name")
+	keyFlag := sandboxBackgroundCmd.PersistentFlags().Lookup("key")
+	originalNameChanged := nameFlag.Changed
+	originalKeyChanged := keyFlag.Changed
+	originalName := sandboxBackgroundName
+	t.Cleanup(func() {
+		nameFlag.Changed = originalNameChanged
+		keyFlag.Changed = originalKeyChanged
+		require.NoError(t, keyFlag.Value.Set(originalName))
+	})
+
+	commands := []*cobra.Command{
+		sandboxBackgroundCmd,
+		sandboxBackgroundRestartCmd,
+		sandboxBackgroundStopCmd,
+		sandboxBackgroundLogsCmd,
+	}
+
+	nameFlag.Changed = false
+	keyFlag.Changed = false
+	for _, command := range commands {
+		require.Error(t, command.ValidateFlagGroups(), "%s should require --key or its compatibility alias", command.CommandPath())
+	}
+
+	require.NoError(t, keyFlag.Value.Set("worker"))
+	require.Equal(t, "worker", sandboxBackgroundName)
+	keyFlag.Changed = true
+	for _, command := range commands {
+		require.NoError(t, command.ValidateFlagGroups(), "%s should accept --key", command.CommandPath())
+	}
+
+	nameFlag.Changed = true
+	for _, command := range commands {
+		require.Error(t, command.ValidateFlagGroups(), "%s should reject --name with --key", command.CommandPath())
+	}
 }
 
 func TestExperimentalSandboxCommandsRequireOptIn(t *testing.T) {

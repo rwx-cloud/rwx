@@ -12,7 +12,7 @@ preview_file="integration-background-preview.txt"
 
 cleanup() {
   if [ -n "${SANDBOX_RUN_ID:-}" ]; then
-    "${RWX_CLI}" sandbox background stop --id "$SANDBOX_RUN_ID" --name "$preview_name" >/dev/null 2>&1 || true
+    "${RWX_CLI}" sandbox background stop --id "$SANDBOX_RUN_ID" --key "$preview_name" >/dev/null 2>&1 || true
     "${RWX_CLI}" sandbox stop --id "$SANDBOX_RUN_ID" >/dev/null 2>&1 || true
   fi
   rm -f "$preview_file"
@@ -25,7 +25,7 @@ printf 'initial preview\n' > "$preview_file"
 
 start_result=$("${RWX_CLI}" sandbox background \
   --id "$SANDBOX_RUN_ID" \
-  --name "$preview_name" \
+  --key "$preview_name" \
   --port "$preview_port" \
   --json \
   -- python3 -u -m http.server "$preview_port" --bind 127.0.0.1)
@@ -56,7 +56,7 @@ fi
 
 restart_result=$("${RWX_CLI}" sandbox background restart \
   --id "$SANDBOX_RUN_ID" \
-  --name "$preview_name" \
+  --key "$preview_name" \
   --json)
 
 restart_url=$(echo "$restart_result" | jq -r '.URL')
@@ -74,7 +74,7 @@ if [ "$restart_pid" = "$start_pid" ] && [ "$restart_time" = "$start_time" ]; the
 fi
 
 curl --fail --silent --show-error --max-time 10 "$restart_url/$preview_file" >/dev/null
-logs_output=$("${RWX_CLI}" sandbox background logs --id "$SANDBOX_RUN_ID" --name "$preview_name")
+logs_output=$("${RWX_CLI}" sandbox background logs --id "$SANDBOX_RUN_ID" --key "$preview_name")
 if [[ "$logs_output" != *"$preview_file"* ]]; then
   echo "background logs did not include the preview request"
   echo "$logs_output"
@@ -83,7 +83,7 @@ fi
 
 portless_result=$("${RWX_CLI}" sandbox background \
   --id "$SANDBOX_RUN_ID" \
-  --name "$preview_name" \
+  --key "$preview_name" \
   --json \
   -- sh -c 'while :; do sleep 60; done')
 
@@ -97,6 +97,6 @@ if curl --fail --silent --max-time 2 "$preview_url/$preview_file" >/dev/null 2>&
   exit 1
 fi
 
-"${RWX_CLI}" sandbox background stop --id "$SANDBOX_RUN_ID" --name "$preview_name" --json >/dev/null
+"${RWX_CLI}" sandbox background stop --id "$SANDBOX_RUN_ID" --key "$preview_name" --json >/dev/null
 
 echo "PASS: sandbox background process, push, restart, logs, and tunnel cleanup"

@@ -614,13 +614,23 @@ func init() {
 
 	// background flags
 	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")
+	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxBackgroundName, "key", "", "Key of the managed sandbox process")
 	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxBackgroundName, "name", "", "Name of the managed sandbox process")
+	if err := sandboxBackgroundCmd.PersistentFlags().MarkDeprecated("name", "use --key instead"); err != nil {
+		panic(err)
+	}
 	sandboxBackgroundCmd.Flags().IntVar(&sandboxBackgroundPort, "port", 0, "Sandbox port to forward locally")
 	sandboxBackgroundCmd.Flags().IntVar(&sandboxBackgroundLocalPort, "local-port", 0, "Local port to use (default: allocate or reuse one)")
 	sandboxBackgroundCmd.Flags().StringVar(&sandboxBackgroundScheme, "scheme", "", "URL scheme for the forwarded port: http or https (default: http)")
 	sandboxBackgroundLogsCmd.Flags().BoolVarP(&sandboxBackgroundFollow, "follow", "f", false, "Follow log output")
-	if err := sandboxBackgroundCmd.MarkPersistentFlagRequired("name"); err != nil {
-		panic(err)
+	for _, command := range []*cobra.Command{
+		sandboxBackgroundCmd,
+		sandboxBackgroundRestartCmd,
+		sandboxBackgroundStopCmd,
+		sandboxBackgroundLogsCmd,
+	} {
+		command.MarkFlagsOneRequired("name", "key")
+		command.MarkFlagsMutuallyExclusive("name", "key")
 	}
 
 	// stop flags

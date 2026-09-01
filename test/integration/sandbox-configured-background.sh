@@ -19,7 +19,7 @@ configured_logs=""
 for _ in {1..30}; do
   configured_logs=$("${RWX_CLI}" sandbox background logs \
     --id "$SANDBOX_RUN_ID" \
-    --name "$configured_name") || true
+    --key "$configured_name") || true
   if [[ "$configured_logs" == *"$configured_log_marker"* ]]; then
     break
   fi
@@ -34,7 +34,7 @@ fi
 
 configured_restart_result=$("${RWX_CLI}" sandbox background restart \
   --id "$SANDBOX_RUN_ID" \
-  --name "$configured_name" \
+  --key "$configured_name" \
   --json)
 
 if [ "$(echo "$configured_restart_result" | jq -r '.Status')" != "running" ]; then
@@ -50,7 +50,7 @@ configured_start_count=0
 for _ in {1..30}; do
   configured_logs=$("${RWX_CLI}" sandbox background logs \
     --id "$SANDBOX_RUN_ID" \
-    --name "$configured_name") || true
+    --key "$configured_name") || true
   configured_start_count=$(grep -c "$configured_log_marker" <<< "$configured_logs" || true)
   if [ "$configured_start_count" -ge 2 ]; then
     break
