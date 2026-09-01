@@ -346,6 +346,38 @@ var sandboxBackgroundRestartCmd = &cobra.Command{
 	},
 }
 
+var sandboxTunnelCmd = &cobra.Command{
+	Use:    "tunnel",
+	Short:  "Expose a sandbox background process through a local tunnel",
+	Hidden: true,
+	Args:   cobra.NoArgs,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		return requireExperimentalSandboxAccess()
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		useJson := useJsonOutput()
+		result, err := service.TunnelSandbox(cli.TunnelSandboxConfig{
+			Key:        sandboxTunnelKey,
+			TargetPort: sandboxTunnelPort,
+			LocalPort:  sandboxTunnelLocalPort,
+			Scheme:     sandboxTunnelScheme,
+			RunID:      sandboxRunID,
+			Json:       useJson,
+		})
+		if err != nil {
+			return err
+		}
+		if useJson {
+			output, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stdout, string(output))
+		}
+		return nil
+	},
+}
+
 var sandboxBackgroundStopCmd = &cobra.Command{
 	Use:    "stop",
 	Short:  "Stop a sandbox background process",
@@ -568,6 +600,10 @@ var (
 	sandboxBackgroundLocalPort int
 	sandboxBackgroundScheme    string
 	sandboxBackgroundFollow    bool
+	sandboxTunnelKey           string
+	sandboxTunnelPort          int
+	sandboxTunnelLocalPort     int
+	sandboxTunnelScheme        string
 	sandboxInitParams          []string
 )
 
@@ -587,6 +623,7 @@ func init() {
 	sandboxBackgroundCmd.AddCommand(sandboxBackgroundStopCmd)
 	sandboxBackgroundCmd.AddCommand(sandboxBackgroundLogsCmd)
 	sandboxCmd.AddCommand(sandboxBackgroundCmd)
+	sandboxCmd.AddCommand(sandboxTunnelCmd)
 	sandboxCmd.AddCommand(sandboxListCmd)
 	sandboxCmd.AddCommand(sandboxStopCmd)
 	sandboxCmd.AddCommand(sandboxResetCmd)
@@ -631,6 +668,19 @@ func init() {
 	} {
 		command.MarkFlagsOneRequired("name", "key")
 		command.MarkFlagsMutuallyExclusive("name", "key")
+	}
+
+	// tunnel flags
+	sandboxTunnelCmd.Flags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")
+	sandboxTunnelCmd.Flags().StringVar(&sandboxTunnelKey, "key", "", "Key of the managed sandbox process to expose")
+	sandboxTunnelCmd.Flags().IntVar(&sandboxTunnelPort, "port", 0, "Sandbox port to forward locally")
+	sandboxTunnelCmd.Flags().IntVar(&sandboxTunnelLocalPort, "local-port", 0, "Local port to use (default: allocate or reuse one)")
+	sandboxTunnelCmd.Flags().StringVar(&sandboxTunnelScheme, "scheme", "", "URL scheme for the forwarded port: http or https (default: http)")
+	if err := sandboxTunnelCmd.MarkFlagRequired("key"); err != nil {
+		panic(err)
+	}
+	if err := sandboxTunnelCmd.MarkFlagRequired("port"); err != nil {
+		panic(err)
 	}
 
 	// stop flags
