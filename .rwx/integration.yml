@@ -58,6 +58,11 @@ tasks:
     init:
       ref: ${{ init.commit-sha }}
 
+  - key: run-rwx-package-build-test
+    call: ${{ run.dir }}/integration/package-build-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
   - key: run-rwx-skill-test
     call: ${{ run.dir }}/integration/skill-test.yml
     init:

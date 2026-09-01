@@ -1,0 +1,249 @@
+# Package fixtures in this file are written by the shell at runtime so that
+# intentionally invalid ones are not caught by real linting.
+
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.1.1
+
+tasks:
+  - key: code
+    call: git/clone 2.0.8
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  # Uploads a real package and returns a server-computed digest.
+  - key: test-package-build-uploads-and-returns-a-digest
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      org=$(rwx whoami --json | jq -r '.organization_slug')
+      tmpdir=$(mktemp -d)
+      cat > "$tmpdir/rwx-package.yml" << EOF
+      name: $org/rwx-cli-integration-test
+      version: 0.0.1
+      description: Fixture uploaded by the rwx CLI integration suite
+      tasks:
+        - key: noop
+          run: echo hello
+      EOF
+      echo "# rwx-cli-integration-test" > "$tmpdir/README.md"
+
+      output=$(rwx package build "$tmpdir")
+      echo "$output"
+
+      digest=$(echo "$output" | sed -n 's/^Uploaded package with digest: //p')
+      if ! echo "$digest" | grep -qE '^[0-9a-f]{64}$'; then
+        echo "expected a 64 character hex digest, got: '$digest'"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+
+  # --timestamp must make the digest reproducible even when mtimes change,
+  # which is what makes content-based caching work.
+  - key: test-package-build-timestamp-produces-a-stable-digest
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      org=$(rwx whoami --json | jq -r '.organization_slug')
+      tmpdir=$(mktemp -d)
+      cat > "$tmpdir/rwx-package.yml" << EOF
+      name: $org/rwx-cli-integration-test
+      version: 0.0.1
+      description: Fixture uploaded by the rwx CLI integration suite
+      tasks:
+        - key: noop
+          run: echo hello
+      EOF
+      echo "# rwx-cli-integration-test" > "$tmpdir/README.md"
+
+      build_digest() {
+        rwx package build "$tmpdir" --timestamp 202601020304 --json | jq -r '.Digest'
+      }
+
+      find "$tmpdir" -exec touch -t 202001010000 {} \;
+      first=$(build_digest)
+
+      # Rewriting every modification time must not change the digest.
+      find "$tmpdir" -exec touch -t 202412250000 {} \;
+      second=$(build_digest)
+
+      if [ "$first" != "$second" ]; then
+        echo "--timestamp did not produce a reproducible digest"
+        echo "first:  $first"
+        echo "second: $second"
+        exit 1
+      fi
+
+      # Sanity check that the files themselves were not rewritten by the build.
+      if [ -n "$(find "$tmpdir" -newermt '2025-01-01' -print -quit)" ]; then
+        echo "package build modified file timestamps on disk"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+
+  # Without --timestamp the real mtimes are preserved, so the digest tracks them.
+  - key: test-package-build-without-timestamp-tracks-mtimes
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      org=$(rwx whoami --json | jq -r '.organization_slug')
+      tmpdir=$(mktemp -d)
+      cat > "$tmpdir/rwx-package.yml" << EOF
+      name: $org/rwx-cli-integration-test
+      version: 0.0.1
+      description: Fixture uploaded by the rwx CLI integration suite
+      tasks:
+        - key: noop
+          run: echo hello
+      EOF
+      echo "# rwx-cli-integration-test" > "$tmpdir/README.md"
+
+      find "$tmpdir" -exec touch -t 202001010000 {} \;
+      first=$(rwx package build "$tmpdir" --json | jq -r '.Digest')
+
+      find "$tmpdir" -exec touch -t 202412250000 {} \;
+      second=$(rwx package build "$tmpdir" --json | jq -r '.Digest')
+
+      if [ "$first" = "$second" ]; then
+        echo "expected the digest to change with file mtimes when --timestamp is omitted"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+
+  # Every validation failure the registry can return must reach the user.
+  - key: test-package-build-displays-server-validation-errors
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      org=$(rwx whoami --json | jq -r '.organization_slug')
+
+      # assert_error <case name> <expected substring> <fixture dir>
+      assert_error() {
+        name="$1"; expected="$2"; dir="$3"
+
+        if output=$(rwx package build "$dir" 2>&1); then
+          echo "[$name] expected a non-zero exit, but the build succeeded:"
+          echo "$output"
+          exit 1
+        fi
+
+        if ! echo "$output" | grep -qF "$expected"; then
+          echo "[$name] expected output to contain: $expected"
+          echo "actual output:"
+          echo "$output"
+          exit 1
+        fi
+        echo "[$name] ok"
+      }
+
+      # Missing rwx-package.yml. The server also lists what was uploaded, which
+      # is multi-line and must not be truncated.
+      d=$(mktemp -d)
+      echo "# readme" > "$d/README.md"
+      assert_error "missing rwx-package.yml" "Upload did not contain rwx-package.yml" "$d"
+      assert_error "missing rwx-package.yml lists files" "Files in upload:" "$d"
+
+      # Missing README.md
+      d=$(mktemp -d)
+      printf 'name: %s/rwx-cli-integration-test\nversion: 0.0.1\ndescription: d\ntasks:\n  - key: noop\n    run: echo hi\n' "$org" > "$d/rwx-package.yml"
+      assert_error "missing README.md" "Upload did not contain README.md" "$d"
+
+      # Invalid YAML
+      d=$(mktemp -d)
+      echo "# readme" > "$d/README.md"
+      printf 'name: [unclosed\n  bad: : :\n' > "$d/rwx-package.yml"
+      assert_error "invalid yaml" "did not find expected" "$d"
+
+      # Manifest without a name
+      d=$(mktemp -d)
+      echo "# readme" > "$d/README.md"
+      printf 'description: no name here\n' > "$d/rwx-package.yml"
+      assert_error "missing name" "did not contain a name" "$d"
+
+      # Version that is not semver
+      d=$(mktemp -d)
+      echo "# readme" > "$d/README.md"
+      printf 'name: %s/rwx-cli-integration-test\nversion: not-a-version\ndescription: d\ntasks:\n  - key: noop\n    run: echo hi\n' "$org" > "$d/rwx-package.yml"
+      assert_error "invalid version" "did not contain a valid version" "$d"
+
+      # Package name owned by a different organization
+      d=$(mktemp -d)
+      echo "# readme" > "$d/README.md"
+      printf 'name: not-your-org/rwx-cli-integration-test\nversion: 0.0.1\ndescription: d\ntasks:\n  - key: noop\n    run: echo hi\n' > "$d/rwx-package.yml"
+      assert_error "wrong organization" "but request was made under organization" "$d"
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+
+  - key: test-package-build-displays-unauthorized-error
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      echo "# readme" > "$tmpdir/README.md"
+      printf 'name: rwx/rwx-cli-integration-test\nversion: 0.0.1\ndescription: d\ntasks:\n  - key: noop\n    run: echo hi\n' > "$tmpdir/rwx-package.yml"
+
+      if output=$(rwx package build "$tmpdir" --access-token rwxp_not_a_real_token 2>&1); then
+        echo "expected a non-zero exit with an invalid access token"
+        echo "$output"
+        exit 1
+      fi
+
+      if ! echo "$output" | grep -qi "unauthorized"; then
+        echo "expected the unauthorized error to be displayed, got:"
+        echo "$output"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+
+  # A malformed --timestamp is rejected locally, before anything is uploaded.
+  - key: test-package-build-rejects-an-invalid-timestamp
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      echo "# readme" > "$tmpdir/README.md"
+      printf 'name: rwx/rwx-cli-integration-test\nversion: 0.0.1\ndescription: d\ntasks:\n  - key: noop\n    run: echo hi\n' > "$tmpdir/rwx-package.yml"
+
+      if output=$(rwx package build "$tmpdir" --timestamp 2026-01-02 2>&1); then
+        echo "expected a non-zero exit for a malformed timestamp"
+        echo "$output"
+        exit 1
+      fi
+
+      if ! echo "$output" | grep -q "YYYYMMDDHHmm"; then
+        echo "expected the timestamp format to be explained, got:"
+        echo "$output"
+        exit 1
+      fi
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}

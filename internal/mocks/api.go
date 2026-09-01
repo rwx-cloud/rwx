@@ -29,6 +29,7 @@ type API struct {
 	MockDeleteVar                               func(api.DeleteVarConfig) (*api.DeleteVarResult, error)
 	MockGetPackageVersions                      func() (*api.PackageVersionsResult, error)
 	MockGetPackageDocumentation                 func(string) (*api.PackageDocumentationResult, error)
+	MockUploadPackage                           func(api.UploadPackageConfig) (*api.UploadPackageResult, error)
 	MockInitiateDispatch                        func(api.InitiateDispatchConfig) (*api.InitiateDispatchResult, error)
 	MockGetDispatch                             func(api.GetDispatchConfig) (*api.GetDispatchResult, error)
 	MockGetDefaultBase                          func() (api.DefaultBaseResult, error)
@@ -227,6 +228,14 @@ func (c *API) GetPackageDocumentation(packageName string) (*api.PackageDocumenta
 	}
 
 	return nil, errors.New("MockGetPackageDocumentation was not configured")
+}
+
+func (c *API) UploadPackage(cfg api.UploadPackageConfig) (*api.UploadPackageResult, error) {
+	if c.MockUploadPackage != nil {
+		return c.MockUploadPackage(cfg)
+	}
+
+	return nil, errors.New("MockUploadPackage was not configured")
 }
 
 func (c *API) InitiateDispatch(cfg api.InitiateDispatchConfig) (*api.InitiateDispatchResult, error) {

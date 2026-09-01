@@ -245,6 +245,15 @@ type PackageVersionsResult struct {
 	Packages    map[string]ApiPackageInfo    `json:"packages"`
 }
 
+type UploadPackageConfig struct {
+	FileName string
+	Contents io.Reader
+}
+
+type UploadPackageResult struct {
+	Digest string `json:"digest"`
+}
+
 type PackageDocumentationParameter struct {
 	Name        string           `json:"name"`
 	Required    bool             `json:"required"`

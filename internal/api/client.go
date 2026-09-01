@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -962,6 +963,52 @@ func (c Client) GetPackageVersions() (*PackageVersionsResult, error) {
 	}
 
 	return &respBody, nil
+}
+
+// UploadPackage uploads a zipped package to the RWX package registry and
+// returns the content digest assigned by the server.
+func (c Client) UploadPackage(cfg UploadPackageConfig) (*UploadPackageResult, error) {
+	endpoint := "/mint/api/leaves"
+
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+
+	part, err := form.CreateFormFile("file", cfg.FileName)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to build multipart form")
+	}
+
+	if _, err := io.Copy(part, cfg.Contents); err != nil {
+		return nil, errors.Wrap(err, "unable to write package contents")
+	}
+
+	if err := form.Close(); err != nil {
+		return nil, errors.Wrap(err, "unable to finalize multipart form")
+	}
+
+	req, err := http.NewRequest(http.MethodPost, endpoint, &body)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
+	}
+
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	// Package validation failures (missing rwx-package.yml or README.md, invalid
+	// YAML, a name owned by another organization, ...) come back as
+	// {"error": "..."} and are surfaced verbatim to the user.
+	result := UploadPackageResult{}
+	if err := decodeResponseJSON(resp, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
 }
 
 func (c Client) GetPackageDocumentation(packageName string) (*PackageDocumentationResult, error) {
