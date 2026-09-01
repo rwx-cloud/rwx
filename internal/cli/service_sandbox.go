@@ -93,6 +93,15 @@ type SandboxBackgroundConfig struct {
 	Json  bool
 }
 
+type TunnelSandboxConfig struct {
+	Key        string
+	TargetPort int
+	LocalPort  int
+	Scheme     string
+	RunID      string
+	Json       bool
+}
+
 type SandboxBackgroundLogsConfig struct {
 	Context context.Context
 	Name    string
@@ -157,6 +166,15 @@ type SandboxBackgroundResult struct {
 	StderrPath  string
 	LogPath     string `json:"logPath,omitempty"`
 	LogsID      string `json:"-"`
+}
+
+type SandboxTunnelResult struct {
+	RunID      string
+	Key        string
+	TargetPort int
+	LocalPort  int
+	Scheme     string
+	URL        string
 }
 
 type sandboxOperationConfig struct {
@@ -556,25 +574,12 @@ func (s Service) BackgroundSandbox(cfg BackgroundSandboxConfig) (*SandboxBackgro
 	if err := validateSandboxBackgroundName(cfg.Name); err != nil {
 		return nil, err
 	}
-	if cfg.TargetPort < 0 || cfg.TargetPort > 65535 {
-		return nil, fmt.Errorf("background process port must be between 1 and 65535")
-	}
-	if cfg.LocalPort < 0 || cfg.LocalPort > 65535 {
-		return nil, fmt.Errorf("local background process port must be between 1 and 65535")
-	}
-	if cfg.LocalPort != 0 && cfg.TargetPort == 0 {
-		return nil, fmt.Errorf("--local-port requires --port")
-	}
-	if cfg.Scheme != "" && cfg.TargetPort == 0 {
-		return nil, fmt.Errorf("--scheme requires --port")
-	}
-	if cfg.TargetPort != 0 {
-		if cfg.Scheme == "" {
-			cfg.Scheme = "http"
-		}
-		if cfg.Scheme != "http" && cfg.Scheme != "https" {
-			return nil, fmt.Errorf("--scheme must be http or https")
-		}
+	var err error
+	cfg.Scheme, err = validateSandboxTunnelOptions(
+		cfg.TargetPort, cfg.LocalPort, cfg.Scheme, "background process", "local background process", false,
+	)
+	if err != nil {
+		return nil, err
 	}
 	if len(cfg.Command) == 0 {
 		return nil, fmt.Errorf("background process command is required")
@@ -606,6 +611,88 @@ func (s Service) BackgroundSandbox(cfg BackgroundSandboxConfig) (*SandboxBackgro
 	process.Key = cfg.Name
 	process.TargetPort = cfg.TargetPort
 	return s.finishSandboxBackground(sandbox, process, cfg.LocalPort, cfg.Scheme, cfg.Json, "Started")
+}
+
+func (s Service) TunnelSandbox(cfg TunnelSandboxConfig) (*SandboxTunnelResult, error) {
+	if err := validateSandboxKey(cfg.Key, "tunnel key"); err != nil {
+		return nil, err
+	}
+	var err error
+	cfg.Scheme, err = validateSandboxTunnelOptions(
+		cfg.TargetPort, cfg.LocalPort, cfg.Scheme, "sandbox", "local tunnel", true,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		RunID:           cfg.RunID,
+		Json:            cfg.Json,
+		RequireExisting: true,
+		SkipSync:        true,
+		LockWaitMessage: "Waiting for another sandbox operation to complete...",
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer sandbox.close()
+
+	startCommand := fmt.Sprintf("rwx sandbox background --key %s -- <command>", cfg.Key)
+	process, err := s.executeSandboxProcessDirective(sandboxDirectiveProcessStatus, struct {
+		Key string `json:"key"`
+	}{Key: cfg.Key}, "get status for")
+	if err != nil {
+		return nil, fmt.Errorf("unable to use background process %q: %w\n\nStart it with:\n  %s", cfg.Key, err, startCommand)
+	}
+	if process.Status != "running" {
+		return nil, fmt.Errorf(
+			"background process %q is not running (status: %s)\n\nStart it with:\n  %s",
+			cfg.Key, process.Status, startCommand,
+		)
+	}
+
+	stateDirectory, err := sandboxTunnelStateDirectory()
+	if err != nil {
+		return nil, err
+	}
+	tunnel, err := s.SSHTunnelManager.Open(rwxssh.TunnelConfig{
+		Key: cfg.Key, RunID: sandbox.runID, Address: sandbox.connectionInfo.Address,
+		PrivateUserKey: sandbox.connectionInfo.PrivateUserKey, PublicHostKey: sandbox.connectionInfo.PublicHostKey,
+		LocalPort: cfg.LocalPort, TargetPort: cfg.TargetPort, Scheme: cfg.Scheme, StateDirectory: stateDirectory,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := &SandboxTunnelResult{
+		RunID:      sandbox.runID,
+		Key:        cfg.Key,
+		TargetPort: cfg.TargetPort,
+		LocalPort:  tunnel.LocalPort,
+		Scheme:     tunnel.Scheme,
+		URL:        fmt.Sprintf("%s://127.0.0.1:%d", tunnel.Scheme, tunnel.LocalPort),
+	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	portReadyDirectiveSupported := process.SupportsPortReadyCheck
+	for {
+		ready, directiveSupported, readyErr := s.sandboxPortReady(cfg.TargetPort, tunnel.LocalPort, portReadyDirectiveSupported)
+		if readyErr != nil {
+			return nil, readyErr
+		}
+		portReadyDirectiveSupported = directiveSupported
+		if ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("timed out waiting for sandbox port %d on %s; the tunnel is still running", cfg.TargetPort, result.URL)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	if !cfg.Json {
+		fmt.Fprintf(s.Stdout, "Tunnel %q: %s\n", cfg.Key, result.URL)
+	}
+	return result, nil
 }
 
 func (s Service) RestartSandboxBackground(cfg SandboxBackgroundConfig) (*SandboxBackgroundResult, error) {
@@ -866,26 +953,11 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 		deadline := time.Now().Add(30 * time.Second)
 		portReadyDirectiveSupported := process.SupportsPortReadyCheck
 		for {
-			ready := false
-			if portReadyDirectiveSupported {
-				exitCode, readyErr := s.SSHClient.ExecuteCommand(fmt.Sprintf("%s %d", sandboxDirectivePortReady, process.TargetPort))
-				if readyErr != nil {
-					return nil, errors.Wrap(readyErr, "failed to check sandbox process port readiness")
-				}
-				switch exitCode {
-				case 0:
-					ready = true
-				case 1:
-					ready = false
-				case 127:
-					portReadyDirectiveSupported = false
-				default:
-					return nil, fmt.Errorf("sandbox agent failed to check port %d readiness (exit code %d)", process.TargetPort, exitCode)
-				}
+			ready, directiveSupported, readyErr := s.sandboxPortReady(process.TargetPort, tunnel.LocalPort, portReadyDirectiveSupported)
+			if readyErr != nil {
+				return nil, readyErr
 			}
-			if !portReadyDirectiveSupported {
-				ready = s.SSHTunnelManager.IsReady(tunnel.LocalPort)
-			}
+			portReadyDirectiveSupported = directiveSupported
 			if ready {
 				break
 			}
@@ -932,6 +1004,26 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 	return result, nil
 }
 
+func (s Service) sandboxPortReady(targetPort, localPort int, directiveSupported bool) (bool, bool, error) {
+	if directiveSupported {
+		exitCode, _, _, err := s.SSHClient.ExecuteCommandWithSeparateOutput(fmt.Sprintf("%s %d", sandboxDirectivePortReady, targetPort))
+		if err != nil {
+			return false, directiveSupported, errors.Wrap(err, "failed to check sandbox port readiness")
+		}
+		switch exitCode {
+		case 0:
+			return true, true, nil
+		case 1:
+			return false, true, nil
+		case 127:
+			directiveSupported = false
+		default:
+			return false, directiveSupported, fmt.Errorf("sandbox agent failed to check port %d readiness (exit code %d)", targetPort, exitCode)
+		}
+	}
+	return s.SSHTunnelManager.IsReady(localPort), directiveSupported, nil
+}
+
 func sandboxBackgroundResult(runID string, process sandboxProcessResponse) *SandboxBackgroundResult {
 	return &SandboxBackgroundResult{
 		RunID: runID, Name: process.Key, Status: process.Status, TargetPort: process.TargetPort,
@@ -942,20 +1034,50 @@ func sandboxBackgroundResult(runID string, process sandboxProcessResponse) *Sand
 }
 
 func validateSandboxBackgroundName(name string) error {
-	if name == "" {
-		return fmt.Errorf("background process name is required")
+	return validateSandboxKey(name, "background process name")
+}
+
+func validateSandboxKey(key, description string) error {
+	if key == "" {
+		return fmt.Errorf("%s is required", description)
 	}
-	if len(name) > sandboxBackgroundNameSizeLimit {
-		return fmt.Errorf("background process name must be at most %d bytes", sandboxBackgroundNameSizeLimit)
+	if len(key) > sandboxBackgroundNameSizeLimit {
+		return fmt.Errorf("%s must be at most %d bytes", description, sandboxBackgroundNameSizeLimit)
 	}
-	for _, char := range name {
+	for _, char := range key {
 		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
 			(char >= '0' && char <= '9') || char == '-' || char == '_' {
 			continue
 		}
-		return fmt.Errorf("background process name may contain only letters, numbers, underscores, and hyphens")
+		return fmt.Errorf("%s may contain only letters, numbers, underscores, and hyphens", description)
 	}
 	return nil
+}
+
+func validateSandboxTunnelOptions(
+	targetPort, localPort int,
+	scheme, targetDescription, localDescription string,
+	requireTargetPort bool,
+) (string, error) {
+	if targetPort < 0 || targetPort > 65535 || (requireTargetPort && targetPort == 0) {
+		return "", fmt.Errorf("%s port must be between 1 and 65535", targetDescription)
+	}
+	if localPort < 0 || localPort > 65535 {
+		return "", fmt.Errorf("%s port must be between 1 and 65535", localDescription)
+	}
+	if localPort != 0 && targetPort == 0 {
+		return "", fmt.Errorf("--local-port requires --port")
+	}
+	if scheme != "" && targetPort == 0 {
+		return "", fmt.Errorf("--scheme requires --port")
+	}
+	if targetPort != 0 && scheme == "" {
+		scheme = "http"
+	}
+	if scheme != "" && scheme != "http" && scheme != "https" {
+		return "", fmt.Errorf("--scheme must be http or https")
+	}
+	return scheme, nil
 }
 
 func sandboxTunnelStateDirectory() (string, error) {

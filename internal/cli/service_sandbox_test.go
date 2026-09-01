@@ -1307,25 +1307,19 @@ func TestService_BackgroundSandbox(t *testing.T) {
 			return false
 		}
 		readyChecks := 0
-		setup.mockSSH.MockExecuteCommand = func(command string) (int, error) {
-			*commands = append(*commands, command)
-			if strings.HasPrefix(command, "__rwx_sandbox_port_ready__ ") {
-				readyChecks++
-				if readyChecks == 1 {
-					return 1, nil
-				}
-
-				return 0, nil
-			}
-
-			return 0, nil
-		}
 		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
 			switch {
 			case strings.HasPrefix(command, "__rwx_sandbox_process_start__ "):
 				return 0, `{"key":"web","status":"running","supportsPortReadyCheck":true,"targetPort":3100}`, "", nil
 			case strings.HasPrefix(command, "__rwx_sandbox_process_status__ "):
 				return 0, `{"key":"web","status":"running","targetPort":3100}`, "", nil
+			case strings.HasPrefix(command, "__rwx_sandbox_port_ready__ "):
+				*commands = append(*commands, command)
+				readyChecks++
+				if readyChecks == 1 {
+					return 1, "", "", nil
+				}
+				return 0, "", "", nil
 			default:
 				return 0, "", "", nil
 			}
@@ -1614,6 +1608,158 @@ rwx sandbox exec -- <command> syncs local changes before it runs.
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "No active sandbox found")
 		require.Contains(t, err.Error(), "rwx sandbox start")
+	})
+}
+
+func TestService_TunnelSandbox(t *testing.T) {
+	setupTunnel := func(t *testing.T) (*testSetup, *[]string) {
+		t.Helper()
+		setup := setupTest(t)
+		setup.mockGit.MockGetHeadError = fmt.Errorf("git should not be consulted")
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
+		commands := []string{}
+		setup.mockSSH.MockExecuteCommand = func(command string) (int, error) {
+			commands = append(commands, command)
+			return 0, nil
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+			commands = append(commands, command)
+			if strings.HasPrefix(command, "__rwx_sandbox_process_status__ ") {
+				return 0, `{"key":"web","status":"running","supportsPortReadyCheck":true}`, nil
+			}
+			return 0, "", nil
+		}
+		return setup, &commands
+	}
+
+	t.Run("opens a named tunnel for a running managed process without mutating it", func(t *testing.T) {
+		setup, commands := setupTunnel(t)
+		var tunnelConfig rwxssh.TunnelConfig
+		setup.mockTunnel.MockOpen = func(cfg rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			tunnelConfig = cfg
+			return rwxssh.TunnelResult{LocalPort: 8301, Scheme: cfg.Scheme}, nil
+		}
+
+		result, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{
+			Key:        "web",
+			TargetPort: 3001,
+			LocalPort:  8301,
+			Scheme:     "https",
+			RunID:      "run-sandbox",
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-sandbox", result.RunID)
+		require.Equal(t, "web", result.Key)
+		require.Equal(t, 3001, result.TargetPort)
+		require.Equal(t, 8301, result.LocalPort)
+		require.Equal(t, "https", result.Scheme)
+		require.Equal(t, "https://127.0.0.1:8301", result.URL)
+		require.Equal(t, "web", tunnelConfig.Key)
+		require.Equal(t, "run-sandbox", tunnelConfig.RunID)
+		require.Equal(t, "192.168.1.1:22", tunnelConfig.Address)
+		require.Equal(t, 3001, tunnelConfig.TargetPort)
+		require.Equal(t, 8301, tunnelConfig.LocalPort)
+		require.Equal(t, "https", tunnelConfig.Scheme)
+		require.Contains(t, *commands, "__rwx_sandbox_port_ready__ 3001")
+		require.True(t, slices.ContainsFunc(*commands, func(command string) bool {
+			return strings.HasPrefix(command, "__rwx_sandbox_process_status__ ")
+		}))
+		for _, command := range *commands {
+			require.NotContains(t, command, "checkout -f")
+			require.NotContains(t, command, "__rwx_sandbox_process_start__")
+			require.NotContains(t, command, "__rwx_sandbox_process_restart__")
+			require.NotContains(t, command, "__rwx_sandbox_process_stop__")
+		}
+	})
+
+	t.Run("falls back to local tunnel readiness when the process lacks sandbox-side support", func(t *testing.T) {
+		setup, commands := setupTunnel(t)
+		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+			*commands = append(*commands, command)
+			if strings.HasPrefix(command, "__rwx_sandbox_process_status__ ") {
+				return 0, `{"key":"web","status":"running"}`, nil
+			}
+			return 0, "", nil
+		}
+		setup.mockTunnel.MockOpen = func(cfg rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			return rwxssh.TunnelResult{LocalPort: 8301, Scheme: cfg.Scheme}, nil
+		}
+		localReadyChecks := 0
+		setup.mockTunnel.MockIsReady = func(localPort int) bool {
+			localReadyChecks++
+			return true
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{
+			Key: "web", TargetPort: 3001, RunID: "run-sandbox", Json: true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 1, localReadyChecks)
+	})
+
+	t.Run("explains how to start a missing managed process", func(t *testing.T) {
+		setup, _ := setupTunnel(t)
+		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
+			if strings.HasPrefix(command, "__rwx_sandbox_process_status__ ") {
+				return 1, "", `sandbox process "missing" was not found`, nil
+			}
+			return 0, "", "", nil
+		}
+		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			require.Fail(t, "a missing process must not open a tunnel")
+			return rwxssh.TunnelResult{}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{
+			Key: "missing", TargetPort: 3001, RunID: "run-sandbox", Json: true,
+		})
+
+		require.ErrorContains(t, err, `unable to use background process "missing"`)
+		require.ErrorContains(t, err, `sandbox process "missing" was not found`)
+		require.ErrorContains(t, err, "Start it with:\n  rwx sandbox background --key missing -- <command>")
+	})
+
+	t.Run("does not tunnel to a stopped managed process", func(t *testing.T) {
+		setup, commands := setupTunnel(t)
+		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+			*commands = append(*commands, command)
+			if strings.HasPrefix(command, "__rwx_sandbox_process_status__ ") {
+				return 0, `{"key":"web","status":"stopped"}`, nil
+			}
+			return 0, "", nil
+		}
+		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			require.Fail(t, "a stopped process must not open a tunnel")
+			return rwxssh.TunnelResult{}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{
+			Key: "web", TargetPort: 3001, RunID: "run-sandbox", Json: true,
+		})
+
+		require.ErrorContains(t, err, `background process "web" is not running (status: stopped)`)
+		require.ErrorContains(t, err, "Start it with:\n  rwx sandbox background --key web -- <command>")
+	})
+
+	t.Run("validates the tunnel key and sandbox port", func(t *testing.T) {
+		setup := setupTest(t)
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "../web", TargetPort: 3000})
+		require.EqualError(t, err, "tunnel key may contain only letters, numbers, underscores, and hyphens")
+
+		_, err = setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web"})
+		require.EqualError(t, err, "sandbox port must be between 1 and 65535")
 	})
 }
 

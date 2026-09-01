@@ -78,6 +78,19 @@ func TestSandboxBackgroundNameAndKeyFlags(t *testing.T) {
 	}
 }
 
+func TestSandboxTunnelCommandIsHidden(t *testing.T) {
+	require.True(t, sandboxTunnelCmd.Hidden)
+	require.Equal(t, "tunnel", sandboxTunnelCmd.Use)
+	require.NotNil(t, sandboxTunnelCmd.Flags().Lookup("id"))
+	require.NotNil(t, sandboxTunnelCmd.Flags().Lookup("key"))
+	require.NotNil(t, sandboxTunnelCmd.Flags().Lookup("port"))
+	require.NotNil(t, sandboxTunnelCmd.Flags().Lookup("local-port"))
+	require.NotNil(t, sandboxTunnelCmd.Flags().Lookup("scheme"))
+	require.Nil(t, sandboxTunnelCmd.Flags().Lookup("name"))
+	require.NoError(t, sandboxTunnelCmd.Args(sandboxTunnelCmd, nil))
+	require.Error(t, sandboxTunnelCmd.Args(sandboxTunnelCmd, []string{"web"}))
+}
+
 func TestExperimentalSandboxCommandsRequireOptIn(t *testing.T) {
 	commands := []*cobra.Command{
 		sandboxPushCmd,
@@ -85,6 +98,7 @@ func TestExperimentalSandboxCommandsRequireOptIn(t *testing.T) {
 		sandboxBackgroundRestartCmd,
 		sandboxBackgroundStopCmd,
 		sandboxBackgroundLogsCmd,
+		sandboxTunnelCmd,
 	}
 
 	for _, value := range []string{"", "false", "TRUE", "1"} {
