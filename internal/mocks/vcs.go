@@ -5,10 +5,10 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/rwx-cloud/rwx/internal/git"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 )
 
-type Git struct {
+type VCS struct {
 	MockGetBranch              string
 	MockGetHead                string
 	MockGetHeadError           error
@@ -16,25 +16,26 @@ type Git struct {
 	MockGetCommit              string
 	MockGetCommitError         error
 	MockGetOriginUrl           string
-	MockGeneratePatchFile      git.PatchFile
+	MockGeneratePatchFile      vcs.PatchFile
 	MockGeneratePatchFileError error
-	MockGeneratePatchFileFunc  func(destDir string, pathspec []string) (git.PatchFile, error)
+	MockGeneratePatchFileFunc  func(destDir string, pathspec []string) (vcs.PatchFile, error)
 	MockGeneratePatchPathspec  []string
-	MockGeneratePatch          func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error)
-	MockGenerateDirtyPatches   func() (git.DirtyPatches, error)
-	MockHasCommit              func(sha string) bool
-	MockPushRef                func(opts git.PushRefOptions) error
+	MockGeneratePatch          func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error)
+	MockGenerateDirtyPatches   func() (vcs.DirtyPatches, error)
+	MockPushRef                func(opts vcs.PushRefOptions) error
 	MockApplyPatch             func(patch []byte) *exec.Cmd
 	MockApplyPatchReject       func(patch []byte) *exec.Cmd
-	MockIsInstalled            bool
 	MockIsInsideWorkTree       bool
+	MockMissingDependency      string
+	MockGetShortHead           string
+	MockIsAncestor             func(candidateSHA, headRef string) bool
 }
 
-func (c *Git) GetBranch() string {
+func (c *VCS) GetBranch() string {
 	return c.MockGetBranch
 }
 
-func (c *Git) GetHead() string {
+func (c *VCS) GetHead() string {
 	head, err := c.GetHeadCommit()
 	if err != nil {
 		return ""
@@ -42,44 +43,44 @@ func (c *Git) GetHead() string {
 	return head
 }
 
-func (c *Git) GetHeadCommit() (string, error) {
+func (c *VCS) GetHeadCommit() (string, error) {
 	return c.MockGetHead, c.MockGetHeadError
 }
 
-func (c *Git) GetTopLevel() string {
+func (c *VCS) GetTopLevel() string {
 	return c.MockGetTopLevel
 }
 
-func (c *Git) GetCommit() (string, error) {
+func (c *VCS) GetCommit() (string, error) {
 	return c.MockGetCommit, c.MockGetCommitError
 }
 
-func (c *Git) GetOriginUrl() string {
+func (c *VCS) GetOriginUrl() string {
 	return c.MockGetOriginUrl
 }
 
-func (c *Git) GeneratePatchFile(destDir string, pathspec []string) (git.PatchFile, error) {
+func (c *VCS) GeneratePatchFile(destDir string, pathspec []string) (vcs.PatchFile, error) {
 	c.MockGeneratePatchPathspec = append([]string(nil), pathspec...)
 	if c.MockGeneratePatchFileFunc != nil {
 		return c.MockGeneratePatchFileFunc(destDir, pathspec)
 	}
 
 	if c.MockGeneratePatchFileError != nil {
-		return git.PatchFile{}, c.MockGeneratePatchFileError
+		return vcs.PatchFile{}, c.MockGeneratePatchFileError
 	}
 
 	if c.MockGeneratePatchFile.Written {
 		if err := os.MkdirAll(destDir, 0755); err != nil {
-			return git.PatchFile{}, err
+			return vcs.PatchFile{}, err
 		}
 
 		sha, _ := c.GetCommit()
 		path := filepath.Join(destDir, sha)
 		if err := os.WriteFile(path, []byte("patch"), 0644); err != nil {
-			return git.PatchFile{}, err
+			return vcs.PatchFile{}, err
 		}
 
-		return git.PatchFile{
+		return vcs.PatchFile{
 			Written:         c.MockGeneratePatchFile.Written,
 			Path:            path,
 			UntrackedFiles:  c.MockGeneratePatchFile.UntrackedFiles,
@@ -90,52 +91,58 @@ func (c *Git) GeneratePatchFile(destDir string, pathspec []string) (git.PatchFil
 	return c.MockGeneratePatchFile, nil
 }
 
-func (c *Git) GeneratePatch(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+func (c *VCS) GeneratePatch(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 	if c.MockGeneratePatch != nil {
 		return c.MockGeneratePatch(pathspec)
 	}
 	return nil, nil, nil
 }
 
-func (c *Git) GenerateDirtyPatches() (git.DirtyPatches, error) {
+func (c *VCS) GenerateDirtyPatches() (vcs.DirtyPatches, error) {
 	if c.MockGenerateDirtyPatches != nil {
 		return c.MockGenerateDirtyPatches()
 	}
-	return git.DirtyPatches{}, nil
+	return vcs.DirtyPatches{}, nil
 }
 
-func (c *Git) HasCommit(sha string) bool {
-	if c.MockHasCommit != nil {
-		return c.MockHasCommit(sha)
-	}
-	return true
-}
-
-func (c *Git) PushRef(opts git.PushRefOptions) error {
+func (c *VCS) PushRef(opts vcs.PushRefOptions) error {
 	if c.MockPushRef != nil {
 		return c.MockPushRef(opts)
 	}
 	return nil
 }
 
-func (c *Git) ApplyPatch(patch []byte) *exec.Cmd {
+func (c *VCS) ApplyPatch(patch []byte) *exec.Cmd {
 	if c.MockApplyPatch != nil {
 		return c.MockApplyPatch(patch)
 	}
 	return exec.Command("true")
 }
 
-func (c *Git) ApplyPatchReject(patch []byte) *exec.Cmd {
+func (c *VCS) ApplyPatchReject(patch []byte) *exec.Cmd {
 	if c.MockApplyPatchReject != nil {
 		return c.MockApplyPatchReject(patch)
 	}
 	return exec.Command("true")
 }
 
-func (c *Git) IsInstalled() bool {
-	return c.MockIsInstalled
-}
-
-func (c *Git) IsInsideWorkTree() bool {
+func (c *VCS) IsInsideWorkTree() bool {
 	return c.MockIsInsideWorkTree
 }
+
+func (c *VCS) MissingDependency() string {
+	return c.MockMissingDependency
+}
+
+func (c *VCS) GetShortHead() string {
+	return c.MockGetShortHead
+}
+
+func (c *VCS) IsAncestor(candidateSHA, headRef string) bool {
+	if c.MockIsAncestor != nil {
+		return c.MockIsAncestor(candidateSHA, headRef)
+	}
+	return false
+}
+
+var _ vcs.Client = (*VCS)(nil)

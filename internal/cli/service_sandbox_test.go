@@ -22,8 +22,8 @@ import (
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/errors"
-	"github.com/rwx-cloud/rwx/internal/git"
 	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
@@ -632,7 +632,7 @@ func TestService_ExecSandbox(t *testing.T) {
 
 		// Pull mocks (no changes on sandbox)
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -688,7 +688,7 @@ func TestService_ExecSandbox(t *testing.T) {
 
 		// Pull mocks (no changes on sandbox)
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -730,7 +730,7 @@ func TestService_ExecSandbox(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -974,7 +974,7 @@ func TestService_ExecSandbox(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -1072,9 +1072,9 @@ func TestService_SyncSandbox(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 		localPatch := []byte("diff --git a/file.txt b/file.txt\n")
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: localPatch, Files: []string{"file.txt"}}, nil
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: localPatch, Files: []string{"file.txt"}}, nil
 		}
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
@@ -1482,7 +1482,7 @@ rwx sandbox exec -- <command> syncs local changes before it runs.
 
 	t.Run("stop closes the matching tunnel without syncing", func(t *testing.T) {
 		setup, commands := setupBackground(t)
-		setup.mockGit.MockGetHeadError = fmt.Errorf("git should not be consulted")
+		setup.mockVCS.MockGetHeadError = fmt.Errorf("git should not be consulted")
 		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
 			*commands = append(*commands, command)
 			return 0, `{"key":"web","status":"stopped"}`, nil
@@ -1919,7 +1919,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 
 		runID := "run-no-local-head"
 		address := "192.168.1.1:22"
-		setup.mockGit.MockGetHeadError = fmt.Errorf("not a git repository")
+		setup.mockVCS.MockGetHeadError = fmt.Errorf("not a git repository")
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
@@ -1944,7 +1944,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		})
 
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "sandbox push requires a git repository with a valid HEAD")
+		require.Contains(t, err.Error(), "sandbox push requires a repository with a resolvable working copy")
 		require.Contains(t, err.Error(), "not a git repository")
 	})
 
@@ -1969,8 +1969,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: []byte("diff --git a/file.txt b/file.txt\n")}, nil
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: []byte("diff --git a/file.txt b/file.txt\n")}, nil
 		}
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
@@ -2023,7 +2023,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil // No changes
 		}
 
@@ -2080,7 +2080,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil // No changes
 		}
 
@@ -2145,10 +2145,10 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{
 				Staged:          []byte("diff --git a/non-lfs.txt b/non-lfs.txt\n"),
-				LFSChangedFiles: &git.LFSChangedFilesMetadata{Files: []string{"large.bin"}, Count: 1},
+				LFSChangedFiles: &vcs.LFSChangedFilesMetadata{Files: []string{"large.bin"}, Count: 1},
 			}, nil
 		}
 
@@ -2216,8 +2216,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: []byte("invalid patch")}, nil
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: []byte("invalid patch")}, nil
 		}
 
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
@@ -2266,8 +2266,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: []byte("diff --git a/file.txt b/file.txt\n")}, nil
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: []byte("diff --git a/file.txt b/file.txt\n")}, nil
 		}
 
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
@@ -2287,7 +2287,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			stdinCommandOrder = append(stdinCommandOrder, command)
 			return 0, "", nil
 		}
-		setup.mockGit.MockApplyPatch = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatch = func(patch []byte) *exec.Cmd {
 			require.Equal(t, sandboxPatch, string(patch))
 			pulledPatchApplied = true
 			return exec.Command("true")
@@ -2379,18 +2379,18 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/sync"
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/sync"
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{
 				Staged:   []byte("staged-patch"),
 				Unstaged: []byte("unstaged-patch"),
 			}, nil
 		}
 
 		var commandOrder []string
-		var pushOpts git.PushRefOptions
-		setup.mockGit.MockPushRef = func(opts git.PushRefOptions) error {
+		var pushOpts vcs.PushRefOptions
+		setup.mockVCS.MockPushRef = func(opts vcs.PushRefOptions) error {
 			pushOpts = opts
 			commandOrder = append(commandOrder, "git push "+opts.Remote+" "+opts.Refspec)
 			return nil
@@ -2536,16 +2536,16 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/lfs-push"
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/lfs-push"
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
 			t.Fatal("dirty patches should not be generated after broken LFS objects are detected")
-			return git.DirtyPatches{}, nil
+			return vcs.DirtyPatches{}, nil
 		}
 
 		var commandOrder []string
 		pushed := false
-		setup.mockGit.MockPushRef = func(opts git.PushRefOptions) error {
+		setup.mockVCS.MockPushRef = func(opts vcs.PushRefOptions) error {
 			pushed = true
 			commandOrder = append(commandOrder, "git push "+opts.Remote+" "+opts.Refspec)
 			return nil
@@ -2625,8 +2625,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		oid := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/checkout-fail-lfs"
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/checkout-fail-lfs"
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
@@ -2677,8 +2677,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/checkout-fail-transport"
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/checkout-fail-transport"
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
@@ -2731,13 +2731,13 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		newFilePath := "dir with space/quote'file.txt"
 		newFilePatch := []byte("diff --git a/" + newFilePath + " b/" + newFilePath + "\nnew file mode 100644\nindex 0000000..c42fa8d\n--- /dev/null\n+++ b/" + newFilePath + "\n@@ -0,0 +1 @@\n+local-change-content\n")
 
-		setup.mockGit.MockGetBranch = "feature/new-sandbox"
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetCommit = "base"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{
+		setup.mockVCS.MockGetBranch = "feature/new-sandbox"
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetCommit = "base"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{
 				Staged:   newFilePatch,
 				Files:    []string{newFilePath},
 				NewFiles: []string{newFilePath},
@@ -2827,17 +2827,17 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		newFilePatch := []byte("diff --git a/" + newFilePath + " b/" + newFilePath + "\nnew file mode 100644\nindex 0000000..c42fa8d\n--- /dev/null\n+++ b/" + newFilePath + "\n@@ -0,0 +1 @@\n+local-change-content\n")
 
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
-			cli.SessionKey("detached", configFile): {
+			cli.SessionKey("feature/start-first-exec", configFile): {
 				RunID:       "run-started",
 				ConfigFile:  configFile,
 				ScopedToken: "start-token",
 			},
 		})
 
-		setup.mockGit.MockGetBranch = "feature/start-first-exec"
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{
+		setup.mockVCS.MockGetBranch = "feature/start-first-exec"
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{
 				Staged:   newFilePatch,
 				Files:    []string{newFilePath},
 				NewFiles: []string{newFilePath},
@@ -2915,7 +2915,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		newFilePatch := []byte("diff --git a/" + newFilePath + " b/" + newFilePath + "\nnew file mode 100644\nindex 0000000..c42fa8d\n--- /dev/null\n+++ b/" + newFilePath + "\n@@ -0,0 +1 @@\n+local-change-content\n")
 
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
-			cli.SessionKey("detached", configFile): {
+			cli.SessionKey("feature/reused-exec", configFile): {
 				RunID:         "run-reused",
 				ConfigFile:    configFile,
 				ScopedToken:   "reused-token",
@@ -2924,10 +2924,10 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			},
 		})
 
-		setup.mockGit.MockGetBranch = "feature/reused-exec"
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{
+		setup.mockVCS.MockGetBranch = "feature/reused-exec"
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{
 				Staged:   newFilePatch,
 				Files:    []string{newFilePath},
 				NewFiles: []string{newFilePath},
@@ -2998,13 +2998,13 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		stagedDeletePatch := []byte("diff --git a/" + deletedPath + " b/" + deletedPath + "\ndeleted file mode 100644\nindex c42fa8d..0000000\n--- a/" + deletedPath + "\n+++ /dev/null\n@@ -1 +0,0 @@\n-deleted-content\n")
 		unstagedEditPatch := []byte("diff --git a/" + editedPath + " b/" + editedPath + "\nindex c42fa8d..5bd8a42 100644\n--- a/" + editedPath + "\n+++ b/" + editedPath + "\n@@ -1 +1 @@\n-old-content\n+new-content\n")
 
-		setup.mockGit.MockGetBranch = "feature/new-sandbox"
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetCommit = "base"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{
+		setup.mockVCS.MockGetBranch = "feature/new-sandbox"
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetCommit = "base"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{
 				Staged:   stagedDeletePatch,
 				Unstaged: unstagedEditPatch,
 				Files:    []string{deletedPath, editedPath},
@@ -3087,12 +3087,12 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/fetch-only"
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{}, nil
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/fetch-only"
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{}, nil
 		}
-		setup.mockGit.MockPushRef = func(opts git.PushRefOptions) error {
+		setup.mockVCS.MockPushRef = func(opts vcs.PushRefOptions) error {
 			require.Fail(t, "push should not run when remote fetch provides local head")
 			return nil
 		}
@@ -3148,10 +3148,10 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = ""
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{}, nil
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = ""
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{}, nil
 		}
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
@@ -3202,9 +3202,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/push-fail"
-		setup.mockGit.MockPushRef = func(opts git.PushRefOptions) error {
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/push-fail"
+		setup.mockVCS.MockPushRef = func(opts vcs.PushRefOptions) error {
 			return fmt.Errorf("remote rejected push")
 		}
 
@@ -3251,9 +3251,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/push-missing"
-		setup.mockGit.MockPushRef = func(opts git.PushRefOptions) error {
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/push-missing"
+		setup.mockVCS.MockPushRef = func(opts vcs.PushRefOptions) error {
 			return nil
 		}
 
@@ -3311,8 +3311,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: []byte("patch")}, nil
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: []byte("patch")}, nil
 		}
 
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
@@ -3359,7 +3359,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return []byte("patch"), nil, nil
 		}
 
@@ -3430,7 +3430,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		}
 
 		// No local changes
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -3482,7 +3482,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -3549,7 +3549,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -3643,7 +3643,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -3806,17 +3806,17 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
 		// First apply fails
-		setup.mockGit.MockApplyPatch = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatch = func(patch []byte) *exec.Cmd {
 			return exec.Command("false")
 		}
 
 		// --reject also fails (partial apply), and create a .rej file to simulate
-		setup.mockGit.MockApplyPatchReject = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatchReject = func(patch []byte) *exec.Cmd {
 			// Create a .rej file to simulate partial apply
 			_ = os.WriteFile(filepath.Join(setup.tmp, "file.txt.rej"), []byte("rejected hunk"), 0644)
 			return exec.Command("false")
@@ -3871,17 +3871,17 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
 		// First apply fails
-		setup.mockGit.MockApplyPatch = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatch = func(patch []byte) *exec.Cmd {
 			return exec.Command("false")
 		}
 
 		// --reject succeeds (all hunks applied on retry)
-		setup.mockGit.MockApplyPatchReject = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatchReject = func(patch []byte) *exec.Cmd {
 			return exec.Command("true")
 		}
 
@@ -3937,15 +3937,15 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
 		// Both apply attempts fail
-		setup.mockGit.MockApplyPatch = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatch = func(patch []byte) *exec.Cmd {
 			return exec.Command("false")
 		}
-		setup.mockGit.MockApplyPatchReject = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatchReject = func(patch []byte) *exec.Cmd {
 			return exec.Command("false")
 		}
 
@@ -3999,7 +3999,7 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 		}
 
 		// No local changes (sync still runs the .rej check)
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -4030,12 +4030,12 @@ func TestService_StartSandbox(t *testing.T) {
 		err = os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte(sandboxConfig), 0o644)
 		require.NoError(t, err)
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{
 			Written:        true,
-			UntrackedFiles: git.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
+			UntrackedFiles: vcs.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
 		}
 
 		// Mock API
@@ -4087,9 +4087,9 @@ func TestService_StartSandbox(t *testing.T) {
 		require.NoError(t, err)
 
 		// Mock git
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		// Mock API
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
@@ -4141,9 +4141,9 @@ func TestService_StartSandbox_StorageLock(t *testing.T) {
 		require.NoError(t, os.MkdirAll(rwxDir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
@@ -4181,8 +4181,8 @@ func TestService_StartSandbox_StorageLock(t *testing.T) {
 		storage, err := cli.LoadSandboxStorage()
 		require.NoError(t, err)
 		require.NotEmpty(t, storage.Sandboxes, "expected at least one session in storage")
-		// The temp dir is not a git repo, so the branch resolves to "detached"
-		session, found := storage.GetSession("detached", setup.absConfig(".rwx/sandbox.yml"))
+		// Sessions are keyed by the branch the service's VCS client reports
+		session, found := storage.GetSession("main", setup.absConfig(".rwx/sandbox.yml"))
 		require.True(t, found)
 		require.Equal(t, "run-lock-test", session.RunID)
 
@@ -4199,9 +4199,9 @@ func TestService_StartSandbox_StorageLock(t *testing.T) {
 		require.NoError(t, os.MkdirAll(rwxDir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
@@ -4244,9 +4244,9 @@ func TestService_ExecSandbox_ConcurrentAutoCreate(t *testing.T) {
 
 		address := "192.168.1.1:22"
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
@@ -4288,7 +4288,7 @@ func TestService_ExecSandbox_ConcurrentAutoCreate(t *testing.T) {
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			return 0, nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -4300,7 +4300,7 @@ func TestService_ExecSandbox_ConcurrentAutoCreate(t *testing.T) {
 			APIClient:        setup.mockAPI,
 			SSHClient:        setup.mockSSH,
 			SSHTunnelManager: setup.mockTunnel,
-			GitClient:        setup.mockGit,
+			VCSClient:        setup.mockVCS,
 			DockerCLI:        setup.mockDocker,
 			Stdin:            &bytes.Buffer{},
 			Stdout:           stdout2,
@@ -4355,7 +4355,8 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		t.Cleanup(func() { os.Setenv("HOME", originalHome) })
 
 		address := "192.168.1.1:22"
-		// GetCurrentGitBranch uses a real git client, so in a non-repo temp dir it returns "detached"
+		// The mock VCS client reports no branch and no short head, so
+		// GetCurrentBranch falls back to "detached"
 		branch := "detached"
 		configFile := setup.absConfig(".rwx/sandbox.yml")
 
@@ -4396,7 +4397,7 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			return 0, nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -4440,9 +4441,9 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		}
 
 		// Mock the full auto-create path
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
@@ -4480,7 +4481,7 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			return 0, nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -4511,7 +4512,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		}
 		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func([]string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func([]string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 	}
@@ -4525,7 +4526,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 
 		configFile := setup.absConfig(".rwx/sandbox.yml")
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
-			"detached:" + configFile: {
+			"main:" + configFile: {
 				RunID:       staleRunID,
 				ConfigFile:  configFile,
 				ScopedToken: "token-stale",
@@ -4550,9 +4551,9 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 			}, nil
 		}
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
 		}
@@ -4570,7 +4571,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		}
 		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func([]string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func([]string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -4678,7 +4679,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		}
 		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func([]string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func([]string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -4773,9 +4774,9 @@ func TestService_ExecSandbox_InitParams(t *testing.T) {
 		require.NoError(t, err)
 
 		// Mock git
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		// Mock API
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
@@ -4820,7 +4821,7 @@ func TestService_ExecSandbox_InitParams(t *testing.T) {
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			return 0, nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -5180,10 +5181,10 @@ func TestService_ResetSandbox(t *testing.T) {
 		configPath := filepath.Join(setup.tmp, ".rwx", "sandbox.yml")
 		_ = os.WriteFile(configPath, []byte("tasks:\n  - key: test\n"), 0o644)
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "https://github.com/test/repo"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "https://github.com/test/repo"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
 
 		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			return &api.InitiateRunResult{
@@ -5203,11 +5204,12 @@ func TestService_ResetSandbox(t *testing.T) {
 	}
 
 	// seedResetStorage initializes a git repo on "main" and writes a sandbox session
-	// keyed by branch+configFile so ResetSandbox can find it via GetCurrentGitBranch.
+	// keyed by branch+configFile so ResetSandbox can find it via GetCurrentBranch.
 	seedResetStorage := func(t *testing.T, setup *testSetup, runID, scopedToken string) {
 		t.Helper()
 
-		// GetCurrentGitBranch uses a real git client, so the temp dir must be a repo.
+		// The .rwx directory is placed at the repository root, so the temp dir
+		// has to be one.
 		cmd := exec.Command("git", "init", "-b", "main")
 		cmd.Dir = setup.tmp
 		require.NoError(t, cmd.Run())
@@ -5395,7 +5397,7 @@ func TestService_ExecSandbox_RunURL(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -5450,9 +5452,9 @@ func TestService_StartSandbox_RunURL(t *testing.T) {
 		err = os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte(sandboxConfig), 0o644)
 		require.NoError(t, err)
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{
@@ -5509,7 +5511,7 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -5556,8 +5558,8 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: []byte("invalid patch")}, nil
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: []byte("invalid patch")}, nil
 		}
 
 		var commandOrder []string
@@ -5648,7 +5650,7 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -5735,7 +5737,7 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -5877,12 +5879,12 @@ func TestService_ExecSandbox_DefinitionDrift(t *testing.T) {
 
 func TestService_ExecSandbox_Reset(t *testing.T) {
 	// seedExecResetStorage creates the config file and seeds a session under the
-	// "detached" branch key (what GetCurrentGitBranch returns in a non-git temp dir).
+	// branch key the mocked VCS client reports.
 	seedExecResetStorage := func(t *testing.T, setup *testSetup, runID, scopedToken string, execCount int) string {
 		t.Helper()
 		configFile := setup.absConfig(".rwx/sandbox.yml")
 		require.NoError(t, os.WriteFile(configFile, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
-		key := cli.SessionKey("detached", configFile)
+		key := cli.SessionKey("main", configFile)
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			key: {
 				RunID:       runID,
@@ -5897,10 +5899,10 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 	// setupNewSandboxMocks configures the mocks needed for StartSandbox to succeed
 	// and create "run-new".
 	setupNewSandboxMocks := func(setup *testSetup) {
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
 		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			return &api.InitiateRunResult{
 				RunID:  "run-new",
@@ -5958,7 +5960,7 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 			}
 			return 0, nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -6015,7 +6017,7 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -6074,7 +6076,7 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 			return nil
 		}
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -6110,7 +6112,7 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 		}
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -6159,7 +6161,7 @@ func TestService_ExecSandbox_ReconnectionHint(t *testing.T) {
 		}
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 	}
@@ -6235,10 +6237,10 @@ func TestService_ExecSandbox_ReconnectionHint(t *testing.T) {
 		configFile := setup.absConfig(".rwx/sandbox.yml")
 		require.NoError(t, os.WriteFile(configFile, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
@@ -6264,7 +6266,7 @@ func TestService_ExecSandbox_ReconnectionHint(t *testing.T) {
 		}
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 

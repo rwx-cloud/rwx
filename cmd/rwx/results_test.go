@@ -6,6 +6,7 @@ import (
 	rwx "github.com/rwx-cloud/rwx/cmd/rwx"
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
+	"github.com/rwx-cloud/rwx/internal/mocks"
 	"github.com/stretchr/testify/require"
 )
 
@@ -147,5 +148,36 @@ func TestMergeEnrichedResults(t *testing.T) {
 		merged := rwx.MergeEnrichedResults(base, map[string]any{})
 
 		require.Equal(t, map[string]any{"RunID": "abc123", "ResultStatus": "failed"}, merged)
+	})
+}
+
+func TestCommitDriftNote(t *testing.T) {
+	const base = "1111111111111111111111111111111111111111"
+	const moved = "2222222222222222222222222222222222222222"
+	const head = "3333333333333333333333333333333333333333"
+
+	t.Run("is silent when the run still describes the working copy", func(t *testing.T) {
+		client := &mocks.VCS{MockGetCommit: base, MockGetHead: base}
+		require.Empty(t, rwx.CommitDriftNote(client, base))
+	})
+
+	// The jj shape: @ is always a fresh commit above the base, so HEAD never
+	// equals the recorded commit even when nothing has drifted. Git hits the same
+	// shape whenever the working copy is ahead of the remote.
+	t.Run("is silent when only HEAD differs from the recorded commit", func(t *testing.T) {
+		client := &mocks.VCS{MockGetCommit: base, MockGetHead: head}
+		require.Empty(t, rwx.CommitDriftNote(client, base))
+	})
+
+	t.Run("warns when the recorded commit is no longer current", func(t *testing.T) {
+		client := &mocks.VCS{MockGetCommit: moved, MockGetHead: head}
+		note := rwx.CommitDriftNote(client, base)
+		require.Contains(t, note, moved[:7])
+		require.Contains(t, note, base[:7])
+	})
+
+	t.Run("is silent when the commit cannot be resolved", func(t *testing.T) {
+		require.Empty(t, rwx.CommitDriftNote(&mocks.VCS{}, base))
+		require.Empty(t, rwx.CommitDriftNote(&mocks.VCS{MockGetCommitError: errors.New("nope")}, base))
 	})
 }

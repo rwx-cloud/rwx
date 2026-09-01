@@ -16,28 +16,6 @@ type Client struct {
 	Dir    string
 }
 
-// These keep the git package's existing surface working while callers still
-// import it directly. They go away once everything reaches these names through
-// internal/vcs.
-type (
-	UntrackedFilesMetadata  = vcstypes.UntrackedFilesMetadata
-	LFSChangedFilesMetadata = vcstypes.LFSChangedFilesMetadata
-	PatchFile               = vcstypes.PatchFile
-	DirtyPatches            = vcstypes.DirtyPatches
-	PushRefOptions          = vcstypes.PushRefOptions
-	PatchError              = vcstypes.PatchError
-)
-
-var (
-	CommitMismatchNote    = vcstypes.CommitMismatchNote
-	RepoNameFromOriginUrl = vcstypes.RepoNameFromOriginUrl
-	PatchFailureReason    = vcstypes.PatchFailureReason
-)
-
-func (c *Client) IsInstalled() bool {
-	return c.MissingDependency() == ""
-}
-
 // MissingDependency returns the name of the executable this backend needs but
 // cannot find, or "" when everything is present.
 func (c *Client) MissingDependency() string {

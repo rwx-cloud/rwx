@@ -9,7 +9,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/errors"
-	"github.com/rwx-cloud/rwx/internal/git"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 
 	"github.com/skratchdot/open-golang/open"
 	"github.com/spf13/cobra"
@@ -141,10 +141,8 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 				fmt.Println(string(resultJson))
 			} else {
 				if runIDFromGit && ResultsBranch == "" && ResultsRepo == "" && result.Commit != "" {
-					if head := service.GitClient.GetHead(); head != "" {
-						if note := git.CommitMismatchNote(head, result.Commit); note != "" {
-							fmt.Println(note)
-						}
+					if note := CommitDriftNote(service.VCSClient, result.Commit); note != "" {
+						fmt.Println(note)
 					}
 				}
 				if result.TaskURL != "" {
@@ -206,6 +204,17 @@ func handleResultsTaskKeyError(err error) error {
 	}
 
 	return err
+}
+
+// CommitDriftNote warns that an earlier run no longer describes the working
+// copy. runCommit is a GetCommit value, so it is compared against one: HEAD
+// misfires whenever the two legitimately differ.
+func CommitDriftNote(client vcs.Client, runCommit string) string {
+	current, err := client.GetCommit()
+	if err != nil || current == "" {
+		return ""
+	}
+	return vcs.CommitMismatchNote(current, runCommit)
 }
 
 func HandleAmbiguousDefinitionPathError(err error, branch, repo string) error {
