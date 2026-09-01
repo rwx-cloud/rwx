@@ -817,7 +817,7 @@ func (s Service) executeSandboxProcessDirective(directive string, request any, a
 	}
 	exitCode, output, stderr, err := s.SSHClient.ExecuteCommandWithSeparateOutput(directive + " " + string(payload))
 	if err != nil {
-		return sandboxProcessResponse{}, errors.Wrapf(err, "failed to %s managed sandbox process", action)
+		return sandboxProcessResponse{}, errors.Wrapf(err, "failed to %s sandbox background process", action)
 	}
 	if exitCode == 127 {
 		return sandboxProcessResponse{}, fmt.Errorf("background processes are not supported by this sandbox")
@@ -825,9 +825,9 @@ func (s Service) executeSandboxProcessDirective(directive string, request any, a
 	if exitCode != 0 {
 		stderr = strings.TrimSpace(stderr)
 		if stderr != "" && !strings.Contains(stderr, "__rwx_sandbox_") {
-			return sandboxProcessResponse{}, fmt.Errorf("sandbox agent failed to %s managed process: %s", action, stderr)
+			return sandboxProcessResponse{}, fmt.Errorf("sandbox agent failed to %s background process: %s", action, stderr)
 		}
-		return sandboxProcessResponse{}, fmt.Errorf("sandbox agent failed to %s managed process (exit code %d)", action, exitCode)
+		return sandboxProcessResponse{}, fmt.Errorf("sandbox agent failed to %s background process (exit code %d)", action, exitCode)
 	}
 	var process sandboxProcessResponse
 	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &process); err != nil {

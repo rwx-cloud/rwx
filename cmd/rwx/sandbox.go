@@ -243,12 +243,21 @@ CONFIG FILE
 }
 
 var sandboxPushCmd = &cobra.Command{
-	Use:    "push",
-	Short:  "Push local changes to a sandbox",
-	Hidden: true,
-	Args:   cobra.NoArgs,
+	Use:   "push",
+	Short: "Push local changes to a sandbox",
+	Long: `Sync local changes to an existing sandbox without running a command.
+
+"rwx sandbox exec" syncs local changes before running its command. Use push
+when you want to update the sandbox without running a command.
+
+The sandbox is reset to the local Git state, including staged, unstaged, and
+untracked changes. Changes made only in the sandbox are not preserved.
+
+By default, push targets the sandbox for the current directory and Git branch.
+Use --id to target a specific sandbox.`,
+	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireExperimentalSandboxAccess()
+		return requireAccessToken()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
@@ -273,15 +282,19 @@ var sandboxPushCmd = &cobra.Command{
 }
 
 var sandboxBackgroundCmd = &cobra.Command{
-	Use:    "background -- <command>",
-	Short:  "Start or replace a sandbox background process",
-	Hidden: true,
-	Long: `Start or replace a named managed process in an existing sandbox.
-Local changes are synced before the process starts. When --port is provided,
-the port is forwarded locally and its localhost URL is printed.`,
+	Use:   "background -- <command>",
+	Short: "Start or replace a sandbox background process",
+	Long: `Start or replace a named process in an existing sandbox.
+
+Starting a process syncs the local Git state first. Changes made only in the
+sandbox are not preserved. The process runs until you stop it or the sandbox
+stops.
+
+Use --port to forward a sandbox port to localhost. Use --id to target a
+specific sandbox.`,
 	Args: cobra.ArbitraryArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireExperimentalSandboxAccess()
+		return requireAccessToken()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dashIndex := cmd.ArgsLenAtDash()
@@ -318,12 +331,15 @@ the port is forwarded locally and its localhost URL is printed.`,
 }
 
 var sandboxBackgroundRestartCmd = &cobra.Command{
-	Use:    "restart",
-	Short:  "Sync changes and restart a sandbox background process",
-	Hidden: true,
-	Args:   cobra.NoArgs,
+	Use:   "restart",
+	Short: "Sync changes and restart a sandbox background process",
+	Long: `Sync the local Git state and restart a named process, reusing its saved
+command and sandbox port. Changes made only in the sandbox are not preserved.
+If the process forwards a port, restart reopens the local tunnel and prints its
+URL.`,
+	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireExperimentalSandboxAccess()
+		return requireAccessToken()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
@@ -347,12 +363,11 @@ var sandboxBackgroundRestartCmd = &cobra.Command{
 }
 
 var sandboxBackgroundStopCmd = &cobra.Command{
-	Use:    "stop",
-	Short:  "Stop a sandbox background process",
-	Hidden: true,
-	Args:   cobra.NoArgs,
+	Use:   "stop",
+	Short: "Stop a sandbox background process",
+	Args:  cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireExperimentalSandboxAccess()
+		return requireAccessToken()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
@@ -376,12 +391,13 @@ var sandboxBackgroundStopCmd = &cobra.Command{
 }
 
 var sandboxBackgroundLogsCmd = &cobra.Command{
-	Use:    "logs",
-	Short:  "Show logs for a sandbox background process",
-	Hidden: true,
-	Args:   cobra.NoArgs,
+	Use:   "logs",
+	Short: "Show logs for a sandbox background process",
+	Long: `Show logs for an ad hoc background process or one declared in the sandbox
+configuration. Use --follow to stream new output.`,
+	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireExperimentalSandboxAccess()
+		return requireAccessToken()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
@@ -571,13 +587,6 @@ var (
 	sandboxInitParams          []string
 )
 
-func requireExperimentalSandboxAccess() error {
-	if os.Getenv("RWX_EXPERIMENTAL") != "true" {
-		return fmt.Errorf("this command is experimental; set RWX_EXPERIMENTAL=true to use it")
-	}
-	return requireAccessToken()
-}
-
 func init() {
 	sandboxCmd.AddCommand(sandboxInitCmd)
 	sandboxCmd.AddCommand(sandboxStartCmd)
@@ -614,7 +623,7 @@ func init() {
 
 	// background flags
 	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")
-	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxBackgroundName, "name", "", "Name of the managed sandbox process")
+	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxBackgroundName, "name", "", "Name of the sandbox background process")
 	sandboxBackgroundCmd.Flags().IntVar(&sandboxBackgroundPort, "port", 0, "Sandbox port to forward locally")
 	sandboxBackgroundCmd.Flags().IntVar(&sandboxBackgroundLocalPort, "local-port", 0, "Local port to use (default: allocate or reuse one)")
 	sandboxBackgroundCmd.Flags().StringVar(&sandboxBackgroundScheme, "scheme", "", "URL scheme for the forwarded port: http or https (default: http)")

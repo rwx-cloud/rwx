@@ -1237,7 +1237,7 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		require.EqualError(t, err, "background process name must be at most 255 bytes")
 	})
 
-	t.Run("syncs, starts a managed process, and opens a local tunnel", func(t *testing.T) {
+	t.Run("syncs, starts a background process, and opens a local tunnel", func(t *testing.T) {
 		setup, commands := setupBackground(t)
 		var tunnelConfig rwxssh.TunnelConfig
 		setup.mockTunnel.MockOpen = func(cfg rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
@@ -1537,7 +1537,7 @@ rwx sandbox exec -- <command> syncs local changes before it runs.
 		require.NotContains(t, setup.mockStderr.String(), "__rwx_sandbox_")
 	})
 
-	t.Run("returns managed process diagnostics without exposing directives", func(t *testing.T) {
+	t.Run("returns background process diagnostics without exposing directives", func(t *testing.T) {
 		setup, _ := setupBackground(t)
 		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
 			if strings.HasPrefix(command, "__rwx_sandbox_process_restart__ ") {
@@ -1551,7 +1551,7 @@ rwx sandbox exec -- <command> syncs local changes before it runs.
 			Name: "web", RunID: "run-background", Json: true,
 		})
 
-		require.EqualError(t, err, `sandbox agent failed to restart managed process: sandbox process "web" has no stored definition`)
+		require.EqualError(t, err, `sandbox agent failed to restart background process: sandbox process "web" has no stored definition`)
 		require.NotContains(t, err.Error(), "__rwx_sandbox_")
 	})
 
