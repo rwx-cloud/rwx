@@ -2,10 +2,8 @@ package cli
 
 import (
 	"io"
-	"os/exec"
 
 	"github.com/rwx-cloud/rwx/internal/api"
-	"github.com/rwx-cloud/rwx/internal/git"
 	"github.com/rwx-cloud/rwx/internal/ssh"
 
 	gossh "golang.org/x/crypto/ssh"
@@ -74,21 +72,3 @@ type SSHClient interface {
 }
 
 var _ SSHClient = (*ssh.Client)(nil)
-
-type GitClient interface {
-	GetBranch() string
-	GetHead() string
-	GetHeadCommit() (string, error)
-	GetTopLevel() string
-	GetCommit() (string, error)
-	GetOriginUrl() string
-	GeneratePatchFile(destDir string, pathspec []string) (git.PatchFile, error)
-	GeneratePatch(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error)
-	GenerateDirtyPatches() (git.DirtyPatches, error)
-	HasCommit(sha string) bool
-	PushRef(opts git.PushRefOptions) error
-	ApplyPatch(patch []byte) *exec.Cmd
-	ApplyPatchReject(patch []byte) *exec.Cmd
-	IsInstalled() bool
-	IsInsideWorkTree() bool
-}

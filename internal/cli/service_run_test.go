@@ -49,11 +49,11 @@ func TestService_InitiatingRun(t *testing.T) {
 				}
 
 				branch := "main"
-				s.mockGit.MockGetBranch = branch
+				s.mockVCS.MockGetBranch = branch
 				sha := "e86ec9c4802fb5f6c7d7220c5f7356278e7ace5a"
-				s.mockGit.MockGetCommit = sha
+				s.mockVCS.MockGetCommit = sha
 				originUrl := "git@github.com:rwx-cloud/rwx.git"
-				s.mockGit.MockGetOriginUrl = originUrl
+				s.mockVCS.MockGetOriginUrl = originUrl
 
 				originalSpecifiedFileContent := "on:\n  cli:\n    init:\n      sha: ${{ event.git.sha }}\n\ntasks:\n  - key: foo\n    run: echo 'bar'\n" + baseSpec
 				originalRwxDirFileContent := "tasks:\n  - key: mintdir\n    run: echo 'mintdir'\n" + baseSpec
@@ -1056,9 +1056,9 @@ func TestService_InitiatingRun(t *testing.T) {
 			}, nil
 		}
 
-		s.mockGit.MockGetBranch = "main"
-		s.mockGit.MockGetCommit = "abc123"
-		s.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		s.mockVCS.MockGetBranch = "main"
+		s.mockVCS.MockGetCommit = "abc123"
+		s.mockVCS.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
 
 		originalFileContent := `
 on:

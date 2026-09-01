@@ -28,9 +28,9 @@ func setupImageBuildTest(t *testing.T, s *testSetup) {
 		}, nil
 	}
 
-	s.mockGit.MockGetBranch = "main"
-	s.mockGit.MockGetCommit = "abc123"
-	s.mockGit.MockGetOriginUrl = "git@github.com:test/test.git"
+	s.mockVCS.MockGetBranch = "main"
+	s.mockVCS.MockGetCommit = "abc123"
+	s.mockVCS.MockGetOriginUrl = "git@github.com:test/test.git"
 }
 
 func TestService_ImageBuild(t *testing.T) {
