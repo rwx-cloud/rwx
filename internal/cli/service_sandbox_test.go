@@ -1296,6 +1296,49 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		}
 	})
 
+	t.Run("waits for authoritative sandbox-side port readiness", func(t *testing.T) {
+		setup, commands := setupBackground(t)
+		setup.mockTunnel.MockOpen = func(cfg rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: cfg.Scheme}, nil
+		}
+		setup.mockTunnel.MockIsReady = func(int) bool {
+			require.Fail(t, "local tunnel readiness must not be used when the agent supports port checks")
+
+			return false
+		}
+		readyChecks := 0
+		setup.mockSSH.MockExecuteCommand = func(command string) (int, error) {
+			*commands = append(*commands, command)
+			if strings.HasPrefix(command, "__rwx_sandbox_port_ready__ ") {
+				readyChecks++
+				if readyChecks == 1 {
+					return 1, nil
+				}
+
+				return 0, nil
+			}
+
+			return 0, nil
+		}
+		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
+			switch {
+			case strings.HasPrefix(command, "__rwx_sandbox_process_start__ "):
+				return 0, `{"key":"web","status":"running","supportsPortReadyCheck":true,"targetPort":3100}`, "", nil
+			case strings.HasPrefix(command, "__rwx_sandbox_process_status__ "):
+				return 0, `{"key":"web","status":"running","targetPort":3100}`, "", nil
+			default:
+				return 0, "", "", nil
+			}
+		}
+
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command: []string{"bin/server"}, Name: "web", TargetPort: 3100, RunID: "run-background", Json: true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 2, readyChecks)
+	})
+
 	t.Run("starts without a tunnel when no port is requested", func(t *testing.T) {
 		setup, commands := setupBackground(t)
 		var closeConfig rwxssh.TunnelCloseConfig

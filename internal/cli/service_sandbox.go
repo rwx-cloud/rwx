@@ -32,6 +32,7 @@ const (
 	sandboxDirectiveProcessStop    = "__rwx_sandbox_process_stop__"
 	sandboxDirectiveProcessStatus  = "__rwx_sandbox_process_status__"
 	sandboxDirectiveProcessLogs    = "__rwx_sandbox_process_logs__"
+	sandboxDirectivePortReady      = "__rwx_sandbox_port_ready__"
 	sandboxBackgroundNameSizeLimit = 255
 	rwxCLISSHUser                  = "rwx-cli"
 	// Reuse one fixed ref (force-pushed) rather than a unique ref per push so the
@@ -795,19 +796,20 @@ func (s Service) LogsSandboxBackground(cfg SandboxBackgroundLogsConfig) (*Sandbo
 }
 
 type sandboxProcessResponse struct {
-	Key         string `json:"key"`
-	Status      string `json:"status"`
-	TargetPort  int    `json:"targetPort"`
-	PID         int    `json:"pid"`
-	PGID        int    `json:"pgid"`
-	StartedAt   string `json:"startedAt"`
-	CompletedAt string `json:"completedAt"`
-	ExitCode    *int   `json:"exitCode"`
-	Signal      string `json:"signal"`
-	StdoutPath  string `json:"stdoutPath"`
-	StderrPath  string `json:"stderrPath"`
-	LogPath     string `json:"logPath"`
-	LogsID      string `json:"logsId,omitempty"`
+	Key                    string `json:"key"`
+	Status                 string `json:"status"`
+	SupportsPortReadyCheck bool   `json:"supportsPortReadyCheck"`
+	TargetPort             int    `json:"targetPort"`
+	PID                    int    `json:"pid"`
+	PGID                   int    `json:"pgid"`
+	StartedAt              string `json:"startedAt"`
+	CompletedAt            string `json:"completedAt"`
+	ExitCode               *int   `json:"exitCode"`
+	Signal                 string `json:"signal"`
+	StdoutPath             string `json:"stdoutPath"`
+	StderrPath             string `json:"stderrPath"`
+	LogPath                string `json:"logPath"`
+	LogsID                 string `json:"logsId,omitempty"`
 }
 
 func (s Service) executeSandboxProcessDirective(directive string, request any, action string) (sandboxProcessResponse, error) {
@@ -862,7 +864,32 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 		result.URL = fmt.Sprintf("%s://127.0.0.1:%d", tunnel.Scheme, tunnel.LocalPort)
 
 		deadline := time.Now().Add(30 * time.Second)
-		for !s.SSHTunnelManager.IsReady(tunnel.LocalPort) {
+		portReadyDirectiveSupported := process.SupportsPortReadyCheck
+		for {
+			ready := false
+			if portReadyDirectiveSupported {
+				exitCode, readyErr := s.SSHClient.ExecuteCommand(fmt.Sprintf("%s %d", sandboxDirectivePortReady, process.TargetPort))
+				if readyErr != nil {
+					return nil, errors.Wrap(readyErr, "failed to check sandbox process port readiness")
+				}
+				switch exitCode {
+				case 0:
+					ready = true
+				case 1:
+					ready = false
+				case 127:
+					portReadyDirectiveSupported = false
+				default:
+					return nil, fmt.Errorf("sandbox agent failed to check port %d readiness (exit code %d)", process.TargetPort, exitCode)
+				}
+			}
+			if !portReadyDirectiveSupported {
+				ready = s.SSHTunnelManager.IsReady(tunnel.LocalPort)
+			}
+			if ready {
+				break
+			}
+
 			status, statusErr := s.executeSandboxProcessDirective(sandboxDirectiveProcessStatus, struct {
 				Key string `json:"key"`
 			}{Key: process.Key}, "get status for")
