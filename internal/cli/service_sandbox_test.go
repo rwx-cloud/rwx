@@ -1350,7 +1350,7 @@ func TestService_BackgroundSandbox(t *testing.T) {
 
 After local edits:
   Hot reload:    rwx sandbox push
-  Hard restart:  rwx sandbox background restart --name web
+  Hard restart:  rwx sandbox background restart --key web
 
 rwx sandbox exec -- <command> syncs local changes before it runs.
 `, setup.mockStdout.String())

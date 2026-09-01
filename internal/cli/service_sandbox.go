@@ -896,7 +896,7 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 			fmt.Fprintf(s.Stdout, "Preview %q: %s\n\n", process.Key, result.URL)
 			fmt.Fprintln(s.Stdout, "After local edits:")
 			fmt.Fprintln(s.Stdout, "  Hot reload:    rwx sandbox push")
-			fmt.Fprintf(s.Stdout, "  Hard restart:  rwx sandbox background restart --name %s\n\n", process.Key)
+			fmt.Fprintf(s.Stdout, "  Hard restart:  rwx sandbox background restart --key %s\n\n", process.Key)
 			fmt.Fprintln(s.Stdout, "rwx sandbox exec -- <command> syncs local changes before it runs.")
 		} else {
 			fmt.Fprintf(s.Stdout, "%s background process %q.\n", action, process.Key)
