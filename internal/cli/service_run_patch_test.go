@@ -10,8 +10,8 @@ import (
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/errors"
-	"github.com/rwx-cloud/rwx/internal/git"
 	"github.com/rwx-cloud/rwx/internal/mocks"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 	"github.com/stretchr/testify/require"
 )
 
@@ -22,10 +22,10 @@ type initiateRunResult struct {
 	stderr string
 }
 
-func initiateRun(t *testing.T, patchFile git.PatchFile, expectedPatchMetadata api.PatchMetadata, opts ...func(*cli.InitiateRunConfig)) initiateRunResult {
+func initiateRun(t *testing.T, patchFile vcs.PatchFile, expectedPatchMetadata api.PatchMetadata, opts ...func(*cli.InitiateRunConfig)) initiateRunResult {
 	s := setupTest(t)
-	s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
-	s.mockGit.MockGeneratePatchFile = patchFile
+	s.mockVCS.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+	s.mockVCS.MockGeneratePatchFile = patchFile
 
 	var receivedRwxDir []api.RwxDirectoryEntry
 
@@ -80,8 +80,8 @@ func initiateRun(t *testing.T, patchFile git.PatchFile, expectedPatchMetadata ap
 func TestService_InitiatingRunPatch(t *testing.T) {
 	t.Run("uses repository root pathspec when run from subdirectory", func(t *testing.T) {
 		s := setupTest(t)
-		s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
-		s.mockGit.MockGetTopLevel = s.tmp
+		s.mockVCS.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+		s.mockVCS.MockGetTopLevel = s.tmp
 
 		rwxDir := filepath.Join(s.tmp, ".rwx")
 		definitionsFile := filepath.Join(rwxDir, "rwx.yml")
@@ -113,13 +113,13 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 			MintFilePath: definitionsFile,
 		})
 		require.NoError(t, err)
-		require.Equal(t, []string{":/", ":(top,exclude).rwx/rwx.yml"}, s.mockGit.MockGeneratePatchPathspec)
+		require.Equal(t, []string{":/", ":(top,exclude).rwx/rwx.yml"}, s.mockVCS.MockGeneratePatchPathspec)
 	})
 
 	t.Run("when git is not installed", func(t *testing.T) {
 		s := setupTest(t)
-		s.mockGit.MockIsInstalled = false
-		s.mockGit.MockIsInsideWorkTree = false
+		s.mockVCS.MockMissingDependency = "git"
+		s.mockVCS.MockIsInsideWorkTree = false
 
 		rwxDir := filepath.Join(s.tmp, ".rwx")
 		err := os.MkdirAll(rwxDir, 0o755)
@@ -140,7 +140,7 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 			require.False(t, cfg.Patch.Sent)
 			require.False(t, cfg.Patch.GitInstalled)
 			require.False(t, cfg.Patch.GitDirectory)
-			require.Equal(t, "Git is not installed", cfg.Patch.ErrorMessage)
+			require.Equal(t, "git is not installed", cfg.Patch.ErrorMessage)
 			require.Empty(t, cfg.Git.Sha)
 			require.Empty(t, cfg.Git.Branch)
 			require.Empty(t, cfg.Git.OriginUrl)
@@ -157,10 +157,43 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("when not in a git directory", func(t *testing.T) {
+	t.Run("when the backend names a different missing dependency", func(t *testing.T) {
 		s := setupTest(t)
-		s.mockGit.MockIsInstalled = true
-		s.mockGit.MockIsInsideWorkTree = false
+		s.mockVCS.MockMissingDependency = "some-vcs"
+		s.mockVCS.MockIsInsideWorkTree = false
+
+		rwxDir := filepath.Join(s.tmp, ".rwx")
+		require.NoError(t, os.MkdirAll(rwxDir, 0o755))
+
+		definitionsFile := filepath.Join(rwxDir, "rwx.yml")
+		definition := "on:\n  cli:\n    init:\n      sha: ${{ event.git.sha }}\n\nbase:\n  os: ubuntu 24.04\n  tag: 1.0\n\ntasks:\n  - key: foo\n    run: echo 'bar'\n"
+		require.NoError(t, os.WriteFile(definitionsFile, []byte(definition), 0o644))
+
+		s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{
+				LatestMajor: make(map[string]string),
+				LatestMinor: make(map[string]map[string]string),
+			}, nil
+		}
+		s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			require.False(t, cfg.Patch.GitInstalled)
+			require.Equal(t, "some-vcs is not installed", cfg.Patch.ErrorMessage)
+			return &api.InitiateRunResult{
+				RunID:  "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
+				RunURL: "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",
+			}, nil
+		}
+
+		_, err := s.service.InitiateRun(cli.InitiateRunConfig{
+			RwxDirectory: rwxDir,
+			MintFilePath: definitionsFile,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("when not in a source code repository", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockVCS.MockIsInsideWorkTree = false
 
 		rwxDir := filepath.Join(s.tmp, ".rwx")
 		err := os.MkdirAll(rwxDir, 0o755)
@@ -181,7 +214,7 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 			require.False(t, cfg.Patch.Sent)
 			require.True(t, cfg.Patch.GitInstalled)
 			require.False(t, cfg.Patch.GitDirectory)
-			require.Equal(t, "You are not in a git repository", cfg.Patch.ErrorMessage)
+			require.Equal(t, "You are not in a source code repository", cfg.Patch.ErrorMessage)
 			require.Empty(t, cfg.Git.Sha)
 			require.Empty(t, cfg.Git.Branch)
 			require.Empty(t, cfg.Git.OriginUrl)
@@ -200,9 +233,8 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 	t.Run("when git commit fails", func(t *testing.T) {
 		s := setupTest(t)
-		s.mockGit.MockIsInstalled = true
-		s.mockGit.MockIsInsideWorkTree = true
-		s.mockGit.MockGetCommitError = stderrors.New("no git remote named 'origin' is configured")
+		s.mockVCS.MockIsInsideWorkTree = true
+		s.mockVCS.MockGetCommitError = stderrors.New("no git remote named 'origin' is configured")
 
 		rwxDir := filepath.Join(s.tmp, ".rwx")
 		err := os.MkdirAll(rwxDir, 0o755)
@@ -242,10 +274,10 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 	t.Run("when patch generation fails", func(t *testing.T) {
 		s := setupTest(t)
-		s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
-		s.mockGit.MockGetBranch = "main"
-		s.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		s.mockGit.MockGeneratePatchFileError = stderrors.New("unable to generate patch data")
+		s.mockVCS.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+		s.mockVCS.MockGetBranch = "main"
+		s.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		s.mockVCS.MockGeneratePatchFileError = stderrors.New("unable to generate patch data")
 
 		rwxDir := filepath.Join(s.tmp, ".rwx")
 		err := os.MkdirAll(rwxDir, 0o755)
@@ -294,8 +326,8 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 	t.Run("when patch generation fails with a git command error", func(t *testing.T) {
 		s := setupTest(t)
-		s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
-		s.mockGit.MockGeneratePatchFileError = &git.PatchError{
+		s.mockVCS.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+		s.mockVCS.MockGeneratePatchFileError = &vcs.PatchError{
 			Command:  "diff_name_only",
 			Display:  "git diff --name-only",
 			Stderr:   "fatal: bad object 9a3b1c4e",
@@ -346,7 +378,7 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 	t.Run("when the run is not patchable", func(t *testing.T) {
 		// it launches a run but does not patch
-		result := initiateRun(t, git.PatchFile{}, api.PatchMetadata{})
+		result := initiateRun(t, vcs.PatchFile{}, api.PatchMetadata{})
 
 		for _, entry := range result.rwxDir {
 			require.False(t, strings.HasPrefix(entry.Path, ".patches/"))
@@ -354,9 +386,9 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 	})
 
 	t.Run("when patchable is false", func(t *testing.T) {
-		patchFile := git.PatchFile{
+		patchFile := vcs.PatchFile{
 			Written:        true,
-			UntrackedFiles: git.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
+			UntrackedFiles: vcs.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
 		}
 		notPatchable := func(cfg *cli.InitiateRunConfig) { cfg.Patchable = false }
 
@@ -370,12 +402,12 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 	t.Run("patch logging", func(t *testing.T) {
 		t.Run("when no patch is written", func(t *testing.T) {
-			result := initiateRun(t, git.PatchFile{}, api.PatchMetadata{})
+			result := initiateRun(t, vcs.PatchFile{}, api.PatchMetadata{})
 			require.NotContains(t, result.stderr, "Included a git patch")
 		})
 
 		t.Run("when a patch is written with no untracked files", func(t *testing.T) {
-			patchFile := git.PatchFile{Written: true}
+			patchFile := vcs.PatchFile{Written: true}
 			expectedPatch := api.PatchMetadata{Sent: true}
 			result := initiateRun(t, patchFile, expectedPatch)
 			require.Contains(t, result.stderr, "Included a git patch for uncommitted changes")
@@ -383,8 +415,8 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 		})
 
 		t.Run("when no patch is written but there are untracked files", func(t *testing.T) {
-			patchFile := git.PatchFile{
-				UntrackedFiles: git.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
+			patchFile := vcs.PatchFile{
+				UntrackedFiles: vcs.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
 			}
 			result := initiateRun(t, patchFile, api.PatchMetadata{})
 			require.NotContains(t, result.stderr, "Included a git patch")
@@ -392,9 +424,9 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 		})
 
 		t.Run("when a patch is written with 1 untracked file", func(t *testing.T) {
-			patchFile := git.PatchFile{
+			patchFile := vcs.PatchFile{
 				Written:        true,
-				UntrackedFiles: git.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
+				UntrackedFiles: vcs.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
 			}
 			expectedPatch := api.PatchMetadata{Sent: true}
 			result := initiateRun(t, patchFile, expectedPatch)
@@ -404,9 +436,9 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 		t.Run("when a patch is written with 5 untracked files", func(t *testing.T) {
 			files := []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt"}
-			patchFile := git.PatchFile{
+			patchFile := vcs.PatchFile{
 				Written:        true,
-				UntrackedFiles: git.UntrackedFilesMetadata{Files: files, Count: 5},
+				UntrackedFiles: vcs.UntrackedFilesMetadata{Files: files, Count: 5},
 			}
 			expectedPatch := api.PatchMetadata{Sent: true}
 			result := initiateRun(t, patchFile, expectedPatch)
@@ -416,9 +448,9 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 		t.Run("when a patch is written with more than 5 untracked files", func(t *testing.T) {
 			files := []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt", "g.txt"}
-			patchFile := git.PatchFile{
+			patchFile := vcs.PatchFile{
 				Written:        true,
-				UntrackedFiles: git.UntrackedFilesMetadata{Files: files, Count: 7},
+				UntrackedFiles: vcs.UntrackedFilesMetadata{Files: files, Count: 7},
 			}
 			expectedPatch := api.PatchMetadata{Sent: true}
 			result := initiateRun(t, patchFile, expectedPatch)
@@ -429,16 +461,16 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 	})
 
 	t.Run("when the run is patchable", func(t *testing.T) {
-		untrackedFiles := git.UntrackedFilesMetadata{
+		untrackedFiles := vcs.UntrackedFilesMetadata{
 			Files: []string{"foo.txt"},
 			Count: 1,
 		}
-		lfsChangedFiles := git.LFSChangedFilesMetadata{
+		lfsChangedFiles := vcs.LFSChangedFilesMetadata{
 			Files: []string{"bar.txt"},
 			Count: 1,
 		}
 
-		patchFile := git.PatchFile{
+		patchFile := vcs.PatchFile{
 			Written:         true,
 			UntrackedFiles:  untrackedFiles,
 			LFSChangedFiles: lfsChangedFiles,
@@ -457,8 +489,8 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 		t.Run("by default", func(t *testing.T) {
 			s := setupTest(t)
-			s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
-			s.mockGit.MockGeneratePatchFile = patchFile
+			s.mockVCS.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+			s.mockVCS.MockGeneratePatchFile = patchFile
 
 			rwxDir := filepath.Join(s.tmp, ".rwx")
 			err := os.MkdirAll(rwxDir, 0o755)
@@ -495,10 +527,10 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 		t.Run("when init params match git params", func(t *testing.T) {
 			s := setupTest(t)
-			s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
-			s.mockGit.MockGeneratePatchFile = patchFile
+			s.mockVCS.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+			s.mockVCS.MockGeneratePatchFile = patchFile
 			// Uncommitted changes are present, so the skip notice should be shown.
-			s.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			s.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 				return []byte("diff"), nil, nil
 			}
 
@@ -553,10 +585,10 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 		t.Run("when init params match existing CLI git clone params", func(t *testing.T) {
 			s := setupTest(t)
-			s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
-			s.mockGit.MockGeneratePatchFile = patchFile
+			s.mockVCS.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+			s.mockVCS.MockGeneratePatchFile = patchFile
 			// Uncommitted changes are present, so the skip notice should be shown.
-			s.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			s.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 				return []byte("diff"), nil, nil
 			}
 
@@ -609,10 +641,10 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 		t.Run("when init params match git params but there are no uncommitted changes", func(t *testing.T) {
 			s := setupTest(t)
-			s.mockGit.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
-			s.mockGit.MockGeneratePatchFile = patchFile
+			s.mockVCS.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+			s.mockVCS.MockGeneratePatchFile = patchFile
 			// Clean tree: no patch would have been produced, so no notice.
-			s.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+			s.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 				return nil, nil, nil
 			}
 

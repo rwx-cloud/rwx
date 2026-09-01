@@ -41,8 +41,7 @@ func setupSkillTest(t *testing.T) *testSetup {
 	setup.mockAPI = new(mocks.API)
 	setup.mockSSH = new(mocks.SSH)
 	setup.mockTunnel = new(mocks.SSHTunnelManager)
-	setup.mockGit = &mocks.Git{
-		MockIsInstalled:      true,
+	setup.mockVCS = &mocks.VCS{
 		MockIsInsideWorkTree: true,
 	}
 	setup.mockDocker = new(mocks.DockerClient)
@@ -55,7 +54,7 @@ func setupSkillTest(t *testing.T) *testSetup {
 		APIClient:          setup.mockAPI,
 		SSHClient:          setup.mockSSH,
 		SSHTunnelManager:   setup.mockTunnel,
-		GitClient:          setup.mockGit,
+		VCSClient:          setup.mockVCS,
 		DockerCLI:          setup.mockDocker,
 		TelemetryCollector: setup.collector,
 		Stdin:              setup.mockStdin,

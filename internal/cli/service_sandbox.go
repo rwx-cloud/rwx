@@ -18,8 +18,8 @@ import (
 	"al.essio.dev/pkg/shellescape"
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
-	"github.com/rwx-cloud/rwx/internal/git"
 	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -246,11 +246,7 @@ type CheckExistingSandboxResult struct {
 }
 
 func (s Service) CheckExistingSandbox(configFile string) (*CheckExistingSandboxResult, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to get current directory")
-	}
-	branch := GetCurrentGitBranch(cwd)
+	branch := GetCurrentBranch(s.VCSClient)
 
 	lockFile, lockErr := s.lockSandboxStorageWithInfo(false)
 	if lockErr != nil {
@@ -265,8 +261,7 @@ func (s Service) CheckExistingSandbox(configFile string) (*CheckExistingSandboxR
 
 	session, found := storage.GetSession(branch, configFile)
 	if !found && IsDetachedBranch(branch) {
-		gitClient := &git.Client{Binary: "git", Dir: cwd}
-		session, found = storage.GetSessionByAncestry(branch, configFile, gitClient)
+		session, found = storage.GetSessionByAncestry(branch, configFile, s.VCSClient)
 		if found {
 			_ = storage.Save()
 		}
@@ -314,7 +309,7 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get current directory")
 	}
-	branch := GetCurrentGitBranch(cwd)
+	branch := GetCurrentBranch(s.VCSClient)
 
 	// If --id is provided, check if run is still active and reattach
 	if cfg.RunID != "" {
@@ -944,13 +939,13 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get current directory")
 	}
-	branch := GetCurrentGitBranch(cwd)
+	branch := GetCurrentBranch(s.VCSClient)
 
 	var localHeadForSync string
 	if !cfg.SkipSync {
-		localHeadForSync, err = s.GitClient.GetHeadCommit()
+		localHeadForSync, err = s.VCSClient.GetHeadCommit()
 		if err != nil {
-			return nil, errors.Wrap(err, "sandbox push requires a git repository with a valid HEAD")
+			return nil, errors.Wrap(err, "sandbox push requires a repository with a resolvable working copy")
 		}
 	}
 
@@ -1008,8 +1003,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 			// Config file provided - look up specific session
 			session, found = storage.GetSession(branch, cfg.ConfigFile)
 			if !found && IsDetachedBranch(branch) {
-				gitClient := &git.Client{Binary: "git", Dir: cwd}
-				session, found = storage.GetSessionByAncestry(branch, cfg.ConfigFile, gitClient)
+				session, found = storage.GetSessionByAncestry(branch, cfg.ConfigFile, s.VCSClient)
 				if found {
 					_ = storage.Save()
 				}
@@ -1038,8 +1032,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 			// No config file - find any session for this branch
 			sessions := storage.GetSessionsForBranch(branch)
 			if len(sessions) == 0 && IsDetachedBranch(branch) {
-				gitClient := &git.Client{Binary: "git", Dir: cwd}
-				sessions = storage.GetSessionsForBranchByAncestry(branch, gitClient)
+				sessions = storage.GetSessionsForBranchByAncestry(branch, s.VCSClient)
 				if len(sessions) > 0 {
 					_ = storage.Save()
 				}
@@ -1101,8 +1094,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 					if !branchMatch && IsDetachedBranch(branch) && IsDetachedBranch(state.Branch) {
 						storedSHA := DetachedShortSHA(state.Branch)
 						if storedSHA != "" {
-							gitClient := &git.Client{Binary: "git", Dir: cwd}
-							branchMatch = gitClient.IsAncestor(storedSHA, "HEAD")
+							branchMatch = s.VCSClient.IsAncestor(storedSHA, "HEAD")
 						}
 					}
 					if branchMatch && state.ConfigFile == cfgFile {
@@ -1577,16 +1569,11 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 		keys = append(keys, key)
 	} else {
 		// Stop sandbox(es) for current CWD + branch
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, errors.Wrap(err, "unable to get current directory")
-		}
-		branch := GetCurrentGitBranch(cwd)
+		branch := GetCurrentBranch(s.VCSClient)
 
 		sessions := storage.GetSessionsForBranch(branch)
 		if len(sessions) == 0 && IsDetachedBranch(branch) {
-			gitClient := &git.Client{Binary: "git", Dir: cwd}
-			sessions = storage.GetSessionsForBranchByAncestry(branch, gitClient)
+			sessions = storage.GetSessionsForBranchByAncestry(branch, s.VCSClient)
 			if len(sessions) > 0 {
 				_ = storage.Save()
 			}
@@ -1717,11 +1704,7 @@ func (s Service) closeSandboxTunnels(runID string) {
 }
 
 func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to get current directory")
-	}
-	branch := GetCurrentGitBranch(cwd)
+	branch := GetCurrentBranch(s.VCSClient)
 
 	var oldRunID string
 	cancelMethod := ""
@@ -1739,8 +1722,7 @@ func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, erro
 	} else {
 		session, found := storage.GetSession(branch, cfg.ConfigFile)
 		if !found && IsDetachedBranch(branch) {
-			gitClient := &git.Client{Binary: "git", Dir: cwd}
-			session, found = storage.GetSessionByAncestry(branch, cfg.ConfigFile, gitClient)
+			session, found = storage.GetSessionByAncestry(branch, cfg.ConfigFile, s.VCSClient)
 		}
 		if found {
 			oldRunID = session.RunID
@@ -1890,13 +1872,13 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 
 	// Apply sandbox patch locally (git apply is atomic — on failure nothing is modified)
 	if len(strings.TrimSpace(patch)) > 0 {
-		cmd := s.GitClient.ApplyPatch([]byte(patch))
+		cmd := s.VCSClient.ApplyPatch([]byte(patch))
 		if err := cmd.Run(); err != nil {
 			// Save the full patch so it can be inspected or applied manually
 			patchSavePath := saveRejectedPatch([]byte(patch))
 
 			// Retry with --reject: applies hunks that succeed, writes .rej files for the rest
-			rejectCmd := s.GitClient.ApplyPatchReject([]byte(patch))
+			rejectCmd := s.VCSClient.ApplyPatchReject([]byte(patch))
 			rejectOutput, rejectErr := rejectCmd.CombinedOutput()
 
 			if rejectErr != nil {
@@ -1940,7 +1922,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 
 func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
 	if localHead == "" {
-		return 0, fmt.Errorf("sandbox push requires a git repository with a valid HEAD")
+		return 0, fmt.Errorf("sandbox push requires a repository with a resolvable working copy")
 	}
 
 	s.warnUnresolvedRejectFiles()
@@ -1969,7 +1951,7 @@ func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, loc
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
 	head := quoteShellArg(localHead)
-	branch := s.GitClient.GetBranch()
+	branch := s.VCSClient.GetBranch()
 	gitCommand := "GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false /usr/bin/git"
 	var checkoutCommand string
 	if branch == "" {
@@ -2019,7 +2001,7 @@ func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, loc
 	}
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 
-	patches, err := s.GitClient.GenerateDirtyPatches()
+	patches, err := s.VCSClient.GenerateDirtyPatches()
 	if err != nil {
 		syncPushErr = errors.Wrap(err, "failed to generate dirty patch")
 		return patchBytes, syncPushErr
@@ -2109,7 +2091,7 @@ func (s Service) pushLocalHeadToSandbox(localHead string, connInfo *api.SandboxC
 	}
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	pushErr := s.GitClient.PushRef(opts)
+	pushErr := s.VCSClient.PushRef(opts)
 	hasCommit := pushErr == nil && s.sandboxHasCommit(localHead)
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if pushErr != nil {
@@ -2241,7 +2223,7 @@ func sandboxWorktreeRootCommand(script string) string {
 	return "/bin/sh -lc " + quoteShellArg("repo_root=$(/usr/bin/git rev-parse --show-toplevel) || exit 1; cd \"$repo_root\" || exit 1; "+script)
 }
 
-func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo) (git.PushRefOptions, func(), error) {
+func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo) (vcs.PushRefOptions, func(), error) {
 	paths := []string{}
 	cleanup := func() {
 		for _, path := range paths {
@@ -2251,36 +2233,36 @@ func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo
 
 	host, port, err := net.SplitHostPort(connInfo.Address)
 	if err != nil {
-		return git.PushRefOptions{}, cleanup, errors.Wrap(err, "unable to parse sandbox SSH address")
+		return vcs.PushRefOptions{}, cleanup, errors.Wrap(err, "unable to parse sandbox SSH address")
 	}
 
 	alias := fmt.Sprintf("rwx-sandbox-%d-%d", os.Getpid(), time.Now().UnixNano())
 
 	keyFile, err := os.CreateTemp("", "rwx-sandbox-key-*")
 	if err != nil {
-		return git.PushRefOptions{}, cleanup, err
+		return vcs.PushRefOptions{}, cleanup, err
 	}
 	keyPath := keyFile.Name()
 	paths = append(paths, keyPath)
 	if err := keyFile.Close(); err != nil {
-		return git.PushRefOptions{}, cleanup, err
+		return vcs.PushRefOptions{}, cleanup, err
 	}
 	if err := os.WriteFile(keyPath, []byte(connInfo.PrivateUserKey), 0o600); err != nil {
-		return git.PushRefOptions{}, cleanup, err
+		return vcs.PushRefOptions{}, cleanup, err
 	}
 
 	knownHostsFile, err := os.CreateTemp("", "rwx-sandbox-known-hosts-*")
 	if err != nil {
-		return git.PushRefOptions{}, cleanup, err
+		return vcs.PushRefOptions{}, cleanup, err
 	}
 	knownHostsPath := knownHostsFile.Name()
 	paths = append(paths, knownHostsPath)
 	if err := knownHostsFile.Close(); err != nil {
-		return git.PushRefOptions{}, cleanup, err
+		return vcs.PushRefOptions{}, cleanup, err
 	}
 	knownHosts := fmt.Sprintf("%s %s\n", alias, strings.TrimSpace(connInfo.PublicHostKey))
 	if err := os.WriteFile(knownHostsPath, []byte(knownHosts), 0o600); err != nil {
-		return git.PushRefOptions{}, cleanup, err
+		return vcs.PushRefOptions{}, cleanup, err
 	}
 
 	sshCommand := shellescape.QuoteCommand([]string{
@@ -2296,7 +2278,7 @@ func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo
 		"-p", port,
 	})
 
-	return git.PushRefOptions{
+	return vcs.PushRefOptions{
 		Remote:  fmt.Sprintf("%s@%s:.", rwxCLISSHUser, alias),
 		Refspec: fmt.Sprintf("+%s:%s", localHead, sandboxPushRef),
 		Env:     []string{"GIT_SSH_COMMAND=" + sshCommand, "GIT_LFS_SKIP_PUSH=1"},
@@ -2308,7 +2290,7 @@ func (s Service) sandboxHasCommit(sha string) bool {
 	return err == nil && exitCode == 0
 }
 
-func (s Service) applyDirtyPatchesToSandbox(patches git.DirtyPatches) error {
+func (s Service) applyDirtyPatchesToSandbox(patches vcs.DirtyPatches) error {
 	if len(patches.Staged) > 0 {
 		if err := s.applyPatchToSandbox("/usr/bin/git apply --index --allow-empty -", patches.Staged); err != nil {
 			return err
@@ -2324,7 +2306,7 @@ func (s Service) applyDirtyPatchesToSandbox(patches git.DirtyPatches) error {
 	return nil
 }
 
-func (s Service) removePreAppliedNewFilesFromSandbox(patches git.DirtyPatches) error {
+func (s Service) removePreAppliedNewFilesFromSandbox(patches vcs.DirtyPatches) error {
 	paths := newFilePathsForDirtyPatches(patches)
 	if len(paths) == 0 {
 		return nil
@@ -2408,7 +2390,7 @@ func (s Service) snapshotSandboxSyncRefForPaths(paths []string) error {
 	return nil
 }
 
-func newFilePathsForDirtyPatches(patches git.DirtyPatches) []string {
+func newFilePathsForDirtyPatches(patches vcs.DirtyPatches) []string {
 	if len(patches.NewFiles) > 0 {
 		return patches.NewFiles
 	}

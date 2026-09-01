@@ -1,7 +1,6 @@
 package git_test
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rwx-cloud/rwx/internal/git"
+	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -440,7 +440,7 @@ func TestPushRef(t *testing.T) {
 	mustGit(t, target, "init", "--bare")
 
 	client := &git.Client{Binary: "git", Dir: source}
-	err := client.PushRef(git.PushRefOptions{
+	err := client.PushRef(vcstypes.PushRefOptions{
 		Remote:  target,
 		Refspec: head + ":refs/rwx/push/test",
 		Env:     []string{"RWX_TEST_PUSH_ENV=1"},
@@ -672,7 +672,7 @@ func TestGeneratePatchFile(t *testing.T) {
 			_, err := client.GeneratePatchFile(t.TempDir(), []string{":(top,bogusmagic)x"})
 			require.Error(t, err)
 
-			var pe *git.PatchError
+			var pe *vcstypes.PatchError
 			require.ErrorAs(t, err, &pe)
 			require.Equal(t, "diff_name_only", pe.Command)
 			require.Equal(t, 128, pe.ExitCode)
@@ -681,58 +681,6 @@ func TestGeneratePatchFile(t *testing.T) {
 			require.Contains(t, pe.Error(), "failed to generate patch (git diff --name-only):")
 		})
 	})
-}
-
-func TestPatchErrorReason(t *testing.T) {
-	cases := []struct {
-		stderr string
-		want   string
-	}{
-		{"fatal: bad object 9a3b1c4e", "shallow_clone"},
-		{"fatal: pathspec '.rwx' is beyond a symbolic link", "beyond_symlink"},
-		{"error: external filter 'git-lfs filter-process' failed", "missing_external_filter"},
-		{"signal: killed", "oom_killed"},
-		{"error: patch failed: main.go:12", "patch_conflict"},
-		{"error: foo.txt: patch does not apply", "patch_conflict"},
-		{"error: bar.txt: already exists in working directory", "already_exists"},
-		{"error: corrupt patch at line 3", "corrupt_patch"},
-		{"fatal: something else entirely", "unknown"},
-		{"", "unknown"},
-	}
-
-	for _, tc := range cases {
-		pe := &git.PatchError{Stderr: tc.stderr}
-		require.Equal(t, tc.want, pe.Reason(), "stderr: %q", tc.stderr)
-	}
-}
-
-func TestPatchFailureReason(t *testing.T) {
-	t.Run("nil is empty", func(t *testing.T) {
-		require.Equal(t, "", git.PatchFailureReason(nil))
-	})
-
-	t.Run("prefers a wrapped *PatchError's structured stderr", func(t *testing.T) {
-		err := fmt.Errorf("failed to generate dirty patch: %w", &git.PatchError{Stderr: "fatal: bad object deadbeef"})
-		require.Equal(t, "shallow_clone", git.PatchFailureReason(err))
-	})
-
-	cases := []struct {
-		name string
-		msg  string
-		want string
-	}{
-		{"git apply conflict", "failed to sync changes to sandbox: git apply failed: error: patch failed: a.go:1", "patch_conflict"},
-		{"already exists", "failed to sync changes to sandbox: git apply failed: error: b.go: already exists in working directory", "already_exists"},
-		{"corrupt patch", "failed to sync changes to sandbox: git apply failed: error: corrupt patch at line 9", "corrupt_patch"},
-		{"lfs changed", "3 LFS file(s) changed locally and cannot be synced to the sandbox", "lfs_changed"},
-		{"unclassified", "failed to apply patch on sandbox: connection reset", "unknown"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, git.PatchFailureReason(fmt.Errorf("%s", tc.msg)))
-		})
-	}
 }
 
 func TestIsAncestor(t *testing.T) {
@@ -802,63 +750,4 @@ func TestApplyPatch(t *testing.T) {
 		require.Equal(t, "new\n", string(content))
 		require.Equal(t, repo, client.ApplyPatchReject(patch).Dir)
 	})
-}
-
-func TestCommitMismatchNote(t *testing.T) {
-	t.Run("returns note with short SHAs when commits differ", func(t *testing.T) {
-		note := git.CommitMismatchNote(
-			"aaaaaaa1111111222222233333334444444",
-			"bbbbbbb5555555666666677777778888888",
-		)
-		require.Equal(t, "Note: you're currently on commit aaaaaaa but the most recent run on this branch was for commit bbbbbbb", note)
-	})
-
-	t.Run("returns empty when commits match exactly", func(t *testing.T) {
-		note := git.CommitMismatchNote(
-			"abc123def456",
-			"abc123def456",
-		)
-		require.Equal(t, "", note)
-	})
-
-	t.Run("returns empty when head is a prefix of run commit", func(t *testing.T) {
-		note := git.CommitMismatchNote(
-			"abc123d",
-			"abc123def456789",
-		)
-		require.Equal(t, "", note)
-	})
-
-	t.Run("returns empty when run commit is a prefix of head", func(t *testing.T) {
-		note := git.CommitMismatchNote(
-			"abc123def456789",
-			"abc123d",
-		)
-		require.Equal(t, "", note)
-	})
-
-	t.Run("preserves short SHAs when already short", func(t *testing.T) {
-		note := git.CommitMismatchNote("abc", "def")
-		require.Equal(t, "Note: you're currently on commit abc but the most recent run on this branch was for commit def", note)
-	})
-}
-
-func TestRepoNameFromOriginUrl(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{"SSH URL", "git@github.com:rwx-cloud/rwx.git", "rwx"},
-		{"HTTPS URL", "https://github.com/rwx-cloud/rwx.git", "rwx"},
-		{"SSH URL without .git suffix", "git@github.com:rwx-cloud/rwx", "rwx"},
-		{"HTTPS URL without .git suffix", "https://github.com/rwx-cloud/rwx", "rwx"},
-		{"empty string", "", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.expected, git.RepoNameFromOriginUrl(tt.input))
-		})
-	}
 }

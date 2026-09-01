@@ -14,10 +14,10 @@ import (
 	"github.com/rwx-cloud/rwx/internal/docs"
 	"github.com/rwx-cloud/rwx/internal/docstoken"
 	"github.com/rwx-cloud/rwx/internal/errors"
-	"github.com/rwx-cloud/rwx/internal/git"
 	"github.com/rwx-cloud/rwx/internal/retry"
 	"github.com/rwx-cloud/rwx/internal/ssh"
 	"github.com/rwx-cloud/rwx/internal/telemetry"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 	"github.com/rwx-cloud/rwx/internal/versions"
 	"golang.org/x/term"
 
@@ -86,13 +86,10 @@ var (
 			}
 
 			service, err = cli.NewService(cli.Config{
-				APIClient:        c,
-				SSHClient:        new(ssh.Client),
-				SSHTunnelManager: ssh.NewTunnelManager(),
-				GitClient: &git.Client{
-					Binary: "git",
-					Dir:    dir,
-				},
+				APIClient:            c,
+				SSHClient:            new(ssh.Client),
+				SSHTunnelManager:     ssh.NewTunnelManager(),
+				VCSClient:            vcs.New(dir),
 				DockerCLI:            dockerCli,
 				DocsClient:           docs.Client{Host: docsHost, Scheme: docsScheme},
 				DocsTokenBackend:     docsTokenBackend,

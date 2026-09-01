@@ -9,7 +9,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/errors"
-	"github.com/rwx-cloud/rwx/internal/git"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 
 	"github.com/skratchdot/open-golang/open"
 	"github.com/spf13/cobra"
@@ -141,8 +141,8 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 				fmt.Println(string(resultJson))
 			} else {
 				if runIDFromGit && ResultsBranch == "" && ResultsRepo == "" && result.Commit != "" {
-					if head := service.GitClient.GetHead(); head != "" {
-						if note := git.CommitMismatchNote(head, result.Commit); note != "" {
+					if head := service.VCSClient.GetHead(); head != "" {
+						if note := vcs.CommitMismatchNote(head, result.Commit); note != "" {
 							fmt.Println(note)
 						}
 					}

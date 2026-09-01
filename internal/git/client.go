@@ -2,12 +2,13 @@ package git
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 )
 
 type Client struct {
@@ -15,18 +16,13 @@ type Client struct {
 	Dir    string
 }
 
-const defaultRemote = "origin"
-
-func getRemote() string {
-	if remote := os.Getenv("RWX_GIT_REMOTE"); remote != "" {
-		return remote
+// MissingDependency returns the name of the executable this backend needs but
+// cannot find, or "" when everything is present.
+func (c *Client) MissingDependency() string {
+	if _, err := exec.LookPath(c.Binary); err != nil {
+		return "git"
 	}
-	return defaultRemote
-}
-
-func (c *Client) IsInstalled() bool {
-	_, err := exec.LookPath(c.Binary)
-	return err == nil
+	return ""
 }
 
 func (c *Client) IsInsideWorkTree() bool {
@@ -115,7 +111,7 @@ func (c *Client) GetCommit() (string, error) {
 		return "", fmt.Errorf("current branch has no commits")
 	}
 
-	remote := getRemote()
+	remote := vcstypes.ConfiguredRemote()
 
 	// Check if remote exists — for detached HEAD, fall back to raw HEAD
 	if c.GetRemoteUrl(remote) == "" {
@@ -158,39 +154,8 @@ func (c *Client) GetCommit() (string, error) {
 	return "", fmt.Errorf("current branch has no commits in common with the '%s' remote (set RWX_GIT_REMOTE to use a different remote)", remote)
 }
 
-func CommitMismatchNote(head, runCommit string) string {
-	if strings.HasPrefix(runCommit, head) || strings.HasPrefix(head, runCommit) {
-		return ""
-	}
-	shortHead := head
-	if len(shortHead) > 7 {
-		shortHead = shortHead[:7]
-	}
-	shortCommit := runCommit
-	if len(shortCommit) > 7 {
-		shortCommit = shortCommit[:7]
-	}
-	return fmt.Sprintf("Note: you're currently on commit %s but the most recent run on this branch was for commit %s", shortHead, shortCommit)
-}
-
 func (c *Client) GetOriginUrl() string {
-	return c.GetRemoteUrl(getRemote())
-}
-
-// RepoNameFromOriginUrl extracts the repository name from a git remote URL.
-// For example, "git@github.com:rwx-cloud/rwx.git" returns "rwx".
-func RepoNameFromOriginUrl(originUrl string) string {
-	// Handle SSH-style URLs (git@github.com:rwx-cloud/rwx.git)
-	if idx := strings.LastIndex(originUrl, ":"); idx != -1 && !strings.Contains(originUrl, "://") {
-		originUrl = originUrl[idx+1:]
-	}
-
-	// Handle HTTPS-style URLs (https://github.com/rwx-cloud/rwx.git)
-	if idx := strings.LastIndex(originUrl, "/"); idx != -1 {
-		originUrl = originUrl[idx+1:]
-	}
-
-	return strings.TrimSuffix(originUrl, ".git")
+	return c.GetRemoteUrl(vcstypes.ConfiguredRemote())
 }
 
 func (c *Client) GetRemoteUrl(remote string) string {
@@ -205,142 +170,14 @@ func (c *Client) GetRemoteUrl(remote string) string {
 	return strings.TrimSpace(string(url))
 }
 
-type UntrackedFilesMetadata struct {
-	Files []string
-	Count int
-}
-
-type LFSChangedFilesMetadata struct {
-	Files []string
-	Count int
-}
-
-type PatchFile struct {
-	Written         bool
-	Path            string
-	UntrackedFiles  UntrackedFilesMetadata
-	LFSChangedFiles LFSChangedFilesMetadata
-}
-
-type DirtyPatches struct {
-	Staged          []byte
-	Unstaged        []byte
-	Files           []string
-	NewFiles        []string
-	LFSChangedFiles *LFSChangedFilesMetadata
-}
-
-func (p DirtyPatches) Size() int {
-	return len(p.Staged) + len(p.Unstaged)
-}
-
-type PushRefOptions struct {
-	Remote  string
-	Refspec string
-	Env     []string
-}
-
-// patchResult holds the result of generating patch data
-type patchResult struct {
-	patch     []byte
-	sha       string
-	untracked UntrackedFilesMetadata
-	lfs       LFSChangedFilesMetadata
-	ok        bool
-}
-
-// PatchError identifies which git command failed while generating a patch,
-// along with its exit code and stderr, so callers can show the underlying git
-// error to the user and record a stable, PII-free bucket in telemetry.
-type PatchError struct {
-	Command  string // stable identifier for telemetry: diff_name_only, check_attr, ls_files, diff_patch
-	Display  string // human-readable command, e.g. "git diff --name-only"
-	Stderr   string // trimmed git stderr (the user's own repo data)
-	ExitCode int    // process exit code, or -1 if the command never started
-}
-
-func (e *PatchError) Error() string {
-	if e.Stderr == "" {
-		return fmt.Sprintf("failed to generate patch (%s)", e.Display)
-	}
-	return fmt.Sprintf("failed to generate patch (%s): %s", e.Display, e.Stderr)
-}
-
-// Reason buckets the git stderr into a stable category for telemetry. Raw
-// stderr must never be sent to telemetry — it embeds customer file paths,
-// branch names, and repo layout.
-func (e *PatchError) Reason() string {
-	return classifyPatchStderr(e.Stderr)
-}
-
-// PatchFailureReason buckets any patch-related error into a stable, PII-free
-// category for telemetry. It prefers a *PatchError's structured stderr and
-// otherwise scans the error message for git-apply and LFS signatures. Only the
-// returned bucket is safe to record — never the underlying message.
-func PatchFailureReason(err error) string {
-	if err == nil {
-		return ""
-	}
-	var pe *PatchError
-	if errors.As(err, &pe) {
-		return pe.Reason()
-	}
-	return classifyPatchStderr(err.Error())
-}
-
-func classifyPatchStderr(s string) string {
-	s = strings.ToLower(s)
-	switch {
-	case strings.Contains(s, "bad object"), strings.Contains(s, "shallow"):
-		return "shallow_clone"
-	case strings.Contains(s, "beyond a symbolic link"):
-		return "beyond_symlink"
-	case strings.Contains(s, "external filter"), strings.Contains(s, "filter-process"):
-		return "missing_external_filter"
-	case strings.Contains(s, "signal: killed"), strings.Contains(s, "out of memory"), strings.Contains(s, "cannot allocate memory"):
-		return "oom_killed"
-	case strings.Contains(s, "lfs file(s) changed locally"):
-		return "lfs_changed"
-	case strings.Contains(s, "already exists in working directory"):
-		return "already_exists"
-	case strings.Contains(s, "corrupt patch"):
-		return "corrupt_patch"
-	case strings.Contains(s, "does not apply"), strings.Contains(s, "patch failed"), strings.Contains(s, "partially applied"):
-		return "patch_conflict"
-	default:
-		return "unknown"
-	}
-}
-
-// newPatchError builds a PatchError from a failed exec, extracting the exit
-// code and stderr from an *exec.ExitError when available. fallbackStderr is
-// used when the error doesn't carry captured stderr (e.g. CombinedOutput).
-func newPatchError(command, display string, err error, fallbackStderr string) *PatchError {
-	pe := &PatchError{Command: command, Display: display, ExitCode: -1}
-
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		pe.ExitCode = exitErr.ExitCode()
-		pe.Stderr = strings.TrimSpace(string(exitErr.Stderr))
-	}
-
-	if pe.Stderr == "" {
-		pe.Stderr = strings.TrimSpace(fallbackStderr)
-	}
-	if pe.Stderr == "" {
-		pe.Stderr = strings.TrimSpace(err.Error())
-	}
-
-	return pe
-}
-
 // generatePatchData generates patch data for working tree changes relative to the base commit on origin.
-// On a git command failure it returns a *PatchError identifying which command failed and why.
-func (c *Client) generatePatchData(pathspec []string) (patchResult, *PatchError) {
+// On a git command failure it returns a *vcstypes.PatchError identifying which command failed and why.
+func (c *Client) generatePatchData(pathspec []string) (vcstypes.PatchResult, *vcstypes.PatchError) {
 	sha, err := c.GetCommit()
 	if sha == "" || err != nil {
 		// GetCommit failures are pre-filtered upstream in InitiateRun; treat as
 		// "nothing to patch" here rather than a git command failure.
-		return patchResult{}, nil
+		return vcstypes.PatchResult{}, nil
 	}
 
 	diffArgs := []string{"diff", "-z", "--name-only", sha}
@@ -353,19 +190,19 @@ func (c *Client) generatePatchData(pathspec []string) (patchResult, *PatchError)
 
 	files, err := cmd.Output()
 	if err != nil {
-		return patchResult{}, newPatchError("diff_name_only", "git diff --name-only", err, "")
+		return vcstypes.PatchResult{}, vcstypes.NewPatchError("diff_name_only", "git diff --name-only", err, "")
 	}
 
-	lfsChanged, lfsErr := c.lfsFilesForPaths(splitNULPaths(files))
+	lfsChanged, lfsErr := c.lfsFilesForPaths(vcstypes.SplitNULPaths(files))
 	if lfsErr != nil {
-		return patchResult{}, lfsErr
+		return vcstypes.PatchResult{}, lfsErr
 	}
 
 	if lfsChanged.Count > 0 {
-		return patchResult{
-			sha: sha,
-			lfs: lfsChanged,
-			ok:  true,
+		return vcstypes.PatchResult{
+			SHA: sha,
+			LFS: lfsChanged,
+			OK:  true,
 		}, nil
 	}
 
@@ -379,10 +216,10 @@ func (c *Client) generatePatchData(pathspec []string) (patchResult, *PatchError)
 
 	untracked, err := cmd.Output()
 	if err != nil {
-		return patchResult{}, newPatchError("ls_files", "git ls-files --others --exclude-standard", err, "")
+		return vcstypes.PatchResult{}, vcstypes.NewPatchError("ls_files", "git ls-files --others --exclude-standard", err, "")
 	}
 
-	untrackedFiles := splitNULPaths(untracked)
+	untrackedFiles := vcstypes.SplitNULPaths(untracked)
 
 	patchArgs := []string{"diff", sha, "-p", "--binary"}
 	if len(pathspec) > 0 {
@@ -394,21 +231,21 @@ func (c *Client) generatePatchData(pathspec []string) (patchResult, *PatchError)
 
 	patch, err := cmd.Output()
 	if err != nil {
-		return patchResult{}, newPatchError("diff_patch", "git diff -p --binary", err, "")
+		return vcstypes.PatchResult{}, vcstypes.NewPatchError("diff_patch", "git diff -p --binary", err, "")
 	}
 
-	return patchResult{
-		patch: patch,
-		sha:   sha,
-		untracked: UntrackedFilesMetadata{
+	return vcstypes.PatchResult{
+		Patch: patch,
+		SHA:   sha,
+		Untracked: vcstypes.UntrackedFilesMetadata{
 			Files: untrackedFiles,
 			Count: len(untrackedFiles),
 		},
-		ok: true,
+		OK: true,
 	}, nil
 }
 
-func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (PatchFile, error) {
+func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (vcstypes.PatchFile, error) {
 	cleanup, err := c.AddUntrackedFilesForPatch()
 	if err != nil {
 		cleanup = func() {}
@@ -417,33 +254,33 @@ func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (PatchFile
 
 	data, patchErr := c.generatePatchData(pathspec)
 	if patchErr != nil {
-		return PatchFile{}, patchErr
+		return vcstypes.PatchFile{}, patchErr
 	}
-	if !data.ok {
-		return PatchFile{}, fmt.Errorf("unable to generate patch data")
-	}
-
-	if data.lfs.Count > 0 {
-		return PatchFile{LFSChangedFiles: data.lfs}, nil
+	if !data.OK {
+		return vcstypes.PatchFile{}, fmt.Errorf("unable to generate patch data")
 	}
 
-	if len(data.patch) == 0 {
-		return PatchFile{UntrackedFiles: data.untracked}, nil
+	if data.LFS.Count > 0 {
+		return vcstypes.PatchFile{LFSChangedFiles: data.LFS}, nil
 	}
 
-	outputPath := filepath.Join(destDir, data.sha)
+	if len(data.Patch) == 0 {
+		return vcstypes.PatchFile{UntrackedFiles: data.Untracked}, nil
+	}
+
+	outputPath := filepath.Join(destDir, data.SHA)
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-		return PatchFile{}, fmt.Errorf("unable to create patch directory: %w", err)
+		return vcstypes.PatchFile{}, fmt.Errorf("unable to create patch directory: %w", err)
 	}
 
-	if err := os.WriteFile(outputPath, data.patch, 0644); err != nil {
-		return PatchFile{}, fmt.Errorf("unable to write patch file: %w", err)
+	if err := os.WriteFile(outputPath, data.Patch, 0644); err != nil {
+		return vcstypes.PatchFile{}, fmt.Errorf("unable to write patch file: %w", err)
 	}
 
-	return PatchFile{
+	return vcstypes.PatchFile{
 		Written:        true,
 		Path:           outputPath,
-		UntrackedFiles: data.untracked,
+		UntrackedFiles: data.Untracked,
 	}, nil
 }
 
@@ -460,7 +297,7 @@ func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
 		return nil, err
 	}
 
-	files := splitNULPaths(output)
+	files := vcstypes.SplitNULPaths(output)
 
 	if len(files) == 0 {
 		return func() {}, nil // No untracked files, no-op cleanup
@@ -487,7 +324,7 @@ func (c *Client) AddUntrackedFilesForPatch() (cleanup func(), err error) {
 
 // GeneratePatch returns patch bytes for working tree changes relative to the base commit on origin.
 // Returns (nil, nil, nil) if no changes or unable to generate patch.
-func (c *Client) GeneratePatch(pathspec []string) ([]byte, *LFSChangedFilesMetadata, error) {
+func (c *Client) GeneratePatch(pathspec []string) ([]byte, *vcstypes.LFSChangedFilesMetadata, error) {
 	// Add untracked files temporarily so they appear in the diff
 	cleanup, err := c.AddUntrackedFilesForPatch()
 	if err != nil {
@@ -497,22 +334,22 @@ func (c *Client) GeneratePatch(pathspec []string) ([]byte, *LFSChangedFilesMetad
 	defer cleanup()
 
 	data, patchErr := c.generatePatchData(pathspec)
-	if patchErr != nil || !data.ok {
+	if patchErr != nil || !data.OK {
 		return nil, nil, nil
 	}
 
-	if data.lfs.Count > 0 {
-		return nil, &data.lfs, nil
+	if data.LFS.Count > 0 {
+		return nil, &data.LFS, nil
 	}
 
-	if len(data.patch) == 0 {
+	if len(data.Patch) == 0 {
 		return nil, nil, nil
 	}
 
-	return data.patch, nil, nil
+	return data.Patch, nil, nil
 }
 
-func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
+func (c *Client) GenerateDirtyPatches() (vcstypes.DirtyPatches, error) {
 	cleanup, err := c.AddUntrackedFilesForPatch()
 	if err != nil {
 		cleanup = func() {}
@@ -521,11 +358,11 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 
 	files, err := c.changedFilesForDirtyPatch()
 	if err != nil {
-		return DirtyPatches{}, err
+		return vcstypes.DirtyPatches{}, err
 	}
 	newFiles, err := c.newFilesForDirtyPatch()
 	if err != nil {
-		return DirtyPatches{}, err
+		return vcstypes.DirtyPatches{}, err
 	}
 
 	lfsChangedFiles := []string{}
@@ -536,7 +373,7 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 
 		attrs, err := cmd.CombinedOutput()
 		if err != nil {
-			return DirtyPatches{}, err
+			return vcstypes.DirtyPatches{}, err
 		}
 
 		if strings.Contains(string(attrs), "filter: lfs") {
@@ -545,10 +382,10 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 	}
 
 	if len(lfsChangedFiles) > 0 {
-		return DirtyPatches{
+		return vcstypes.DirtyPatches{
 			Files:    files,
 			NewFiles: newFiles,
-			LFSChangedFiles: &LFSChangedFilesMetadata{
+			LFSChangedFiles: &vcstypes.LFSChangedFilesMetadata{
 				Files: lfsChangedFiles,
 				Count: len(lfsChangedFiles),
 			},
@@ -557,14 +394,14 @@ func (c *Client) GenerateDirtyPatches() (DirtyPatches, error) {
 
 	staged, err := c.diffBytes("diff", "--cached", "-p", "--binary", "--no-renames")
 	if err != nil {
-		return DirtyPatches{}, err
+		return vcstypes.DirtyPatches{}, err
 	}
 	unstaged, err := c.diffBytes("diff", "-p", "--binary", "--no-renames")
 	if err != nil {
-		return DirtyPatches{}, err
+		return vcstypes.DirtyPatches{}, err
 	}
 
-	return DirtyPatches{Staged: staged, Unstaged: unstaged, Files: files, NewFiles: newFiles}, nil
+	return vcstypes.DirtyPatches{Staged: staged, Unstaged: unstaged, Files: files, NewFiles: newFiles}, nil
 }
 
 func (c *Client) changedFilesForDirtyPatch() ([]string, error) {
@@ -582,7 +419,7 @@ func (c *Client) changedFilesForDirtyPatch() ([]string, error) {
 			return nil, err
 		}
 
-		for _, file := range splitNULPaths(out) {
+		for _, file := range vcstypes.SplitNULPaths(out) {
 			if file == "" || seen[file] {
 				continue
 			}
@@ -609,7 +446,7 @@ func (c *Client) newFilesForDirtyPatch() ([]string, error) {
 			return nil, err
 		}
 
-		for _, file := range splitNULPaths(out) {
+		for _, file := range vcstypes.SplitNULPaths(out) {
 			if file == "" || seen[file] {
 				continue
 			}
@@ -619,22 +456,6 @@ func (c *Client) newFilesForDirtyPatch() ([]string, error) {
 	}
 
 	return files, nil
-}
-
-func splitNULPaths(output []byte) []string {
-	if len(output) == 0 {
-		return []string{}
-	}
-
-	parts := bytes.Split(output, []byte{0})
-	paths := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if len(part) == 0 {
-			continue
-		}
-		paths = append(paths, string(part))
-	}
-	return paths
 }
 
 func (c *Client) diffBytes(args ...string) ([]byte, error) {
@@ -656,37 +477,17 @@ func (c *Client) HasCommit(sha string) bool {
 	return cmd.Run() == nil
 }
 
-func (c *Client) lfsFilesForPaths(files []string) (LFSChangedFilesMetadata, *PatchError) {
-	lfsChangedFiles := []string{}
+func (c *Client) lfsFilesForPaths(files []string) (vcstypes.LFSChangedFilesMetadata, *vcstypes.PatchError) {
 	dir := c.applyDir()
 
-	for _, file := range files {
-		if file == "" {
-			continue
-		}
-
-		cmd := exec.Command(c.Binary, "check-attr", "filter", "--", file)
+	return vcstypes.LFSFilesForPaths(files, func(args ...string) (*exec.Cmd, error) {
+		cmd := exec.Command(c.Binary, args...)
 		cmd.Dir = dir
-
-		// CombinedOutput mixes stderr into attrs, so pass it as the fallback
-		// stderr for the PatchError (the *exec.ExitError won't carry .Stderr).
-		attrs, err := cmd.CombinedOutput()
-		if err != nil {
-			return LFSChangedFilesMetadata{}, newPatchError("check_attr", "git check-attr filter", err, string(attrs))
-		}
-
-		if strings.Contains(string(attrs), "filter: lfs") {
-			lfsChangedFiles = append(lfsChangedFiles, file)
-		}
-	}
-
-	return LFSChangedFilesMetadata{
-		Files: lfsChangedFiles,
-		Count: len(lfsChangedFiles),
-	}, nil
+		return cmd, nil
+	})
 }
 
-func (c *Client) PushRef(opts PushRefOptions) error {
+func (c *Client) PushRef(opts vcstypes.PushRefOptions) error {
 	if opts.Remote == "" {
 		return fmt.Errorf("no remote provided")
 	}

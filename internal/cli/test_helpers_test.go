@@ -20,7 +20,7 @@ type testSetup struct {
 	mockAPI    *mocks.API
 	mockSSH    *mocks.SSH
 	mockTunnel *mocks.SSHTunnelManager
-	mockGit    *mocks.Git
+	mockVCS    *mocks.VCS
 	mockDocker *mocks.DockerClient
 	mockStdin  *bytes.Buffer
 	mockStdout *strings.Builder
@@ -76,8 +76,7 @@ func setupTest(t *testing.T) *testSetup {
 		exitCode, err := setup.mockSSH.ExecuteCommand(command)
 		return exitCode, "", "", err
 	}
-	setup.mockGit = &mocks.Git{
-		MockIsInstalled:      true,
+	setup.mockVCS = &mocks.VCS{
 		MockIsInsideWorkTree: true,
 		MockGetHead:          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
@@ -91,7 +90,7 @@ func setupTest(t *testing.T) *testSetup {
 		APIClient:          setup.mockAPI,
 		SSHClient:          setup.mockSSH,
 		SSHTunnelManager:   setup.mockTunnel,
-		GitClient:          setup.mockGit,
+		VCSClient:          setup.mockVCS,
 		DockerCLI:          setup.mockDocker,
 		TelemetryCollector: setup.collector,
 		Stdin:              setup.mockStdin,
