@@ -204,6 +204,44 @@ func TestGetBranch(t *testing.T) {
 	})
 }
 
+func TestGetRemoteUrl(t *testing.T) {
+	t.Run("resolves origin", func(t *testing.T) {
+		eachLayout(t, "clone", func(t *testing.T, f fixture) {
+			requireSamePath(t, f.origin, f.client.GetOriginUrl())
+			requireSamePath(t, f.origin, f.client.GetRemoteUrl("origin"))
+			require.Empty(t, f.client.GetRemoteUrl("upstream"))
+		})
+	})
+
+	t.Run("picks origin out of several remotes", func(t *testing.T) {
+		eachLayout(t, "clone-many-remotes", func(t *testing.T, f fixture) {
+			requireSamePath(t, f.origin, f.client.GetOriginUrl())
+			require.NotEmpty(t, f.client.GetRemoteUrl("upstream"))
+		})
+	})
+
+	t.Run("is empty without any remote", func(t *testing.T) {
+		eachLayout(t, "init-uncommitted", func(t *testing.T, f fixture) {
+			require.Empty(t, f.client.GetOriginUrl())
+		})
+	})
+
+	t.Run("is empty when no remote is named origin", func(t *testing.T) {
+		eachLayout(t, "clone-remote-named-upstream", func(t *testing.T, f fixture) {
+			require.Empty(t, f.client.GetOriginUrl())
+			require.NotEmpty(t, f.client.GetRemoteUrl("upstream"))
+		})
+	})
+
+	t.Run("honors RWX_GIT_REMOTE", func(t *testing.T) {
+		eachLayout(t, "clone-remote-named-upstream", func(t *testing.T, f fixture) {
+			t.Setenv("RWX_GIT_REMOTE", "upstream")
+
+			requireSamePath(t, f.origin, f.client.GetOriginUrl())
+		})
+	})
+}
+
 func TestGetHead(t *testing.T) {
 	eachLayout(t, "clone", func(t *testing.T, f fixture) {
 		head, err := f.client.GetHeadCommit()

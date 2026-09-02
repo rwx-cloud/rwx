@@ -1,0 +1,6 @@
+#!/bin/bash
+set -euo pipefail
+
+# A standalone repository: no remote, and nothing committed.
+jj git init $COLOCATE repo
+printf 'hello\n' > repo/base.txt

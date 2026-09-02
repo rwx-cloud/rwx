@@ -168,6 +168,31 @@ func (c *Client) GetShortHead() string {
 	return firstLine(out)
 }
 
+func (c *Client) GetOriginUrl() string {
+	return c.GetRemoteUrl(vcstypes.ConfiguredRemote())
+}
+
+func (c *Client) GetRemoteUrl(remote string) string {
+	return c.remoteUrls()[remote]
+}
+
+func (c *Client) remoteUrls() map[string]string {
+	out, _, err := c.runStale("git", "remote", "list")
+	if err != nil {
+		return nil
+	}
+
+	remotes := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		name, url, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if ok {
+			remotes[name] = strings.TrimSpace(url)
+		}
+	}
+
+	return remotes
+}
+
 // IsAncestor takes revsets, so a GetShortHead change id still matches after @
 // has been rewritten.
 func (c *Client) IsAncestor(candidateSHA, headRef string) bool {
