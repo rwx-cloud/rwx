@@ -291,11 +291,16 @@ func gitDirForRoot(root string) (string, error) {
 	return filepath.Clean(target), nil
 }
 
-// storeCmdIn builds a git command against the backing store.
 func (c *Client) storeCmdIn(st store, args ...string) *exec.Cmd {
 	cmd := exec.Command(c.GitBinary, append([]string{"--git-dir", st.gitDir}, args...)...)
 	cmd.Dir = st.workTree
 	return cmd
+}
+
+// pushSource returns the source side of a refspec, or "" for a delete refspec.
+func pushSource(refspec string) string {
+	src, _, _ := strings.Cut(refspec, ":")
+	return strings.TrimPrefix(src, "+")
 }
 
 func withPathspec(args []string, pathspec []string) []string {
@@ -491,4 +496,43 @@ func (c *Client) hasConflict(rev string) bool {
 		return false
 	}
 	return firstLine(out) == "true"
+}
+
+func (c *Client) PushRef(opts vcstypes.PushRefOptions) error {
+	if opts.Remote == "" {
+		return fmt.Errorf("no remote provided")
+	}
+	if opts.Refspec == "" {
+		return fmt.Errorf("no refspec provided")
+	}
+
+	st, err := c.resolveStore()
+	if err != nil {
+		return err
+	}
+
+	if src := pushSource(opts.Refspec); src != "" {
+		if c.hasConflict(src) {
+			return fmt.Errorf("cannot push %s: %s", src, conflictMessage)
+		}
+
+		if err := c.storeCmdIn(st, "cat-file", "-e", src+"^{commit}").Run(); err != nil {
+			return fmt.Errorf("cannot push %s: the commit is not in the git store backing this jj repository", src)
+		}
+	}
+
+	cmd := c.storeCmdIn(st, "push", opts.Remote, opts.Refspec)
+	if len(opts.Env) > 0 {
+		cmd.Env = append(os.Environ(), opts.Env...)
+	}
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		output := strings.TrimSpace(string(out))
+		if output != "" {
+			return fmt.Errorf("git push failed: %s", output)
+		}
+		return fmt.Errorf("git push failed: %w", err)
+	}
+
+	return nil
 }

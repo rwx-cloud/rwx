@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/rwx-cloud/rwx/internal/jj"
+	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -652,4 +653,66 @@ func TestIsAncestor(t *testing.T) {
 		require.False(t, f.client.IsAncestor("", head))
 		require.False(t, f.client.IsAncestor(f.baseSHA, ""))
 	})
+}
+
+func TestPushRef(t *testing.T) {
+	t.Run("pushes the working copy commit", func(t *testing.T) {
+		eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
+			head, err := f.client.GetHeadCommit()
+			require.NoError(t, err)
+
+			opts := vcstypes.PushRefOptions{Remote: f.origin, Refspec: "+" + head + ":refs/rwx/test"}
+			require.NoError(t, f.client.PushRef(opts))
+
+			require.Equal(t, head, originRef(t, f.origin))
+		})
+	})
+
+	t.Run("validates its options", func(t *testing.T) {
+		eachLayout(t, "clone", func(t *testing.T, f fixture) {
+			require.ErrorContains(t, f.client.PushRef(vcstypes.PushRefOptions{Refspec: "a:b"}), "no remote provided")
+			require.ErrorContains(t, f.client.PushRef(vcstypes.PushRefOptions{Remote: f.origin}), "no refspec provided")
+		})
+	})
+
+	t.Run("rejects a commit missing from the store", func(t *testing.T) {
+		eachLayout(t, "clone", func(t *testing.T, f fixture) {
+			missing := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+			err := f.client.PushRef(vcstypes.PushRefOptions{
+				Remote:  f.origin,
+				Refspec: "+" + missing + ":refs/rwx/test",
+			})
+			require.ErrorContains(t, err, "not in the git store")
+			require.ErrorContains(t, err, missing)
+		})
+	})
+
+	t.Run("rejects a conflicted working copy", func(t *testing.T) {
+		eachLayout(t, "clone-conflicted-merge", func(t *testing.T, f fixture) {
+			head, err := f.client.GetHeadCommit()
+			require.NoError(t, err)
+
+			body, err := os.ReadFile(filepath.Join(f.root, "base.txt"))
+			require.NoError(t, err)
+			require.Contains(t, string(body), "<<<<<<<", "fixture should leave the working copy conflicted")
+
+			err = f.client.PushRef(vcstypes.PushRefOptions{Remote: f.origin, Refspec: "+" + head + ":refs/rwx/test"})
+			require.ErrorContains(t, err, "unresolved conflicts")
+			require.ErrorContains(t, err, "jj resolve")
+
+			require.Empty(t, originRef(t, f.origin), "nothing should have been pushed")
+		})
+	})
+}
+
+// originRef resolves the ref PushRef targets, or "" when it was never created.
+func originRef(t *testing.T, origin string) string {
+	t.Helper()
+
+	out, err := exec.Command("git", "-C", origin, "rev-parse", "refs/rwx/test").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
