@@ -3,7 +3,9 @@ package jj
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -231,6 +233,82 @@ func (c *Client) remoteUrls() map[string]string {
 	}
 
 	return remotes
+}
+
+// store locates the git repository backing a jj repo, along with the work tree
+// its commands should run in. Resolving it costs a `jj root` plus a couple of
+// file reads, so callers that inspect many files resolve it once and reuse it.
+type store struct {
+	gitDir   string
+	workTree string
+}
+
+func (c *Client) resolveStore() (store, error) {
+	root := c.GetTopLevel()
+	if root == "" {
+		return store{}, fmt.Errorf("not inside a jj repository")
+	}
+
+	gitDir, err := gitDirForRoot(root)
+	if err != nil {
+		return store{}, err
+	}
+
+	return store{gitDir: gitDir, workTree: root}, nil
+}
+
+func gitDirForRoot(root string) (string, error) {
+	repoDir := filepath.Join(root, ".jj", "repo")
+	if info, err := os.Stat(repoDir); err == nil && !info.IsDir() {
+		data, err := os.ReadFile(repoDir)
+		if err != nil {
+			return "", fmt.Errorf("unable to read %s: %w", repoDir, err)
+		}
+		target := strings.TrimSpace(string(data))
+		if target == "" {
+			return "", fmt.Errorf("%s is empty", repoDir)
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(root, ".jj", target)
+		}
+		repoDir = target
+	}
+
+	storeDir := filepath.Join(repoDir, "store")
+	data, err := os.ReadFile(filepath.Join(storeDir, "git_target"))
+	if err != nil {
+		return "", fmt.Errorf("unable to locate the git store for this jj repository: %w", err)
+	}
+
+	target := strings.TrimSpace(string(data))
+	if target == "" {
+		return "", fmt.Errorf("unable to locate the git store for this jj repository")
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(storeDir, target)
+	}
+
+	return filepath.Clean(target), nil
+}
+
+// storeCmdIn builds a git command against the backing store.
+func (c *Client) storeCmdIn(st store, args ...string) *exec.Cmd {
+	cmd := exec.Command(c.GitBinary, append([]string{"--git-dir", st.gitDir}, args...)...)
+	cmd.Dir = st.workTree
+	return cmd
+}
+
+func (c *Client) HasCommit(sha string) bool {
+	if sha == "" {
+		return false
+	}
+
+	st, err := c.resolveStore()
+	if err != nil {
+		return false
+	}
+
+	return c.storeCmdIn(st, "cat-file", "-e", sha+"^{commit}").Run() == nil
 }
 
 // IsAncestor takes revsets, so a GetShortHead change id still matches after @

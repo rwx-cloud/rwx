@@ -421,6 +421,18 @@ func TestGetCommitDoesNotSnapshotTheWorkingCopy(t *testing.T) {
 	})
 }
 
+func TestHasCommit(t *testing.T) {
+	eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
+		head, err := f.client.GetHeadCommit()
+		require.NoError(t, err)
+
+		require.True(t, f.client.HasCommit(head))
+		require.True(t, f.client.HasCommit(f.baseSHA))
+		require.False(t, f.client.HasCommit("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"))
+		require.False(t, f.client.HasCommit(""))
+	})
+}
+
 func TestIsAncestor(t *testing.T) {
 	eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
 		head, err := f.client.GetHeadCommit()
