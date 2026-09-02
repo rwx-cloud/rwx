@@ -168,6 +168,46 @@ func (c *Client) GetShortHead() string {
 	return firstLine(out)
 }
 
+// GetCommit reads stale: snapshotting rewrites @ but not its ancestors, so the
+// base resolves without mutating the repository. Only the fallbacks that answer
+// with @ itself snapshot.
+func (c *Client) GetCommit() (string, error) {
+	if out, _, err := c.resolveStale(workingCopy, commitIDTemplate); err != nil || firstLine(out) == "" {
+		return "", nil
+	}
+
+	remote := vcstypes.ConfiguredRemote()
+	if c.GetRemoteUrl(remote) == "" {
+		// No bookmark is jj's detached HEAD: answer with @, as the git backend does.
+		if c.GetBranch() == "" {
+			return c.GetHeadCommit()
+		}
+		return "", fmt.Errorf("no git remote named '%s' is configured (set RWX_GIT_REMOTE to use a different remote)", remote)
+	}
+
+	// root() is an ancestor of everything, so without excluding it unrelated
+	// histories would resolve to the virtual root instead of failing.
+	revset := fmt.Sprintf("heads((::@ & ::remote_bookmarks(remote=exact:%s)) ~ root())", quoteRevsetString(remote))
+	out, stderr, err := c.resolveStale(revset, commitIDTemplate)
+	if err != nil {
+		msg := stderr
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("jj log failed: %s", msg)
+	}
+
+	base := firstLine(out)
+	if base == "" {
+		if c.GetBranch() == "" {
+			return c.GetHeadCommit()
+		}
+		return "", fmt.Errorf("bookmark '%s' has no commits in common with the '%s' remote (set RWX_GIT_REMOTE to use a different remote)", c.GetBranch(), remote)
+	}
+
+	return base, nil
+}
+
 func (c *Client) GetOriginUrl() string {
 	return c.GetRemoteUrl(vcstypes.ConfiguredRemote())
 }

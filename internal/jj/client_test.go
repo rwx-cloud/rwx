@@ -238,8 +238,20 @@ func TestGetRemoteUrl(t *testing.T) {
 			t.Setenv("RWX_GIT_REMOTE", "upstream")
 
 			requireSamePath(t, f.origin, f.client.GetOriginUrl())
+
+			sha, err := f.client.GetCommit()
+			require.NoError(t, err)
+			require.Equal(t, f.baseSHA, sha)
 		})
 	})
+}
+
+func headCommit(t *testing.T, client *jj.Client) string {
+	t.Helper()
+
+	head, err := client.GetHeadCommit()
+	require.NoError(t, err)
+	return head
 }
 
 func TestGetHead(t *testing.T) {
@@ -288,6 +300,124 @@ func TestGetShortHeadSurvivesWorkingCopyEdits(t *testing.T) {
 		// ...while the change id still resolves to the current working copy, so
 		// the sandbox ancestry fallback keeps matching the existing session.
 		require.True(t, f.client.IsAncestor(beforeShort, "HEAD"))
+	})
+}
+
+func TestGetCommit(t *testing.T) {
+	t.Run("returns the remote commit when the working copy is clean", func(t *testing.T) {
+		eachLayout(t, "clone", func(t *testing.T, f fixture) {
+			sha, err := f.client.GetCommit()
+			require.NoError(t, err)
+			require.Equal(t, f.baseSHA, sha)
+		})
+	})
+
+	t.Run("returns the remote commit when ahead of the remote", func(t *testing.T) {
+		eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
+			sha, err := f.client.GetCommit()
+			require.NoError(t, err)
+			require.Equal(t, f.baseSHA, sha)
+		})
+	})
+
+	t.Run("returns the shared commit when behind the remote", func(t *testing.T) {
+		eachLayout(t, "clone-behind-origin", func(t *testing.T, f fixture) {
+			sha, err := f.client.GetCommit()
+			require.NoError(t, err)
+			require.Equal(t, f.baseSHA, sha)
+		})
+	})
+
+	t.Run("returns the fork point when both sides have moved on", func(t *testing.T) {
+		eachLayout(t, "clone-diverged-from-origin", func(t *testing.T, f fixture) {
+			sha, err := f.client.GetCommit()
+			require.NoError(t, err)
+			require.Equal(t, f.baseSHA, sha)
+		})
+	})
+
+	t.Run("returns the fork point for work left behind a bookmark", func(t *testing.T) {
+		eachLayout(t, "clone-bookmark-on-ancestor", func(t *testing.T, f fixture) {
+			sha, err := f.client.GetCommit()
+			require.NoError(t, err)
+			require.Equal(t, f.baseSHA, sha)
+		})
+	})
+
+	t.Run("falls back to the working copy in a repository with no remotes", func(t *testing.T) {
+		eachLayout(t, "init-uncommitted", func(t *testing.T, f fixture) {
+			sha, err := f.client.GetCommit()
+			require.NoError(t, err)
+			require.Equal(t, headCommit(t, f.client), sha)
+		})
+	})
+
+	// No bookmark below @ is jj's detached HEAD, where the git backend answers
+	// with HEAD rather than erroring. Never the virtual root.
+	t.Run("falls back to the working copy without a common ancestor", func(t *testing.T) {
+		eachLayout(t, "init-unrelated-origin", func(t *testing.T, f fixture) {
+			sha, err := f.client.GetCommit()
+			require.NoError(t, err)
+			require.Equal(t, headCommit(t, f.client), sha)
+			require.NotEqual(t, strings.Repeat("0", 40), sha)
+		})
+	})
+
+	// A bookmark below @ is a named position, so the misconfiguration is
+	// reported, as git does on a branch.
+	t.Run("errors without a common ancestor when a bookmark names the change", func(t *testing.T) {
+		eachLayout(t, "init-unrelated-origin-bookmark", func(t *testing.T, f fixture) {
+			sha, err := f.client.GetCommit()
+			require.ErrorContains(t, err, "no commits in common")
+			require.ErrorContains(t, err, "feature")
+			require.Empty(t, sha)
+		})
+	})
+
+	t.Run("errors on a bookmarked line when no remote is named origin", func(t *testing.T) {
+		eachLayout(t, "clone-remote-named-upstream", func(t *testing.T, f fixture) {
+			_, err := f.client.GetCommit()
+			require.ErrorContains(t, err, "no git remote named 'origin' is configured")
+		})
+	})
+}
+
+// staleHead reads @ without letting jj snapshot.
+func staleHead(t *testing.T, root string) string {
+	t.Helper()
+
+	cmd := exec.Command("jj", "--no-pager", "--color=never", "--quiet", "--ignore-working-copy",
+		"log", "-r", "@", "--no-graph", "-T", "commit_id")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "jj log failed: %s", out)
+	return strings.TrimSpace(string(out))
+}
+
+// Reporting commands such as `rwx results` call GetCommit and nothing else, so
+// it must not rewrite @.
+func TestGetCommitDoesNotSnapshotTheWorkingCopy(t *testing.T) {
+	eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
+		_, err := f.client.GetHeadCommit()
+		require.NoError(t, err)
+
+		require.NoError(t, os.WriteFile(filepath.Join(f.root, "base.txt"), []byte("uncommitted\n"), 0o644))
+		before := staleHead(t, f.root)
+
+		base, err := f.client.GetCommit()
+		require.NoError(t, err)
+		require.Equal(t, f.baseSHA, base)
+		require.Equal(t, before, staleHead(t, f.root), "GetCommit must leave @ alone")
+
+		// The base is unchanged by the snapshot, which is what makes the stale
+		// read safe.
+		head, err := f.client.GetHeadCommit()
+		require.NoError(t, err)
+		require.NotEqual(t, before, head, "GetHeadCommit does snapshot")
+
+		after, err := f.client.GetCommit()
+		require.NoError(t, err)
+		require.Equal(t, base, after)
 	})
 }
 

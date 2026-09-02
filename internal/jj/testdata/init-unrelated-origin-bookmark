@@ -1,0 +1,20 @@
+#!/bin/bash
+set -euo pipefail
+
+git init -q -b main origin
+cd origin
+printf 'unrelated\n' > other.txt
+git add -A
+git commit -qm "unrelated root"
+cd ..
+
+# The repository is built from scratch rather than cloned, so it shares no
+# commit at all with the remote it then fetches.
+jj git init $COLOCATE repo
+cd repo
+
+jj git remote add origin ../origin
+jj git fetch
+printf 'hello\n' > base.txt
+jj commit -m "local root"
+jj bookmark set feature -r @
