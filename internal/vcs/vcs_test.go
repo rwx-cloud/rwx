@@ -37,6 +37,7 @@ func isolate(t *testing.T) string {
 	t.Setenv("JJ_CONFIG", jjConfig)
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	t.Setenv("RWX_VCS", "")
 
 	return dir
 }
@@ -127,4 +128,34 @@ func TestNewResolvesTheClientFromASubdirectory(t *testing.T) {
 
 func TestNewSelectsGitOutsideAnyRepository(t *testing.T) {
 	require.IsType(t, &git.Client{}, vcs.New(isolate(t)))
+}
+
+func TestNewHonorsRWXVCS(t *testing.T) {
+	t.Run("git opts out for a colocated repository", func(t *testing.T) {
+		root := jjRepo(t, true)
+
+		t.Setenv("RWX_VCS", "git")
+		require.IsType(t, &git.Client{}, vcs.New(root))
+	})
+
+	t.Run("git forces git for a non-colocated repository", func(t *testing.T) {
+		root := jjRepo(t, false)
+
+		t.Setenv("RWX_VCS", "git")
+		require.IsType(t, &git.Client{}, vcs.New(root))
+	})
+
+	t.Run("is case and whitespace insensitive", func(t *testing.T) {
+		root := jjRepo(t, true)
+
+		t.Setenv("RWX_VCS", "  GIT ")
+		require.IsType(t, &git.Client{}, vcs.New(root))
+	})
+
+	t.Run("an unknown value falls back to detection", func(t *testing.T) {
+		root := jjRepo(t, false)
+
+		t.Setenv("RWX_VCS", "hg")
+		require.IsType(t, &jj.Client{}, vcs.New(root))
+	})
 }

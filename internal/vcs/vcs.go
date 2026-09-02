@@ -66,11 +66,18 @@ const (
 	jjBinary  = "jj"
 )
 
-// New picks the backend for dir. The innermost repository containing dir wins,
-// so a jj repo nested inside an unrelated git checkout is not mistaken for part
-// of it. A colocated jj repo has both roots at the same path, and jj takes that
-// tie.
+// New picks the backend for dir. RWX_VCS forces a backend outright; otherwise
+// the innermost repository containing dir wins, so a jj repo nested inside an
+// unrelated git checkout is not mistaken for part of it. A colocated jj repo
+// has both roots at the same path, and jj takes that tie.
 func New(dir string) Client {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("RWX_VCS"))) {
+	case "git":
+		return newGit(dir)
+	case "jj":
+		return newJJ(dir)
+	}
+
 	gitClient := newGit(dir)
 	if !jjAvailable() {
 		return gitClient
