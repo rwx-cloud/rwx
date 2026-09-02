@@ -181,10 +181,8 @@ func (r PatchResult) Bytes() ([]byte, *LFSChangedFilesMetadata) {
 	return r.Patch, nil
 }
 
-// UntrackedFilesMetadata carries the files a patch adds that do not exist in
-// the base commit. Under git these are literally untracked working-tree files;
-// under jj, which tracks the whole working copy automatically, they are the
-// files the patch adds relative to the base.
+// UntrackedFilesMetadata carries the untracked working-tree files a git patch
+// picks up. jj tracks the whole working copy, so its patches report none.
 type UntrackedFilesMetadata struct {
 	Files []string
 	Count int

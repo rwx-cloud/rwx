@@ -464,29 +464,13 @@ func (c *Client) generatePatchData(pathspec []string) (vcstypes.PatchResult, *vc
 		return vcstypes.PatchResult{SHA: base, LFS: lfsChanged, OK: true}, nil
 	}
 
-	// jj tracks the whole working copy, so there is no untracked set to report.
-	// The files added between base and @ are the closest equivalent: they are
-	// the paths the patch creates, which is what callers use the field for.
-	added, patchErr := c.diffNames(st, base, head, pathspec, "--diff-filter=A")
-	if patchErr != nil {
-		return vcstypes.PatchResult{}, patchErr
-	}
-
 	patchArgs := []string{"diff", base, head, "-p", "--binary"}
 	patch, err := c.storeCmdIn(st, withPathspec(patchArgs, pathspec)...).Output()
 	if err != nil {
 		return vcstypes.PatchResult{}, vcstypes.NewPatchError("diff_patch", "git diff -p --binary", err, "")
 	}
 
-	return vcstypes.PatchResult{
-		Patch: patch,
-		SHA:   base,
-		Untracked: vcstypes.UntrackedFilesMetadata{
-			Files: added,
-			Count: len(added),
-		},
-		OK: true,
-	}, nil
+	return vcstypes.PatchResult{Patch: patch, SHA: base, OK: true}, nil
 }
 
 func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (vcstypes.PatchFile, error) {
