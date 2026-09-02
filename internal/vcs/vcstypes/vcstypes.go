@@ -68,8 +68,9 @@ func SplitNULPaths(output []byte) []string {
 }
 
 // CommandFactory builds a command that can query a repository. Backends differ
-// in how they reach the object store, so the shared helpers below take a
-// factory instead of building commands themselves.
+// in how they reach the object store — the git client shells out in the work
+// tree, the jj client points git at the jj-managed store — so the shared
+// helpers below take a factory instead of building commands themselves.
 type CommandFactory func(args ...string) (*exec.Cmd, error)
 
 // LFSFilesForPaths returns the subset of files that git-lfs is configured to
@@ -120,8 +121,8 @@ type PatchResult struct {
 
 // UntrackedFilesMetadata carries the files a patch adds that do not exist in
 // the base commit. Under git these are literally untracked working-tree files;
-// a backend that tracks the whole working copy reports the files the patch adds
-// relative to the base instead.
+// under jj, which tracks the whole working copy automatically, they are the
+// files the patch adds relative to the base.
 type UntrackedFilesMetadata struct {
 	Files []string
 	Count int

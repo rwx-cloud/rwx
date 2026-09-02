@@ -360,7 +360,7 @@ func (s *SandboxStorage) AllSessions() map[string]SandboxSession {
 
 // BranchLocator reports the current position in a repository: a branch name
 // when there is one, and otherwise a short stable identifier for the anonymous
-// position, as on a detached HEAD.
+// position (a detached HEAD under git, no bookmark at or below @ under jj).
 type BranchLocator interface {
 	GetBranch() string
 	GetShortHead() string

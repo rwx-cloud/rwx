@@ -159,7 +159,7 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 
 	t.Run("when the backend names a different missing dependency", func(t *testing.T) {
 		s := setupTest(t)
-		s.mockVCS.MockMissingDependency = "some-vcs"
+		s.mockVCS.MockMissingDependency = "jj"
 		s.mockVCS.MockIsInsideWorkTree = false
 
 		rwxDir := filepath.Join(s.tmp, ".rwx")
@@ -177,7 +177,7 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 		}
 		s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			require.False(t, cfg.Patch.GitInstalled)
-			require.Equal(t, "some-vcs is not installed", cfg.Patch.ErrorMessage)
+			require.Equal(t, "jj is not installed", cfg.Patch.ErrorMessage)
 			return &api.InitiateRunResult{
 				RunID:  "785ce4e8-17b9-4c8b-8869-a55e95adffe7",
 				RunURL: "https://cloud.rwx.com/mint/rwx/runs/785ce4e8-17b9-4c8b-8869-a55e95adffe7",

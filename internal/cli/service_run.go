@@ -185,8 +185,8 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 			originUrl = s.VCSClient.GetOriginUrl()
 		}
 	} else if !vcsInstalled {
-		// Name the executable the backend reports missing rather than assuming
-		// git, since a backend may depend on more than one.
+		// Name the executable that's actually missing: the jj backend shells out
+		// to git for the object store, so either one can be the culprit.
 		errorMessage = fmt.Sprintf("%s is not installed", missingDependency)
 	} else if !insideRepository {
 		errorMessage = "You are not in a source code repository"

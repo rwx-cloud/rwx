@@ -1,9 +1,13 @@
 package vcs
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/rwx-cloud/rwx/internal/git"
+	"github.com/rwx-cloud/rwx/internal/jj"
 	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 )
 
@@ -29,7 +33,8 @@ type Client interface {
 	IsInsideWorkTree() bool
 	GetTopLevel() string
 	// GetBranch returns the branch naming the current position, or "" when
-	// there is none, as on a detached HEAD.
+	// there is none (a detached HEAD under git, no bookmark at or below @ under
+	// jj).
 	GetBranch() string
 	GetHeadCommit() (string, error)
 	// GetShortHead returns a short identifier for the current position that
@@ -51,15 +56,64 @@ type Client interface {
 	ApplyPatchReject(patch []byte) *exec.Cmd
 }
 
-var _ Client = (*git.Client)(nil)
+var (
+	_ Client = (*git.Client)(nil)
+	_ Client = (*jj.Client)(nil)
+)
 
-const gitBinary = "git"
+const (
+	gitBinary = "git"
+	jjBinary  = "jj"
+)
 
-// New returns the backend for dir. Git is currently the only one.
+// New picks the backend for dir. The innermost repository containing dir wins,
+// so a jj repo nested inside an unrelated git checkout is not mistaken for part
+// of it. A colocated jj repo has both roots at the same path, and jj takes that
+// tie.
 func New(dir string) Client {
-	return newGit(dir)
+	gitClient := newGit(dir)
+	if !jjAvailable() {
+		return gitClient
+	}
+
+	jjClient := newJJ(dir)
+	jjRoot := jjClient.GetTopLevel()
+	if jjRoot == "" {
+		return gitClient
+	}
+
+	// A git repository nested inside the jj workspace is its own repository.
+	gitRoot := gitClient.GetTopLevel()
+	if gitRoot != "" && isProperSubpath(jjRoot, gitRoot) {
+		return gitClient
+	}
+
+	return jjClient
+}
+
+// isProperSubpath reports whether child sits strictly below parent.
+func isProperSubpath(parent, child string) bool {
+	if parent == "" || child == "" {
+		return false
+	}
+
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+
+	return rel != "." && !strings.HasPrefix(rel, "..")
 }
 
 func newGit(dir string) *git.Client {
 	return &git.Client{Binary: gitBinary, Dir: dir}
+}
+
+func newJJ(dir string) *jj.Client {
+	return &jj.Client{Binary: jjBinary, GitBinary: gitBinary, Dir: dir, Stderr: os.Stderr}
+}
+
+func jjAvailable() bool {
+	_, err := exec.LookPath(jjBinary)
+	return err == nil
 }
