@@ -246,7 +246,7 @@ func init() {
 	vaultsCreateCmd.Flags().StringVar(&createVaultName, "name", "", "the name of the vault to create")
 	_ = vaultsCreateCmd.MarkFlagRequired("name")
 	vaultsCreateCmd.Flags().BoolVar(&createVaultUnlocked, "unlocked", false, "whether the vault should be unlocked")
-	vaultsCreateCmd.Flags().StringSliceVar(&createVaultRepoPerms, "repository-permission", nil, "repository permission in the format REPO_SLUG:BRANCH_PATTERN (repeatable)")
+	vaultsCreateCmd.Flags().StringSliceVar(&createVaultRepoPerms, "repository-permission", nil, "repository permission in the format REPO_SLUG:REF_PATTERN (repeatable)")
 	vaultsCmd.AddCommand(vaultsCreateCmd)
 
 	// vaults secrets set
