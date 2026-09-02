@@ -110,6 +110,13 @@ func (c *Client) GetTopLevel() string {
 	return firstLine(out)
 }
 
+func (c *Client) applyDir() string {
+	if root := c.GetTopLevel(); root != "" {
+		return root
+	}
+	return c.Dir
+}
+
 // GetBranch reports the nearest bookmark at or below @, since `jj commit` leaves
 // the bookmark behind as @ moves above it. When @ merges several bookmarked
 // lines, one that exists on the configured remote wins, then the first by name.
@@ -535,4 +542,28 @@ func (c *Client) PushRef(opts vcstypes.PushRefOptions) error {
 	}
 
 	return nil
+}
+
+func (c *Client) ApplyPatch(patch []byte) *exec.Cmd {
+	return c.applyPatchCmd(patch, "apply", "--allow-empty", "-")
+}
+
+func (c *Client) ApplyPatchReject(patch []byte) *exec.Cmd {
+	return c.applyPatchCmd(patch, "apply", "--reject", "--allow-empty", "-")
+}
+
+// A non-colocated workspace has no .git of its own, and without one git apply
+// ignores .gitattributes, so git is pointed at the backing store.
+func (c *Client) applyPatchCmd(patch []byte, args ...string) *exec.Cmd {
+	var cmd *exec.Cmd
+	if st, err := c.resolveStore(); err == nil {
+		cmd = exec.Command(c.GitBinary, append([]string{"--git-dir", st.gitDir, "--work-tree", st.workTree}, args...)...)
+		cmd.Dir = st.workTree
+	} else {
+		cmd = exec.Command(c.GitBinary, args...)
+		cmd.Dir = c.applyDir()
+	}
+
+	cmd.Stdin = bytes.NewReader(patch)
+	return cmd
 }

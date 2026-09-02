@@ -716,3 +716,62 @@ func originRef(t *testing.T, origin string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+func TestApplyPatch(t *testing.T) {
+	t.Run("applies to the working copy", func(t *testing.T) {
+		eachLayout(t, "clone", func(t *testing.T, f fixture) {
+			patch := []byte("diff --git a/base.txt b/base.txt\n" +
+				"--- a/base.txt\n" +
+				"+++ b/base.txt\n" +
+				"@@ -1 +1,2 @@\n" +
+				" hello\n" +
+				"+applied\n")
+
+			out, err := f.client.ApplyPatch(patch).CombinedOutput()
+			require.NoError(t, err, "git apply failed: %s", out)
+
+			contents, err := os.ReadFile(filepath.Join(f.root, "base.txt"))
+			require.NoError(t, err)
+			require.Equal(t, "hello\napplied\n", string(contents))
+
+			head, err := f.client.GetHeadCommit()
+			require.NoError(t, err)
+			require.True(t, f.client.HasCommit(head), "jj snapshots the applied patch into @")
+		})
+	})
+
+	t.Run("honors .gitattributes", func(t *testing.T) {
+		eachLayout(t, "clone", func(t *testing.T, f fixture) {
+			require.NoError(t, os.WriteFile(filepath.Join(f.root, ".gitattributes"), []byte("*.txt text eol=crlf\n"), 0o644))
+
+			patch := []byte("diff --git a/base.txt b/base.txt\n" +
+				"--- a/base.txt\n" +
+				"+++ b/base.txt\n" +
+				"@@ -1 +1 @@\n" +
+				"-hello\n" +
+				"+converted\n")
+
+			out, err := f.client.ApplyPatch(patch).CombinedOutput()
+			require.NoError(t, err, "git apply failed: %s", out)
+
+			body, err := os.ReadFile(filepath.Join(f.root, "base.txt"))
+			require.NoError(t, err)
+			require.Equal(t, "converted\r\n", string(body))
+		})
+	})
+
+	t.Run("writes .rej files for hunks that do not apply", func(t *testing.T) {
+		eachLayout(t, "clone", func(t *testing.T, f fixture) {
+			patch := []byte("diff --git a/base.txt b/base.txt\n" +
+				"--- a/base.txt\n" +
+				"+++ b/base.txt\n" +
+				"@@ -1 +1,2 @@\n" +
+				" nonmatching\n" +
+				"+applied\n")
+
+			_, err := f.client.ApplyPatchReject(patch).CombinedOutput()
+			require.Error(t, err)
+			require.FileExists(t, filepath.Join(f.root, "base.txt.rej"))
+		})
+	})
+}
