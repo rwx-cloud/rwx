@@ -163,3 +163,24 @@ func TestMissingDependency(t *testing.T) {
 	require.Equal(t, "jj", (&jj.Client{Binary: "jj-not-installed", GitBinary: "git"}).MissingDependency())
 	require.Equal(t, "git", (&jj.Client{Binary: "jj", GitBinary: "git-not-installed"}).MissingDependency())
 }
+
+func TestGetHead(t *testing.T) {
+	eachLayout(t, "clone", func(t *testing.T, f fixture) {
+		head, err := f.client.GetHeadCommit()
+		require.NoError(t, err)
+		require.Len(t, head, 40)
+	})
+}
+
+func TestGetHeadCommitTracksWorkingCopy(t *testing.T) {
+	eachLayout(t, "clone", func(t *testing.T, f fixture) {
+		before, err := f.client.GetHeadCommit()
+		require.NoError(t, err)
+
+		require.NoError(t, os.WriteFile(filepath.Join(f.root, "base.txt"), []byte("hello\nchanged\n"), 0o644))
+
+		after, err := f.client.GetHeadCommit()
+		require.NoError(t, err)
+		require.NotEqual(t, before, after, "jj snapshots the working copy into @")
+	})
+}

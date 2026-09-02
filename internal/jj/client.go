@@ -2,6 +2,7 @@ package jj
 
 import (
 	"bytes"
+	"fmt"
 	"os/exec"
 	"strings"
 )
@@ -13,7 +14,8 @@ type Client struct {
 }
 
 const (
-	workingCopy = "@"
+	workingCopy      = "@"
+	commitIDTemplate = `commit_id ++ "\n"`
 )
 
 func (c *Client) exec(globals, args []string) (string, string, error) {
@@ -29,8 +31,16 @@ func (c *Client) exec(globals, args []string) (string, string, error) {
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
 
+func (c *Client) run(args ...string) (string, string, error) {
+	return c.exec(nil, args)
+}
+
 func (c *Client) runStale(args ...string) (string, string, error) {
 	return c.exec([]string{"--ignore-working-copy"}, args)
+}
+
+func (c *Client) resolve(revset, template string) (string, string, error) {
+	return c.run("log", "-r", revset, "--no-graph", "-T", template)
 }
 
 func firstLine(s string) string {
@@ -63,4 +73,22 @@ func (c *Client) GetTopLevel() string {
 		return ""
 	}
 	return firstLine(out)
+}
+
+func (c *Client) GetHeadCommit() (string, error) {
+	out, stderr, err := c.resolve(workingCopy, commitIDTemplate)
+	if err != nil {
+		msg := stderr
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("unable to resolve HEAD: %s", msg)
+	}
+
+	head := firstLine(out)
+	if head == "" {
+		return "", fmt.Errorf("unable to resolve HEAD")
+	}
+
+	return head, nil
 }
