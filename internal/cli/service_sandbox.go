@@ -1090,10 +1090,10 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 	}
 	branch := GetCurrentBranch(s.VCSClient)
 
-	var localHeadForSync string
+	// Fail before a sandbox is selected or created when there is nothing to
+	// push. The head itself is resolved again at sync time.
 	if !cfg.SkipSync {
-		localHeadForSync, err = s.VCSClient.GetHeadCommit()
-		if err != nil {
+		if _, err := s.VCSClient.GetHeadCommit(); err != nil {
 			return nil, errors.Wrap(err, "sandbox push requires a repository with a resolvable working copy")
 		}
 	}
@@ -1441,7 +1441,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 
 	// Sync local changes to sandbox.
 	syncPushStart := time.Now()
-	patchBytes, err := s.syncLocalChangesToSandbox(cfg.Json, isNewSandbox, localHeadForSync, connInfo)
+	patchBytes, err := s.syncLocalChangesToSandbox(cfg.Json, isNewSandbox, connInfo)
 	result.syncPushMs = time.Since(syncPushStart).Milliseconds()
 	result.syncPushPatchBytes = patchBytes
 	if err != nil {
@@ -2069,7 +2069,14 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 	return files, patchBytes, nil
 }
 
-func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
+func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, connInfo *api.SandboxConnectionInfo) (int, error) {
+	// Booting a sandbox or waiting on its lock can take minutes, and under jj
+	// every edit in that window rewrites @, so resolve the head now rather than
+	// pinning the sandbox to a working copy the user has moved past.
+	localHead, err := s.VCSClient.GetHeadCommit()
+	if err != nil {
+		return 0, errors.Wrap(err, "sandbox push requires a repository with a resolvable working copy")
+	}
 	if localHead == "" {
 		return 0, fmt.Errorf("sandbox push requires a repository with a resolvable working copy")
 	}
