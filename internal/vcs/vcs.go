@@ -66,10 +66,10 @@ const (
 	jjBinary  = "jj"
 )
 
-// New picks the backend for dir. RWX_VCS forces a backend outright; otherwise
-// the innermost repository containing dir wins, so a jj repo nested inside an
-// unrelated git checkout is not mistaken for part of it. A colocated jj repo
-// has both roots at the same path, and jj takes that tie.
+// New picks the backend for dir. RWX_VCS forces one; otherwise the innermost
+// repository wins, with jj taking the tie in a colocated repo. Detection reads
+// the filesystem rather than spawning either tool, since most commands never
+// touch version control.
 func New(dir string) Client {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("RWX_VCS"))) {
 	case "git":
@@ -78,24 +78,42 @@ func New(dir string) Client {
 		return newJJ(dir)
 	}
 
-	gitClient := newGit(dir)
 	if !jjAvailable() {
-		return gitClient
+		return newGit(dir)
 	}
 
-	jjClient := newJJ(dir)
-	jjRoot := jjClient.GetTopLevel()
+	jjRoot := nearestRoot(dir, ".jj")
 	if jjRoot == "" {
-		return gitClient
+		return newGit(dir)
 	}
 
-	// A git repository nested inside the jj workspace is its own repository.
-	gitRoot := gitClient.GetTopLevel()
+	gitRoot := nearestRoot(dir, ".git")
 	if gitRoot != "" && isProperSubpath(jjRoot, gitRoot) {
-		return gitClient
+		return newGit(dir)
 	}
 
-	return jjClient
+	return newJJ(dir)
+}
+
+// nearestRoot walks up from dir to the closest directory holding marker, or ""
+// when none does. .git may be a file in a linked work tree, so any entry counts.
+func nearestRoot(dir, marker string) string {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+
+	for {
+		if _, err := os.Lstat(filepath.Join(dir, marker)); err == nil {
+			return dir
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 // isProperSubpath reports whether child sits strictly below parent.
