@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
+
+	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 )
 
 type Client struct {
@@ -16,6 +19,11 @@ type Client struct {
 const (
 	workingCopy      = "@"
 	commitIDTemplate = `commit_id ++ "\n"`
+	// nearestBookmarks names the closest bookmarked commits at or below @. jj does
+	// not advance bookmarks, so @ usually sits one or more commits above the
+	// bookmark it belongs to.
+	nearestBookmarks      = "heads(::@ & bookmarks())"
+	bookmarkNamesTemplate = `local_bookmarks.map(|b| b.name()).join("\n") ++ "\n"`
 )
 
 func (c *Client) exec(globals, args []string) (string, string, error) {
@@ -56,11 +64,25 @@ func firstLine(s string) string {
 	return ""
 }
 
+func nonEmptyLines(s string) []string {
+	var lines []string
+	for _, line := range strings.Split(s, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	return lines
+}
+
 func toRevset(ref string) string {
 	if ref == "HEAD" {
 		return workingCopy
 	}
 	return ref
+}
+
+func quoteRevsetString(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
 // The jj backend reaches the object store through git, so both are required.
@@ -84,6 +106,36 @@ func (c *Client) GetTopLevel() string {
 		return ""
 	}
 	return firstLine(out)
+}
+
+// GetBranch reports the nearest bookmark at or below @, since `jj commit` leaves
+// the bookmark behind as @ moves above it. When @ merges several bookmarked
+// lines, one that exists on the configured remote wins, then the first by name.
+func (c *Client) GetBranch() string {
+	out, _, err := c.resolveStale(nearestBookmarks, bookmarkNamesTemplate)
+	if err != nil {
+		return ""
+	}
+
+	names := nonEmptyLines(out)
+	if len(names) <= 1 {
+		return firstLine(out)
+	}
+
+	sort.Strings(names)
+	remote := vcstypes.ConfiguredRemote()
+	for _, name := range names {
+		if c.bookmarkExistsOnRemote(name, remote) {
+			return name
+		}
+	}
+	return names[0]
+}
+
+func (c *Client) bookmarkExistsOnRemote(name, remote string) bool {
+	revset := fmt.Sprintf("remote_bookmarks(exact:%s, remote=exact:%s)", quoteRevsetString(name), quoteRevsetString(remote))
+	out, _, err := c.resolveStale(revset, commitIDTemplate)
+	return err == nil && firstLine(out) != ""
 }
 
 func (c *Client) GetHeadCommit() (string, error) {

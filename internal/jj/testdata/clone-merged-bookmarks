@@ -1,0 +1,31 @@
+#!/bin/bash
+set -euo pipefail
+
+git init -q -b main origin
+cd origin
+printf 'hello\n' > base.txt
+git add -A
+git commit -qm "base commit"
+
+git checkout -qb topic
+printf 'topic\n' > topic.txt
+git add -A
+git commit -qm "topic commit"
+git checkout -q main
+
+# The base commit patches are expected to be based on.
+git rev-parse HEAD
+cd ..
+
+jj git clone $COLOCATE origin repo
+cd repo
+
+# Two bookmarked lines above main, neither an ancestor of the other: `topic`
+# exists on the remote, `aaa-local` does not but sorts first.
+jj bookmark track topic@origin
+jj new main -m side
+printf 'side\n' > side.txt
+jj bookmark create aaa-local -r @
+
+# @ merges both, so both bookmarks are equally near.
+jj new aaa-local topic -m merge

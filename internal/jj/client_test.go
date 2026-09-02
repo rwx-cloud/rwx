@@ -154,6 +154,7 @@ func TestGetTopLevel(t *testing.T) {
 		client := newClient(t.TempDir())
 		require.False(t, client.IsInsideWorkTree())
 		require.Empty(t, client.GetTopLevel())
+		require.Empty(t, client.GetBranch())
 	})
 }
 
@@ -162,6 +163,45 @@ func TestMissingDependency(t *testing.T) {
 
 	require.Equal(t, "jj", (&jj.Client{Binary: "jj-not-installed", GitBinary: "git"}).MissingDependency())
 	require.Equal(t, "git", (&jj.Client{Binary: "jj", GitBinary: "git-not-installed"}).MissingDependency())
+}
+
+func TestGetBranch(t *testing.T) {
+	t.Run("returns the bookmark on the working copy", func(t *testing.T) {
+		eachLayout(t, "clone-bookmark-on-working-copy", func(t *testing.T, f fixture) {
+			require.Equal(t, "feature", f.client.GetBranch())
+		})
+	})
+
+	// `main` stays on the base commit as @ moves ahead of it.
+	t.Run("returns the nearest bookmark below the working copy", func(t *testing.T) {
+		eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
+			require.Equal(t, "main", f.client.GetBranch())
+		})
+	})
+
+	// `feature` sits on the described change, closer to @ than `main`.
+	t.Run("prefers the closest bookmark", func(t *testing.T) {
+		eachLayout(t, "clone-bookmark-on-ancestor", func(t *testing.T, f fixture) {
+			require.Equal(t, "feature", f.client.GetBranch())
+		})
+	})
+
+	// @ merges two bookmarked lines, neither closer than the other. `aaa-local`
+	// sorts first but only `topic` exists on the remote.
+	t.Run("prefers a bookmark that exists on the remote when the nearest are tied", func(t *testing.T) {
+		eachLayout(t, "clone-merged-bookmarks", func(t *testing.T, f fixture) {
+			require.Equal(t, "topic", f.client.GetBranch())
+
+			t.Setenv("RWX_GIT_REMOTE", "nonexistent")
+			require.Equal(t, "aaa-local", f.client.GetBranch(), "falls back to name order without a remote match")
+		})
+	})
+
+	t.Run("is empty when the repository has no bookmarks", func(t *testing.T) {
+		eachLayout(t, "init-local-commit", func(t *testing.T, f fixture) {
+			require.Empty(t, f.client.GetBranch())
+		})
+	})
 }
 
 func TestGetHead(t *testing.T) {
