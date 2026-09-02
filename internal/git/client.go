@@ -3,9 +3,7 @@ package git
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
@@ -115,7 +113,7 @@ func (c *Client) GetCommit() (string, error) {
 		if c.GetBranch() == "" {
 			return c.GetHeadCommit()
 		}
-		return "", fmt.Errorf("no git remote named '%s' is configured (set RWX_GIT_REMOTE to use a different remote)", remote)
+		return "", vcstypes.MissingRemoteError(remote)
 	}
 
 	// Find commits on HEAD that aren't on any remote ref, with boundary markers.
@@ -148,7 +146,7 @@ func (c *Client) GetCommit() (string, error) {
 		// the caller can still attempt the operation (sync will patch on top).
 		return c.GetHeadCommit()
 	}
-	return "", fmt.Errorf("current branch has no commits in common with the '%s' remote (set RWX_GIT_REMOTE to use a different remote)", remote)
+	return "", vcstypes.NoCommonAncestorError("current branch", remote)
 }
 
 func (c *Client) GetOriginUrl() string {
@@ -253,32 +251,8 @@ func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (vcstypes.
 	if patchErr != nil {
 		return vcstypes.PatchFile{}, patchErr
 	}
-	if !data.OK {
-		return vcstypes.PatchFile{}, fmt.Errorf("unable to generate patch data")
-	}
 
-	if data.LFS.Count > 0 {
-		return vcstypes.PatchFile{LFSChangedFiles: data.LFS}, nil
-	}
-
-	if len(data.Patch) == 0 {
-		return vcstypes.PatchFile{UntrackedFiles: data.Untracked}, nil
-	}
-
-	outputPath := filepath.Join(destDir, data.SHA)
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-		return vcstypes.PatchFile{}, fmt.Errorf("unable to create patch directory: %w", err)
-	}
-
-	if err := os.WriteFile(outputPath, data.Patch, 0644); err != nil {
-		return vcstypes.PatchFile{}, fmt.Errorf("unable to write patch file: %w", err)
-	}
-
-	return vcstypes.PatchFile{
-		Written:        true,
-		Path:           outputPath,
-		UntrackedFiles: data.Untracked,
-	}, nil
+	return data.WriteFile(destDir)
 }
 
 // AddUntrackedFilesForPatch temporarily adds untracked files with intent-to-add
@@ -331,19 +305,12 @@ func (c *Client) GeneratePatch(pathspec []string) ([]byte, *vcstypes.LFSChangedF
 	defer cleanup()
 
 	data, patchErr := c.generatePatchData(pathspec)
-	if patchErr != nil || !data.OK {
+	if patchErr != nil {
 		return nil, nil, nil
 	}
 
-	if data.LFS.Count > 0 {
-		return nil, &data.LFS, nil
-	}
-
-	if len(data.Patch) == 0 {
-		return nil, nil, nil
-	}
-
-	return data.Patch, nil, nil
+	patch, lfs := data.Bytes()
+	return patch, lfs, nil
 }
 
 func (c *Client) GenerateDirtyPatches() (vcstypes.DirtyPatches, error) {
@@ -485,27 +452,13 @@ func (c *Client) lfsFilesForPaths(files []string) (vcstypes.LFSChangedFilesMetad
 }
 
 func (c *Client) PushRef(opts vcstypes.PushRefOptions) error {
-	if opts.Remote == "" {
-		return fmt.Errorf("no remote provided")
-	}
-	if opts.Refspec == "" {
-		return fmt.Errorf("no refspec provided")
+	if err := opts.Validate(); err != nil {
+		return err
 	}
 
 	cmd := exec.Command(c.Binary, "push", opts.Remote, opts.Refspec)
 	cmd.Dir = c.Dir
-	if len(opts.Env) > 0 {
-		cmd.Env = append(os.Environ(), opts.Env...)
-	}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		output := strings.TrimSpace(string(out))
-		if output != "" {
-			return fmt.Errorf("git push failed: %s", output)
-		}
-		return fmt.Errorf("git push failed: %w", err)
-	}
-
-	return nil
+	return vcstypes.RunPush(cmd, opts.Env)
 }
 
 // IsAncestor returns true if candidateSHA is an ancestor of (or equal to) headRef.

@@ -264,7 +264,7 @@ func (c *Client) GetCommit() (string, error) {
 		if c.GetBranch() == "" {
 			return c.GetHeadCommit()
 		}
-		return "", fmt.Errorf("no git remote named '%s' is configured (set RWX_GIT_REMOTE to use a different remote)", remote)
+		return "", vcstypes.MissingRemoteError(remote)
 	}
 
 	// root() is an ancestor of everything, so without excluding it unrelated
@@ -281,10 +281,11 @@ func (c *Client) GetCommit() (string, error) {
 
 	base := firstLine(out)
 	if base == "" {
-		if c.GetBranch() == "" {
+		branch := c.GetBranch()
+		if branch == "" {
 			return c.GetHeadCommit()
 		}
-		return "", fmt.Errorf("bookmark '%s' has no commits in common with the '%s' remote (set RWX_GIT_REMOTE to use a different remote)", c.GetBranch(), remote)
+		return "", vcstypes.NoCommonAncestorError(fmt.Sprintf("bookmark '%s'", branch), remote)
 	}
 
 	return base, nil
@@ -493,49 +494,18 @@ func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (vcstypes.
 	if patchErr != nil {
 		return vcstypes.PatchFile{}, patchErr
 	}
-	if !data.OK {
-		return vcstypes.PatchFile{}, fmt.Errorf("unable to generate patch data")
-	}
 
-	if data.LFS.Count > 0 {
-		return vcstypes.PatchFile{LFSChangedFiles: data.LFS}, nil
-	}
-
-	if len(data.Patch) == 0 {
-		return vcstypes.PatchFile{UntrackedFiles: data.Untracked}, nil
-	}
-
-	outputPath := filepath.Join(destDir, data.SHA)
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-		return vcstypes.PatchFile{}, fmt.Errorf("unable to create patch directory: %w", err)
-	}
-
-	if err := os.WriteFile(outputPath, data.Patch, 0644); err != nil {
-		return vcstypes.PatchFile{}, fmt.Errorf("unable to write patch file: %w", err)
-	}
-
-	return vcstypes.PatchFile{
-		Written:        true,
-		Path:           outputPath,
-		UntrackedFiles: data.Untracked,
-	}, nil
+	return data.WriteFile(destDir)
 }
 
 func (c *Client) GeneratePatch(pathspec []string) ([]byte, *vcstypes.LFSChangedFilesMetadata, error) {
 	data, patchErr := c.generatePatchData(pathspec)
-	if patchErr != nil || !data.OK {
+	if patchErr != nil {
 		return nil, nil, nil
 	}
 
-	if data.LFS.Count > 0 {
-		return nil, &data.LFS, nil
-	}
-
-	if len(data.Patch) == 0 {
-		return nil, nil, nil
-	}
-
-	return data.Patch, nil, nil
+	patch, lfs := data.Bytes()
+	return patch, lfs, nil
 }
 
 // GenerateDirtyPatches has nothing to report: every edit is snapshotted into @,
@@ -587,11 +557,8 @@ func (c *Client) hasConflict(rev string) bool {
 }
 
 func (c *Client) PushRef(opts vcstypes.PushRefOptions) error {
-	if opts.Remote == "" {
-		return fmt.Errorf("no remote provided")
-	}
-	if opts.Refspec == "" {
-		return fmt.Errorf("no refspec provided")
+	if err := opts.Validate(); err != nil {
+		return err
 	}
 
 	st, err := c.resolveStore()
@@ -604,25 +571,12 @@ func (c *Client) PushRef(opts vcstypes.PushRefOptions) error {
 			return fmt.Errorf("cannot push %s: %s", src, conflictMessage)
 		}
 
-		if err := c.storeCmdIn(st, "cat-file", "-e", src+"^{commit}").Run(); err != nil {
+		if !c.HasCommit(src) {
 			return fmt.Errorf("cannot push %s: the commit is not in the git store backing this jj repository", src)
 		}
 	}
 
-	cmd := c.storeCmdIn(st, "push", opts.Remote, opts.Refspec)
-	if len(opts.Env) > 0 {
-		cmd.Env = append(os.Environ(), opts.Env...)
-	}
-
-	if out, err := cmd.CombinedOutput(); err != nil {
-		output := strings.TrimSpace(string(out))
-		if output != "" {
-			return fmt.Errorf("git push failed: %s", output)
-		}
-		return fmt.Errorf("git push failed: %w", err)
-	}
-
-	return nil
+	return vcstypes.RunPush(c.storeCmdIn(st, "push", opts.Remote, opts.Refspec), opts.Env)
 }
 
 func (c *Client) ApplyPatch(patch []byte) *exec.Cmd {
