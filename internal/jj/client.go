@@ -21,9 +21,17 @@ type Client struct {
 	// Nil discards them.
 	Stderr io.Writer
 
-	// jj repeats the snapshot refusal on every command that snapshots, and one
-	// CLI invocation snapshots several times, so the warning is forwarded once.
+	// jj repeats the refusal on every snapshot, so it is forwarded once.
 	snapshotRefusalReported bool
+
+	// Resolved once per invocation, failures included.
+	rootResolved    bool
+	root            string
+	storeResolved   bool
+	store           store
+	storeErr        error
+	remotesResolved bool
+	remotes         map[string]string
 }
 
 const (
@@ -133,11 +141,13 @@ func (c *Client) IsInsideWorkTree() bool {
 }
 
 func (c *Client) GetTopLevel() string {
-	out, _, err := c.runStale("root")
-	if err != nil {
-		return ""
+	if !c.rootResolved {
+		c.rootResolved = true
+		if out, _, err := c.runStale("root"); err == nil {
+			c.root = firstLine(out)
+		}
 	}
-	return firstLine(out)
+	return c.root
 }
 
 func (c *Client) applyDir() string {
@@ -277,6 +287,11 @@ func (c *Client) GetRemoteUrl(remote string) string {
 }
 
 func (c *Client) remoteUrls() map[string]string {
+	if c.remotesResolved {
+		return c.remotes
+	}
+	c.remotesResolved = true
+
 	out, _, err := c.runStale("git", "remote", "list")
 	if err != nil {
 		return nil
@@ -290,18 +305,25 @@ func (c *Client) remoteUrls() map[string]string {
 		}
 	}
 
+	c.remotes = remotes
 	return remotes
 }
 
-// store locates the git repository backing a jj repo, along with the work tree
-// its commands should run in. Resolving it costs a `jj root` plus a couple of
-// file reads, so callers that inspect many files resolve it once and reuse it.
+// store is the git repository backing a jj repo and the work tree to run git in.
 type store struct {
 	gitDir   string
 	workTree string
 }
 
 func (c *Client) resolveStore() (store, error) {
+	if !c.storeResolved {
+		c.storeResolved = true
+		c.store, c.storeErr = c.locateStore()
+	}
+	return c.store, c.storeErr
+}
+
+func (c *Client) locateStore() (store, error) {
 	root := c.GetTopLevel()
 	if root == "" {
 		return store{}, fmt.Errorf("not inside a jj repository")
