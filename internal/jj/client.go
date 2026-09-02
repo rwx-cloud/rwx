@@ -298,6 +298,139 @@ func (c *Client) storeCmdIn(st store, args ...string) *exec.Cmd {
 	return cmd
 }
 
+func withPathspec(args []string, pathspec []string) []string {
+	if len(pathspec) == 0 {
+		return args
+	}
+	args = append(args, "--")
+	return append(args, pathspec...)
+}
+
+func (c *Client) diffNames(st store, base, head string, pathspec []string, extra ...string) ([]string, *vcstypes.PatchError) {
+	args := append([]string{"diff", "-z", "--name-only"}, extra...)
+	args = append(args, base, head)
+
+	out, err := c.storeCmdIn(st, withPathspec(args, pathspec)...).Output()
+	if err != nil {
+		return nil, vcstypes.NewPatchError("diff_name_only", "git diff --name-only", err, "")
+	}
+
+	return vcstypes.SplitNULPaths(out), nil
+}
+
+func (c *Client) lfsFilesForPaths(st store, files []string) (vcstypes.LFSChangedFilesMetadata, *vcstypes.PatchError) {
+	return vcstypes.LFSFilesForPaths(files, func(args ...string) (*exec.Cmd, error) {
+		// A non-colocated store is bare, so check-attr needs a work tree to find
+		// .gitattributes.
+		return c.storeCmdIn(st, append([]string{"--work-tree", st.workTree}, args...)...), nil
+	})
+}
+
+func (c *Client) generatePatchData(pathspec []string) (vcstypes.PatchResult, *vcstypes.PatchError) {
+	base, err := c.GetCommit()
+	if base == "" || err != nil {
+		return vcstypes.PatchResult{}, nil
+	}
+
+	head, err := c.GetHeadCommit()
+	if err != nil || head == "" {
+		return vcstypes.PatchResult{}, nil
+	}
+
+	st, err := c.resolveStore()
+	if err != nil {
+		return vcstypes.PatchResult{}, vcstypes.NewPatchError("diff_name_only", "git diff --name-only", err, "")
+	}
+
+	files, patchErr := c.diffNames(st, base, head, pathspec)
+	if patchErr != nil {
+		return vcstypes.PatchResult{}, patchErr
+	}
+
+	lfsChanged, patchErr := c.lfsFilesForPaths(st, files)
+	if patchErr != nil {
+		return vcstypes.PatchResult{}, patchErr
+	}
+
+	if lfsChanged.Count > 0 {
+		return vcstypes.PatchResult{SHA: base, LFS: lfsChanged, OK: true}, nil
+	}
+
+	// jj tracks the whole working copy, so there is no untracked set to report.
+	// The files added between base and @ are the closest equivalent: they are
+	// the paths the patch creates, which is what callers use the field for.
+	added, patchErr := c.diffNames(st, base, head, pathspec, "--diff-filter=A")
+	if patchErr != nil {
+		return vcstypes.PatchResult{}, patchErr
+	}
+
+	patchArgs := []string{"diff", base, head, "-p", "--binary"}
+	patch, err := c.storeCmdIn(st, withPathspec(patchArgs, pathspec)...).Output()
+	if err != nil {
+		return vcstypes.PatchResult{}, vcstypes.NewPatchError("diff_patch", "git diff -p --binary", err, "")
+	}
+
+	return vcstypes.PatchResult{
+		Patch: patch,
+		SHA:   base,
+		Untracked: vcstypes.UntrackedFilesMetadata{
+			Files: added,
+			Count: len(added),
+		},
+		OK: true,
+	}, nil
+}
+
+func (c *Client) GeneratePatchFile(destDir string, pathspec []string) (vcstypes.PatchFile, error) {
+	data, patchErr := c.generatePatchData(pathspec)
+	if patchErr != nil {
+		return vcstypes.PatchFile{}, patchErr
+	}
+	if !data.OK {
+		return vcstypes.PatchFile{}, fmt.Errorf("unable to generate patch data")
+	}
+
+	if data.LFS.Count > 0 {
+		return vcstypes.PatchFile{LFSChangedFiles: data.LFS}, nil
+	}
+
+	if len(data.Patch) == 0 {
+		return vcstypes.PatchFile{UntrackedFiles: data.Untracked}, nil
+	}
+
+	outputPath := filepath.Join(destDir, data.SHA)
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		return vcstypes.PatchFile{}, fmt.Errorf("unable to create patch directory: %w", err)
+	}
+
+	if err := os.WriteFile(outputPath, data.Patch, 0644); err != nil {
+		return vcstypes.PatchFile{}, fmt.Errorf("unable to write patch file: %w", err)
+	}
+
+	return vcstypes.PatchFile{
+		Written:        true,
+		Path:           outputPath,
+		UntrackedFiles: data.Untracked,
+	}, nil
+}
+
+func (c *Client) GeneratePatch(pathspec []string) ([]byte, *vcstypes.LFSChangedFilesMetadata, error) {
+	data, patchErr := c.generatePatchData(pathspec)
+	if patchErr != nil || !data.OK {
+		return nil, nil, nil
+	}
+
+	if data.LFS.Count > 0 {
+		return nil, &data.LFS, nil
+	}
+
+	if len(data.Patch) == 0 {
+		return nil, nil, nil
+	}
+
+	return data.Patch, nil, nil
+}
+
 func (c *Client) HasCommit(sha string) bool {
 	if sha == "" {
 		return false

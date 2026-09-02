@@ -421,6 +421,188 @@ func TestGetCommitDoesNotSnapshotTheWorkingCopy(t *testing.T) {
 	})
 }
 
+func TestGeneratePatch(t *testing.T) {
+	t.Run("covers local commits and working copy changes", func(t *testing.T) {
+		eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
+			patch, lfs, err := f.client.GeneratePatch(nil)
+			require.NoError(t, err)
+			require.Nil(t, lfs)
+
+			text := string(patch)
+			require.Contains(t, text, "+committed")
+			require.Contains(t, text, "+working copy")
+			require.Contains(t, text, "b/added.txt")
+			require.Contains(t, text, "b/nested/more/x.txt")
+			require.Contains(t, text, "a/sub.txt")
+			require.Contains(t, text, "deleted file mode")
+		})
+	})
+
+	t.Run("includes local commits with a clean working copy", func(t *testing.T) {
+		eachLayout(t, "clone-local-commit", func(t *testing.T, f fixture) {
+			patch, _, err := f.client.GeneratePatch(nil)
+			require.NoError(t, err)
+			require.Contains(t, string(patch), "+committed")
+		})
+	})
+
+	t.Run("includes files that only exist in the working copy", func(t *testing.T) {
+		eachLayout(t, "clone-new-file", func(t *testing.T, f fixture) {
+			patch, _, err := f.client.GeneratePatch(nil)
+			require.NoError(t, err)
+			require.Contains(t, string(patch), "b/added.txt")
+			require.Contains(t, string(patch), "+brand new")
+		})
+	})
+
+	t.Run("is empty when the working copy matches the remote", func(t *testing.T) {
+		eachLayout(t, "clone", func(t *testing.T, f fixture) {
+			patch, lfs, err := f.client.GeneratePatch(nil)
+			require.NoError(t, err)
+			require.Nil(t, lfs)
+			require.Empty(t, patch)
+		})
+	})
+
+	t.Run("omits ignored files", func(t *testing.T) {
+		eachLayout(t, "clone-ignored-file", func(t *testing.T, f fixture) {
+			patch, _, err := f.client.GeneratePatch(nil)
+			require.NoError(t, err)
+			require.Contains(t, string(patch), "+tracked change")
+			require.NotContains(t, string(patch), "b/ignored.txt")
+			require.NotContains(t, string(patch), "do not send")
+		})
+	})
+
+	t.Run("honors pathspec exclusions", func(t *testing.T) {
+		eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
+			patch, _, err := f.client.GeneratePatch([]string{":/", ":(top,exclude)added.txt"})
+			require.NoError(t, err)
+			require.NotContains(t, string(patch), "b/added.txt")
+			require.Contains(t, string(patch), "b/base.txt")
+		})
+	})
+
+	t.Run("keeps paths relative to the repository root", func(t *testing.T) {
+		eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
+			patch, _, err := newClient(filepath.Join(f.root, "nested")).GeneratePatch(nil)
+			require.NoError(t, err)
+			require.Contains(t, string(patch), "b/base.txt")
+			require.Contains(t, string(patch), "b/nested/more/x.txt")
+		})
+	})
+
+	t.Run("reports LFS-tracked changes instead of a patch", func(t *testing.T) {
+		eachLayout(t, "clone-lfs-file", func(t *testing.T, f fixture) {
+			patch, lfs, err := f.client.GeneratePatch(nil)
+			require.NoError(t, err)
+			require.Nil(t, patch)
+			require.NotNil(t, lfs)
+			require.Equal(t, 1, lfs.Count)
+			require.Equal(t, []string{"seed.bin"}, lfs.Files)
+		})
+	})
+}
+
+func TestGeneratePatchRoundTripsThroughGitApply(t *testing.T) {
+	eachLayout(t, "clone-local-work-binary", func(t *testing.T, f fixture) {
+		readWorkingCopy := func(rel string) []byte {
+			contents, err := os.ReadFile(filepath.Join(f.root, rel))
+			require.NoError(t, err)
+			return contents
+		}
+		wantModifiedBinary := readWorkingCopy("seed.bin")
+		wantNewBinary := readWorkingCopy("fresh.bin")
+
+		patch, lfs, err := f.client.GeneratePatch(nil)
+		require.NoError(t, err)
+		require.Nil(t, lfs)
+		require.Contains(t, string(patch), "GIT binary patch", "binary files need literal patch data to survive")
+
+		verify := filepath.Join(f.tempDir, "verify")
+		out, err := exec.Command("git", "clone", "-q", f.origin, verify).CombinedOutput()
+		require.NoError(t, err, "git clone failed: %s", out)
+
+		checkout := exec.Command("git", "checkout", "-q", f.baseSHA)
+		checkout.Dir = verify
+		out, err = checkout.CombinedOutput()
+		require.NoError(t, err, "git checkout failed: %s", out)
+
+		apply := exec.Command("git", "apply", "--allow-empty", "-")
+		apply.Dir = verify
+		apply.Stdin = bytes.NewReader(patch)
+		out, err = apply.CombinedOutput()
+		require.NoError(t, err, "git apply failed: %s", out)
+
+		requireFile := func(rel string, want []byte) {
+			got, err := os.ReadFile(filepath.Join(verify, rel))
+			require.NoError(t, err)
+			require.Equal(t, want, got, "mismatch for %s", rel)
+		}
+		requireFile("base.txt", []byte("hello\ncommitted\nworking copy\n"))
+		requireFile("added.txt", []byte("added\n"))
+		requireFile("nested/more/x.txt", []byte("deeper\n"))
+		requireFile("seed.bin", wantModifiedBinary)
+		requireFile("fresh.bin", wantNewBinary)
+		require.NoFileExists(t, filepath.Join(verify, "sub.txt"))
+	})
+}
+
+func TestGeneratePatchFile(t *testing.T) {
+	t.Run("writes a patch named for the base commit", func(t *testing.T) {
+		eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
+			destDir := filepath.Join(f.tempDir, "patches")
+			patchFile, err := f.client.GeneratePatchFile(destDir, nil)
+			require.NoError(t, err)
+			require.True(t, patchFile.Written)
+			require.Equal(t, filepath.Join(destDir, f.baseSHA), patchFile.Path)
+
+			contents, err := os.ReadFile(patchFile.Path)
+			require.NoError(t, err)
+			require.Contains(t, string(contents), "+working copy")
+		})
+	})
+
+	t.Run("writes nothing when there are no changes", func(t *testing.T) {
+		eachLayout(t, "clone", func(t *testing.T, f fixture) {
+			patchFile, err := f.client.GeneratePatchFile(filepath.Join(f.tempDir, "patches"), nil)
+			require.NoError(t, err)
+			require.False(t, patchFile.Written)
+			require.Empty(t, patchFile.Path)
+		})
+	})
+
+	t.Run("reports LFS-tracked changes", func(t *testing.T) {
+		eachLayout(t, "clone-lfs-file", func(t *testing.T, f fixture) {
+			patchFile, err := f.client.GeneratePatchFile(filepath.Join(f.tempDir, "patches"), nil)
+			require.NoError(t, err)
+			require.False(t, patchFile.Written)
+			require.Equal(t, 1, patchFile.LFSChangedFiles.Count)
+		})
+	})
+}
+
+// A secondary workspace's .jj/repo is a file pointing at the primary one.
+func TestSecondaryWorkspace(t *testing.T) {
+	eachLayout(t, "clone-secondary-workspace", func(t *testing.T, f fixture) {
+		workspace := filepath.Join(f.tempDir, "workspace")
+		client := newClient(workspace)
+
+		requireSamePath(t, workspace, client.GetTopLevel())
+
+		require.NoError(t, os.WriteFile(filepath.Join(workspace, "added.txt"), []byte("from the workspace\n"), 0o644))
+
+		sha, err := client.GetCommit()
+		require.NoError(t, err)
+		require.Equal(t, f.baseSHA, sha)
+
+		patch, _, err := client.GeneratePatch(nil)
+		require.NoError(t, err)
+		require.Contains(t, string(patch), "b/added.txt")
+		require.Contains(t, string(patch), "+from the workspace")
+	})
+}
+
 func TestHasCommit(t *testing.T) {
 	eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
 		head, err := f.client.GetHeadCommit()
