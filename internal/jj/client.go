@@ -43,6 +43,10 @@ func (c *Client) resolve(revset, template string) (string, string, error) {
 	return c.run("log", "-r", revset, "--no-graph", "-T", template)
 }
 
+func (c *Client) resolveStale(revset, template string) (string, string, error) {
+	return c.runStale("log", "-r", revset, "--no-graph", "-T", template)
+}
+
 func firstLine(s string) string {
 	for _, line := range strings.Split(s, "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
@@ -50,6 +54,13 @@ func firstLine(s string) string {
 		}
 	}
 	return ""
+}
+
+func toRevset(ref string) string {
+	if ref == "HEAD" {
+		return workingCopy
+	}
+	return ref
 }
 
 // The jj backend reaches the object store through git, so both are required.
@@ -91,4 +102,32 @@ func (c *Client) GetHeadCommit() (string, error) {
 	}
 
 	return head, nil
+}
+
+// GetShortHead reports a change id, not a commit id: it keys sandbox sessions,
+// and jj rewrites @ on every snapshot, so a commit-id key would strand a sandbox
+// on every edit. Change ids survive the rewrite and still resolve as revsets,
+// which is what the sandbox ancestry fallback needs.
+func (c *Client) GetShortHead() string {
+	out, _, err := c.resolve(workingCopy, `change_id.short(7) ++ "\n"`)
+	if err != nil {
+		return ""
+	}
+	return firstLine(out)
+}
+
+// IsAncestor takes revsets, so a GetShortHead change id still matches after @
+// has been rewritten.
+func (c *Client) IsAncestor(candidateSHA, headRef string) bool {
+	if candidateSHA == "" || headRef == "" {
+		return false
+	}
+
+	revset := fmt.Sprintf("(%s) & ::(%s)", toRevset(candidateSHA), toRevset(headRef))
+	out, _, err := c.resolveStale(revset, commitIDTemplate)
+	if err != nil {
+		return false
+	}
+
+	return firstLine(out) != ""
 }

@@ -169,6 +169,10 @@ func TestGetHead(t *testing.T) {
 		head, err := f.client.GetHeadCommit()
 		require.NoError(t, err)
 		require.Len(t, head, 40)
+
+		short := f.client.GetShortHead()
+		require.Len(t, short, 7)
+		require.NotEqual(t, head[:7], short, "GetShortHead reports a change id, not a commit id")
 	})
 }
 
@@ -182,5 +186,43 @@ func TestGetHeadCommitTracksWorkingCopy(t *testing.T) {
 		after, err := f.client.GetHeadCommit()
 		require.NoError(t, err)
 		require.NotEqual(t, before, after, "jj snapshots the working copy into @")
+	})
+}
+
+// GetShortHead keys sandbox sessions, so it has to survive @ being rewritten.
+func TestGetShortHeadSurvivesWorkingCopyEdits(t *testing.T) {
+	eachLayout(t, "clone", func(t *testing.T, f fixture) {
+		beforeCommit, err := f.client.GetHeadCommit()
+		require.NoError(t, err)
+		beforeShort := f.client.GetShortHead()
+		require.NotEmpty(t, beforeShort)
+
+		require.NoError(t, os.WriteFile(filepath.Join(f.root, "base.txt"), []byte("hello\nedited\n"), 0o644))
+
+		afterCommit, err := f.client.GetHeadCommit()
+		require.NoError(t, err)
+		require.NotEqual(t, beforeCommit, afterCommit, "jj rewrites @ on every snapshot")
+		require.Equal(t, beforeShort, f.client.GetShortHead(), "the session key must survive the rewrite")
+
+		// The rewritten commit is not a descendant of the one it replaced, which
+		// is exactly why the commit id cannot key the session...
+		require.False(t, f.client.IsAncestor(beforeCommit, afterCommit))
+		// ...while the change id still resolves to the current working copy, so
+		// the sandbox ancestry fallback keeps matching the existing session.
+		require.True(t, f.client.IsAncestor(beforeShort, "HEAD"))
+	})
+}
+
+func TestIsAncestor(t *testing.T) {
+	eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
+		head, err := f.client.GetHeadCommit()
+		require.NoError(t, err)
+
+		require.True(t, f.client.IsAncestor(f.baseSHA, head))
+		require.True(t, f.client.IsAncestor(f.baseSHA, "HEAD"))
+		require.False(t, f.client.IsAncestor(head, f.baseSHA))
+		require.False(t, f.client.IsAncestor("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", head))
+		require.False(t, f.client.IsAncestor("", head))
+		require.False(t, f.client.IsAncestor(f.baseSHA, ""))
 	})
 }
