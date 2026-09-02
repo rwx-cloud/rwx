@@ -337,6 +337,16 @@ func (c *Client) generatePatchData(pathspec []string) (vcstypes.PatchResult, *vc
 		return vcstypes.PatchResult{}, nil
 	}
 
+	// See conflictMessage: diffing would add the .jjconflict-* trees.
+	if c.hasConflict(head) {
+		return vcstypes.PatchResult{}, &vcstypes.PatchError{
+			Command:  "jj_conflict",
+			Display:  "jj working copy",
+			Stderr:   conflictMessage,
+			ExitCode: -1,
+		}
+	}
+
 	st, err := c.resolveStore()
 	if err != nil {
 		return vcstypes.PatchResult{}, vcstypes.NewPatchError("diff_name_only", "git diff --name-only", err, "")
@@ -458,4 +468,16 @@ func (c *Client) IsAncestor(candidateSHA, headRef string) bool {
 	}
 
 	return firstLine(out) != ""
+}
+
+// jj writes a conflicted commit to the git store as .jjconflict-* trees plus a
+// JJ-CONFLICT-README, not as the user's files, so it must not leave the machine.
+const conflictMessage = "the jj working copy has unresolved conflicts, which git cannot represent; run `jj resolve` first"
+
+func (c *Client) hasConflict(rev string) bool {
+	out, _, err := c.resolveStale(toRevset(rev), `conflict ++ "\n"`)
+	if err != nil {
+		return false
+	}
+	return firstLine(out) == "true"
 }

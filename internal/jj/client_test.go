@@ -502,6 +502,19 @@ func TestGeneratePatch(t *testing.T) {
 			require.Equal(t, []string{"seed.bin"}, lfs.Files)
 		})
 	})
+
+	t.Run("refuses a conflicted working copy", func(t *testing.T) {
+		eachLayout(t, "clone-conflicted-merge", func(t *testing.T, f fixture) {
+			patch, lfs, err := f.client.GeneratePatch(nil)
+			require.NoError(t, err)
+			require.Nil(t, lfs)
+			require.Empty(t, patch, "nothing from the conflicted store may leak into a patch")
+
+			_, err = f.client.GeneratePatchFile(filepath.Join(f.tempDir, "patches"), nil)
+			require.ErrorContains(t, err, "unresolved conflicts")
+			require.ErrorContains(t, err, "jj resolve")
+		})
+	})
 }
 
 func TestGeneratePatchRoundTripsThroughGitApply(t *testing.T) {
