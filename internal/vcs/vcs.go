@@ -31,7 +31,6 @@ type Client interface {
 	// GetBranch returns the branch naming the current position, or "" when
 	// there is none, as on a detached HEAD.
 	GetBranch() string
-	GetHead() string
 	GetHeadCommit() (string, error)
 	// GetShortHead returns a short identifier for the current position that
 	// stays stable while the working copy is edited. It keys sandbox sessions

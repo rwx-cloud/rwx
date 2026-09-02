@@ -58,14 +58,6 @@ func (c *Client) GetBranch() string {
 	return branch
 }
 
-func (c *Client) GetHead() string {
-	head, err := c.GetHeadCommit()
-	if err != nil {
-		return ""
-	}
-	return head
-}
-
 func (c *Client) GetHeadCommit() (string, error) {
 	cmd := exec.Command(c.Binary, "rev-parse", "--verify", "HEAD^{commit}")
 	cmd.Dir = c.Dir
@@ -121,7 +113,7 @@ func (c *Client) GetCommit() (string, error) {
 	// Check if remote exists — for detached HEAD, fall back to raw HEAD
 	if c.GetRemoteUrl(remote) == "" {
 		if c.GetBranch() == "" {
-			return c.GetHead(), nil
+			return c.GetHeadCommit()
 		}
 		return "", fmt.Errorf("no git remote named '%s' is configured (set RWX_GIT_REMOTE to use a different remote)", remote)
 	}
@@ -140,7 +132,7 @@ func (c *Client) GetCommit() (string, error) {
 
 	// Empty output means HEAD is on an origin ref (no divergence) - return HEAD
 	if output == "" {
-		return c.GetHead(), nil
+		return c.GetHeadCommit()
 	}
 
 	// First line starting with "-" is the boundary (closest merge-base)
@@ -154,7 +146,7 @@ func (c *Client) GetCommit() (string, error) {
 	if c.GetBranch() == "" {
 		// Detached HEAD with no remote ancestor — fall back to raw HEAD so
 		// the caller can still attempt the operation (sync will patch on top).
-		return c.GetHead(), nil
+		return c.GetHeadCommit()
 	}
 	return "", fmt.Errorf("current branch has no commits in common with the '%s' remote (set RWX_GIT_REMOTE to use a different remote)", remote)
 }

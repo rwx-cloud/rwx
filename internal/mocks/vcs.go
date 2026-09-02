@@ -37,14 +37,6 @@ func (c *VCS) GetBranch() string {
 	return c.MockGetBranch
 }
 
-func (c *VCS) GetHead() string {
-	head, err := c.GetHeadCommit()
-	if err != nil {
-		return ""
-	}
-	return head
-}
-
 func (c *VCS) GetHeadCommit() (string, error) {
 	return c.MockGetHead, c.MockGetHeadError
 }
