@@ -441,6 +441,17 @@ func (c *Client) GeneratePatch(pathspec []string) ([]byte, *vcstypes.LFSChangedF
 	return data.Patch, nil, nil
 }
 
+// GenerateDirtyPatches has no dirty state to report: every edit is snapshotted
+// into @, so uncommitted work reaches the sandbox inside the pushed commit. The
+// GetHeadCommit call fails closed rather than reporting a false clean tree.
+func (c *Client) GenerateDirtyPatches() (vcstypes.DirtyPatches, error) {
+	if _, err := c.GetHeadCommit(); err != nil {
+		return vcstypes.DirtyPatches{}, err
+	}
+
+	return vcstypes.DirtyPatches{}, nil
+}
+
 func (c *Client) HasCommit(sha string) bool {
 	if sha == "" {
 		return false

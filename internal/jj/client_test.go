@@ -595,6 +595,18 @@ func TestGeneratePatchFile(t *testing.T) {
 	})
 }
 
+func TestGenerateDirtyPatches(t *testing.T) {
+	eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
+		patches, err := f.client.GenerateDirtyPatches()
+		require.NoError(t, err)
+		require.Empty(t, patches.Staged)
+		require.Empty(t, patches.Unstaged)
+		require.Nil(t, patches.Files)
+		require.Nil(t, patches.NewFiles)
+		require.Equal(t, 0, patches.Size())
+	})
+}
+
 // A secondary workspace's .jj/repo is a file pointing at the primary one.
 func TestSecondaryWorkspace(t *testing.T) {
 	eachLayout(t, "clone-secondary-workspace", func(t *testing.T, f fixture) {
