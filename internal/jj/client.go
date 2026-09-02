@@ -3,6 +3,7 @@ package jj
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,13 @@ type Client struct {
 	Binary    string
 	GitBinary string
 	Dir       string
+	// Stderr receives warnings jj reports while still exiting successfully.
+	// Nil discards them.
+	Stderr io.Writer
+
+	// jj repeats the snapshot refusal on every command that snapshots, and one
+	// CLI invocation snapshots several times, so the warning is forwarded once.
+	snapshotRefusalReported bool
 }
 
 const (
@@ -38,7 +46,29 @@ func (c *Client) exec(globals, args []string) (string, string, error) {
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 
-	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
+	trimmedStderr := strings.TrimSpace(stderr.String())
+	c.reportSnapshotRefusals(trimmedStderr)
+
+	return strings.TrimSpace(stdout.String()), trimmedStderr, err
+}
+
+// jj skips files over snapshot.max-new-file-size and still exits 0, so unless
+// this is forwarded the file silently vanishes from every patch.
+const snapshotRefusalPrefix = "Refused to snapshot some files"
+
+func (c *Client) reportSnapshotRefusals(stderr string) {
+	if c.Stderr == nil || c.snapshotRefusalReported || !strings.Contains(stderr, snapshotRefusalPrefix) {
+		return
+	}
+	c.snapshotRefusalReported = true
+
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "Hint:") {
+			break
+		}
+		fmt.Fprintln(c.Stderr, line)
+	}
+	fmt.Fprintln(c.Stderr, "These files are excluded from RWX patches and sandbox syncs. Raise jj's snapshot.max-new-file-size or add them to .gitignore.")
 }
 
 func (c *Client) run(args ...string) (string, string, error) {

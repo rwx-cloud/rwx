@@ -775,3 +775,28 @@ func TestApplyPatch(t *testing.T) {
 		})
 	})
 }
+
+// Files over snapshot.max-new-file-size vanish from every patch, so jj's
+// warning has to reach the user.
+func TestSnapshotRefusalIsReported(t *testing.T) {
+	eachLayout(t, "clone", func(t *testing.T, f fixture) {
+		var warnings bytes.Buffer
+		f.client.Stderr = &warnings
+
+		big := make([]byte, 2*1024*1024)
+		require.NoError(t, os.WriteFile(filepath.Join(f.root, "big.bin"), big, 0o644))
+
+		_, err := f.client.GetHeadCommit()
+		require.NoError(t, err, "the refusal must not fail the command")
+
+		require.Contains(t, warnings.String(), "big.bin")
+		require.Contains(t, warnings.String(), "excluded from RWX patches")
+
+		patch, _, err := f.client.GeneratePatch(nil)
+		require.NoError(t, err)
+		require.NotContains(t, string(patch), "big.bin", "the skipped file really is missing from the patch")
+
+		// jj repeated the refusal on the second snapshot; the user hears it once.
+		require.Equal(t, 1, strings.Count(warnings.String(), "Refused to snapshot"))
+	})
+}
