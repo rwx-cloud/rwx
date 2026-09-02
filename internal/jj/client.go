@@ -217,10 +217,11 @@ func (c *Client) GetHeadCommit() (string, error) {
 	return head, nil
 }
 
-// GetShortHead reports a change id, not a commit id: it keys sandbox sessions,
-// and jj rewrites @ on every snapshot, so a commit-id key would strand a sandbox
+// GetShortHead reports a change id, not a commit id. It keys sandbox sessions,
+// and jj rewrites @ on every snapshot, so a commit id would strand the sandbox
 // on every edit. Change ids survive the rewrite and still resolve as revsets,
-// which is what the sandbox ancestry fallback needs.
+// though only under jj: a git-backed invocation on the same colocated checkout
+// will not find the session.
 func (c *Client) GetShortHead() string {
 	out, _, err := c.resolve(workingCopy, `change_id.short(7) ++ "\n"`)
 	if err != nil {
