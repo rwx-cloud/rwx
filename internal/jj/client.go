@@ -37,11 +37,12 @@ type Client struct {
 const (
 	workingCopy      = "@"
 	commitIDTemplate = `commit_id ++ "\n"`
-	// nearestBookmarks names the closest bookmarked commits at or below @. jj does
-	// not advance bookmarks, so @ usually sits one or more commits above the
-	// bookmark it belongs to.
+	// jj does not advance bookmarks, so @ usually sits above the bookmark it
+	// belongs to.
 	nearestBookmarks      = "heads(::@ & bookmarks())"
 	bookmarkNamesTemplate = `local_bookmarks.map(|b| b.name()).join("\n") ++ "\n"`
+	// One "<remote> <name>" line per remote bookmark; neither side contains a space.
+	remoteBookmarksTemplate = `remote_bookmarks.map(|b| b.remote() ++ " " ++ b.name()).join("\n") ++ "\n"`
 )
 
 func (c *Client) exec(globals, args []string) (string, string, error) {
@@ -172,19 +173,30 @@ func (c *Client) GetBranch() string {
 	}
 
 	sort.Strings(names)
-	remote := vcstypes.ConfiguredRemote()
+	onRemote := c.remoteBookmarkNames(vcstypes.ConfiguredRemote())
 	for _, name := range names {
-		if c.bookmarkExistsOnRemote(name, remote) {
+		if onRemote[name] {
 			return name
 		}
 	}
 	return names[0]
 }
 
-func (c *Client) bookmarkExistsOnRemote(name, remote string) bool {
-	revset := fmt.Sprintf("remote_bookmarks(exact:%s, remote=exact:%s)", quoteRevsetString(name), quoteRevsetString(remote))
-	out, _, err := c.resolveStale(revset, commitIDTemplate)
-	return err == nil && firstLine(out) != ""
+func (c *Client) remoteBookmarkNames(remote string) map[string]bool {
+	revset := fmt.Sprintf("remote_bookmarks(remote=exact:%s)", quoteRevsetString(remote))
+	out, _, err := c.resolveStale(revset, remoteBookmarksTemplate)
+	if err != nil {
+		return nil
+	}
+
+	names := map[string]bool{}
+	for _, line := range nonEmptyLines(out) {
+		// A commit may carry the same bookmark from several remotes.
+		if lineRemote, name, ok := strings.Cut(line, " "); ok && lineRemote == remote {
+			names[name] = true
+		}
+	}
+	return names
 }
 
 func (c *Client) GetHeadCommit() (string, error) {
