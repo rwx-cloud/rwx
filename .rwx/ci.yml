@@ -65,21 +65,9 @@ tasks:
       git lfs install --skip-repo
 
   - key: jj
-    run: |
-      case "$(uname -m)" in
-        x86_64) jj_arch=x86_64 ;;
-        aarch64 | arm64) jj_arch=aarch64 ;;
-        *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
-      esac
-
-      jj_version="${{ tasks.tool-versions.values.jj }}"
-      jj_dir="$(mktemp -d)"
-      curl -sSfL "https://github.com/jj-vcs/jj/releases/download/v${jj_version}/jj-v${jj_version}-${jj_arch}-unknown-linux-musl.tar.gz" \
-        | tar -xz -C "$jj_dir"
-      sudo install -m 0755 "$jj_dir/jj" /usr/local/bin/jj
-      rm -rf "$jj_dir"
-
-      jj --version
+    call: jj/install 1.0.0
+    with:
+      version: ${{ tasks.tool-versions.values.jj }}
 
   - key: lsp-code
     call: git/clone 2.1.0
