@@ -207,6 +207,27 @@ func (c *Client) GetShortHead() string {
 	return firstLine(out)
 }
 
+// GetLastCommit skips an empty @: a clean working copy is an empty commit above
+// the last described change, and no run was made for it. This snapshots, since
+// whether @ is empty depends on the working copy.
+func (c *Client) GetLastCommit() (string, error) {
+	out, stderr, err := c.resolve("latest(::@ ~ empty())", commitIDTemplate)
+	if err != nil {
+		msg := stderr
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("unable to resolve the last commit: %s", msg)
+	}
+
+	last := firstLine(out)
+	if last == "" {
+		return "", fmt.Errorf("unable to resolve the last commit")
+	}
+
+	return last, nil
+}
+
 // GetCommit reads stale: snapshotting rewrites @ but not its ancestors, so the
 // base resolves without mutating the repository. Only the fallbacks that answer
 // with @ itself snapshot.

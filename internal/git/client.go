@@ -87,6 +87,11 @@ func (c *Client) GetHeadCommit() (string, error) {
 	return head, nil
 }
 
+// GetLastCommit is HEAD; git's working copy is not a commit.
+func (c *Client) GetLastCommit() (string, error) {
+	return c.GetHeadCommit()
+}
+
 func (c *Client) GetShortHead() string {
 	cmd := exec.Command(c.Binary, "rev-parse", "--short", "HEAD")
 	cmd.Dir = c.Dir

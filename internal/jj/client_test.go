@@ -295,12 +295,42 @@ func TestGetShortHeadSurvivesWorkingCopyEdits(t *testing.T) {
 		require.NotEqual(t, beforeCommit, afterCommit, "jj rewrites @ on every snapshot")
 		require.Equal(t, beforeShort, f.client.GetShortHead(), "the session key must survive the rewrite")
 
-		// The rewritten commit is not a descendant of the one it replaced, which
-		// is exactly why the commit id cannot key the session...
+		// The rewritten commit is not a descendant of the one it replaced, but the
+		// change id still resolves to it.
 		require.False(t, f.client.IsAncestor(beforeCommit, afterCommit))
-		// ...while the change id still resolves to the current working copy, so
-		// the sandbox ancestry fallback keeps matching the existing session.
 		require.True(t, f.client.IsAncestor(beforeShort, "HEAD"))
+	})
+}
+
+// A fresh clone has an empty @ above the pushed commit, which must not answer.
+func TestGetLastCommit(t *testing.T) {
+	t.Run("skips an empty working copy", func(t *testing.T) {
+		eachLayout(t, "clone", func(t *testing.T, f fixture) {
+			last, err := f.client.GetLastCommit()
+			require.NoError(t, err)
+			require.Equal(t, f.baseSHA, last)
+			require.NotEqual(t, headCommit(t, f.client), last)
+		})
+	})
+
+	t.Run("is the working copy once it has changes", func(t *testing.T) {
+		eachLayout(t, "clone", func(t *testing.T, f fixture) {
+			require.NoError(t, os.WriteFile(filepath.Join(f.root, "base.txt"), []byte("hello\nedited\n"), 0o644))
+
+			last, err := f.client.GetLastCommit()
+			require.NoError(t, err)
+			require.Equal(t, headCommit(t, f.client), last)
+			require.NotEqual(t, f.baseSHA, last)
+		})
+	})
+
+	t.Run("skips an empty working copy above local work", func(t *testing.T) {
+		eachLayout(t, "clone-local-commit", func(t *testing.T, f fixture) {
+			last, err := f.client.GetLastCommit()
+			require.NoError(t, err)
+			require.NotEqual(t, f.baseSHA, last, "the local commit is the last committed state")
+			require.NotEqual(t, headCommit(t, f.client), last)
+		})
 	})
 }
 

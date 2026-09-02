@@ -38,6 +38,10 @@ type Client interface {
 	// when GetBranch is empty.
 	GetShortHead() string
 	GetCommit() (string, error)
+	// GetLastCommit returns the commit a run made from this position would be
+	// for. It differs from GetHeadCommit only when the working copy is itself a
+	// commit, as under jj, where an empty @ is skipped.
+	GetLastCommit() (string, error)
 	GetOriginUrl() string
 	GeneratePatchFile(destDir string, pathspec []string) (PatchFile, error)
 	GeneratePatch(pathspec []string) ([]byte, *LFSChangedFilesMetadata, error)
