@@ -23,7 +23,7 @@ func (c CreateVaultConfig) Validate() error {
 
 	for _, rp := range c.RepositoryPermissions {
 		if !strings.Contains(rp, ":") {
-			return errors.New(fmt.Sprintf("invalid repository permission %q: must be in the format REPO_SLUG:BRANCH_PATTERN", rp))
+			return errors.New(fmt.Sprintf("invalid repository permission %q: must be in the format REPO_SLUG:REF_PATTERN", rp))
 		}
 	}
 
