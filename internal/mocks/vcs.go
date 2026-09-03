@@ -12,6 +12,9 @@ type VCS struct {
 	MockGetBranch              string
 	MockGetHead                string
 	MockGetHeadError           error
+	MockGetHeadCommit          func() (string, error)
+	MockGetLastCommit          string
+	MockGetLastCommitError     error
 	MockGetTopLevel            string
 	MockGetCommit              string
 	MockGetCommitError         error
@@ -35,16 +38,15 @@ func (c *VCS) GetBranch() string {
 	return c.MockGetBranch
 }
 
-func (c *VCS) GetHead() string {
-	head, err := c.GetHeadCommit()
-	if err != nil {
-		return ""
+func (c *VCS) GetHeadCommit() (string, error) {
+	if c.MockGetHeadCommit != nil {
+		return c.MockGetHeadCommit()
 	}
-	return head
+	return c.MockGetHead, c.MockGetHeadError
 }
 
-func (c *VCS) GetHeadCommit() (string, error) {
-	return c.MockGetHead, c.MockGetHeadError
+func (c *VCS) GetLastCommit() (string, error) {
+	return c.MockGetLastCommit, c.MockGetLastCommitError
 }
 
 func (c *VCS) GetTopLevel() string {

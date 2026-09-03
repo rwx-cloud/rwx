@@ -693,7 +693,8 @@ func TestIsAncestor(t *testing.T) {
 	t.Run("returns false when candidate is descendant of HEAD", func(t *testing.T) {
 		repo, firstSHA := repoFixture(t, "testdata/IsAncestor-linear")
 		client := &git.Client{Binary: "git", Dir: repo}
-		headSHA := client.GetHead()
+		headSHA, err := client.GetHeadCommit()
+		require.NoError(t, err)
 		require.False(t, client.IsAncestor(headSHA, firstSHA))
 	})
 

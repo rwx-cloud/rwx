@@ -64,6 +64,11 @@ tasks:
 
       git lfs install --skip-repo
 
+  - key: jj
+    call: jj/install 1.0.0
+    with:
+      version: ${{ tasks.tool-versions.values.jj }}
+
   - key: lsp-code
     call: git/clone 2.1.0
     with:
@@ -85,7 +90,7 @@ tasks:
     run: cp ${{ tasks.lsp-build.tasks.build.artifacts.bundle }} internal/lsp/bundle/server.js
 
   - key: unit-tests
-    use: [go-deps, rwx-cli, gotestsum, git]
+    use: [go-deps, rwx-cli, gotestsum, git, jj]
     run: |
       gotestsum \
         --jsonfile tmp/go-test.json \

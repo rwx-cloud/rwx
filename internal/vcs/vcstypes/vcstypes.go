@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -16,6 +17,17 @@ func ConfiguredRemote() string {
 		return remote
 	}
 	return defaultRemote
+}
+
+// MissingRemoteError reports that the configured remote does not exist.
+func MissingRemoteError(remote string) error {
+	return fmt.Errorf("no git remote named '%s' is configured (set RWX_GIT_REMOTE to use a different remote)", remote)
+}
+
+// NoCommonAncestorError reports that subject, the named position the working
+// copy sits on, shares no history with the configured remote.
+func NoCommonAncestorError(subject, remote string) error {
+	return fmt.Errorf("%s has no commits in common with the '%s' remote (set RWX_GIT_REMOTE to use a different remote)", subject, remote)
 }
 
 func CommitMismatchNote(head, runCommit string) string {
@@ -68,8 +80,9 @@ func SplitNULPaths(output []byte) []string {
 }
 
 // CommandFactory builds a command that can query a repository. Backends differ
-// in how they reach the object store, so the shared helpers below take a
-// factory instead of building commands themselves.
+// in how they reach the object store — the git client shells out in the work
+// tree, the jj client points git at the jj-managed store — so the shared
+// helpers below take a factory instead of building commands themselves.
 type CommandFactory func(args ...string) (*exec.Cmd, error)
 
 // LFSFilesForPaths returns the subset of files that git-lfs is configured to
@@ -118,10 +131,58 @@ type PatchResult struct {
 	OK        bool
 }
 
-// UntrackedFilesMetadata carries the files a patch adds that do not exist in
-// the base commit. Under git these are literally untracked working-tree files;
-// a backend that tracks the whole working copy reports the files the patch adds
-// relative to the base instead.
+// WriteFile turns a generated patch into the PatchFile callers upload. LFS
+// changes and an empty patch produce no file; anything else is written under
+// destDir, named for the base commit it applies to.
+func (r PatchResult) WriteFile(destDir string) (PatchFile, error) {
+	if !r.OK {
+		return PatchFile{}, fmt.Errorf("unable to generate patch data")
+	}
+
+	if r.LFS.Count > 0 {
+		return PatchFile{LFSChangedFiles: r.LFS}, nil
+	}
+
+	if len(r.Patch) == 0 {
+		return PatchFile{UntrackedFiles: r.Untracked}, nil
+	}
+
+	outputPath := filepath.Join(destDir, r.SHA)
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		return PatchFile{}, fmt.Errorf("unable to create patch directory: %w", err)
+	}
+
+	if err := os.WriteFile(outputPath, r.Patch, 0644); err != nil {
+		return PatchFile{}, fmt.Errorf("unable to write patch file: %w", err)
+	}
+
+	return PatchFile{
+		Written:        true,
+		Path:           outputPath,
+		UntrackedFiles: r.Untracked,
+	}, nil
+}
+
+// Bytes reduces a generated patch to what GeneratePatch reports: the patch
+// itself, or the LFS files that stood in for one, or nothing at all.
+func (r PatchResult) Bytes() ([]byte, *LFSChangedFilesMetadata) {
+	if !r.OK {
+		return nil, nil
+	}
+
+	if r.LFS.Count > 0 {
+		return nil, &r.LFS
+	}
+
+	if len(r.Patch) == 0 {
+		return nil, nil
+	}
+
+	return r.Patch, nil
+}
+
+// UntrackedFilesMetadata carries the untracked working-tree files a git patch
+// picks up. jj tracks the whole working copy, so its patches report none.
 type UntrackedFilesMetadata struct {
 	Files []string
 	Count int
@@ -155,6 +216,36 @@ type PushRefOptions struct {
 	Remote  string
 	Refspec string
 	Env     []string
+}
+
+// Validate rejects options no push can run with.
+func (o PushRefOptions) Validate() error {
+	if o.Remote == "" {
+		return fmt.Errorf("no remote provided")
+	}
+	if o.Refspec == "" {
+		return fmt.Errorf("no refspec provided")
+	}
+	return nil
+}
+
+// RunPush runs a `git push` the backend has already aimed at its repository,
+// applying env and folding git's own output into the error so callers can
+// recognize rejections such as a refused shallow update.
+func RunPush(cmd *exec.Cmd, env []string) error {
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		output := strings.TrimSpace(string(out))
+		if output != "" {
+			return fmt.Errorf("git push failed: %s", output)
+		}
+		return fmt.Errorf("git push failed: %w", err)
+	}
+
+	return nil
 }
 
 // PatchError identifies which command failed while generating a patch, along

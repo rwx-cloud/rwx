@@ -3006,6 +3006,97 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.NotContains(t, order[snapshotIndex], "/usr/bin/git add -A &&")
 	})
 
+	// The jj shape: the working copy is pushed as a commit with no dirty patch,
+	// so the baseline is the checked-out tree and the pushed commit is the one
+	// the working copy holds now.
+	t.Run("new sandbox with no dirty paths syncs the head resolved at sync time and stages nothing", func(t *testing.T) {
+		setup := setupTest(t)
+
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		require.NoError(t, os.WriteFile(configFile, []byte("base:\n  image: ubuntu:24.04\ntasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+		staleHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		currentHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+		headCalls := 0
+		setup.mockVCS.MockGetHeadCommit = func() (string, error) {
+			headCalls++
+			if headCalls == 1 {
+				return staleHead, nil
+			}
+			return currentHead, nil
+		}
+		setup.mockVCS.MockGetBranch = "feature/new-sandbox"
+		setup.mockVCS.MockGetCommit = "base"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
+
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
+		}
+		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			return &api.InitiateRunResult{
+				RunID:  "run-new",
+				RunURL: "https://cloud.rwx.com/runs/run-new",
+			}, nil
+		}
+		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
+			return &api.CreateSandboxTokenResult{Token: "new-token"}, nil
+		}
+		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{}, nil
+		}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+
+		var order []string
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				return 0, nil
+			}
+			order = append(order, cmd)
+			return 0, nil
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			return 0, "", nil
+		}
+		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
+			order = append(order, command)
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"true"},
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-new", result.RunID)
+		require.GreaterOrEqual(t, headCalls, 2, "the head must be resolved again once the sandbox is ready")
+
+		checkoutIndex := sandboxCommandIndex(order, "checkout -f")
+		require.NotEqual(t, -1, checkoutIndex)
+		require.Contains(t, order[checkoutIndex], currentHead)
+		require.NotContains(t, order[checkoutIndex], staleHead)
+
+		require.Equal(t, -1, sandboxCommandIndex(order, "/usr/bin/git apply"), "nothing to apply without dirty patches")
+
+		snapshotIndex := sandboxCommandIndex(order, "update-ref refs/rwx-sync HEAD")
+		require.NotEqual(t, -1, snapshotIndex)
+		require.NotContains(t, order[snapshotIndex], "/usr/bin/git add -A", "setup-created files must stay out of the baseline")
+		require.NotContains(t, order[snapshotIndex], "/usr/bin/git update-index")
+	})
+
 	t.Run("first exec after sandbox start removes pre-applied new files before sync", func(t *testing.T) {
 		setup := setupTest(t)
 

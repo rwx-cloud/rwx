@@ -1,0 +1,9 @@
+#!/bin/bash
+set -euo pipefail
+
+# A standalone repository: no remote, and no bookmark anywhere in it.
+jj git init $COLOCATE repo
+cd repo
+
+printf 'hello\n' > base.txt
+jj commit -m "only local work"

@@ -1090,10 +1090,10 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 	}
 	branch := GetCurrentBranch(s.VCSClient)
 
-	var localHeadForSync string
+	// Fail before a sandbox is selected or created when there is nothing to
+	// push. The head itself is resolved again at sync time.
 	if !cfg.SkipSync {
-		localHeadForSync, err = s.VCSClient.GetHeadCommit()
-		if err != nil {
+		if _, err := s.VCSClient.GetHeadCommit(); err != nil {
 			return nil, errors.Wrap(err, "sandbox push requires a repository with a resolvable working copy")
 		}
 	}
@@ -1441,7 +1441,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 
 	// Sync local changes to sandbox.
 	syncPushStart := time.Now()
-	patchBytes, err := s.syncLocalChangesToSandbox(cfg.Json, isNewSandbox, localHeadForSync, connInfo)
+	patchBytes, err := s.syncLocalChangesToSandbox(cfg.Json, isNewSandbox, connInfo)
 	result.syncPushMs = time.Since(syncPushStart).Milliseconds()
 	result.syncPushPatchBytes = patchBytes
 	if err != nil {
@@ -2069,7 +2069,14 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 	return files, patchBytes, nil
 }
 
-func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, localHead string, connInfo *api.SandboxConnectionInfo) (int, error) {
+func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, connInfo *api.SandboxConnectionInfo) (int, error) {
+	// Booting a sandbox or waiting on its lock can take minutes, and under jj
+	// every edit in that window rewrites @, so resolve the head now rather than
+	// pinning the sandbox to a working copy the user has moved past.
+	localHead, err := s.VCSClient.GetHeadCommit()
+	if err != nil {
+		return 0, errors.Wrap(err, "sandbox push requires a repository with a resolvable working copy")
+	}
 	if localHead == "" {
 		return 0, fmt.Errorf("sandbox push requires a repository with a resolvable working copy")
 	}
@@ -2173,7 +2180,7 @@ func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, loc
 		return patchBytes, syncPushErr
 	}
 
-	if err := s.snapshotSandboxSyncRefForExec(isNewSandbox, patches.Files); err != nil {
+	if err := s.snapshotSandboxSyncRef(isNewSandbox, patches.Files); err != nil {
 		syncPushErr = err
 		return patchBytes, syncPushErr
 	}
@@ -2500,31 +2507,25 @@ func (s Service) applyPatchToSandbox(command string, patch []byte) error {
 	return nil
 }
 
-// snapshotSandboxSyncRefForExec records the post-sync baseline. A new sandbox
-// stages only local dirty paths so server pre-applied files aren't baked into
-// the baseline; a reused sandbox already matches local state.
-func (s Service) snapshotSandboxSyncRefForExec(isNewSandbox bool, paths []string) error {
+// snapshotSandboxSyncRef records the baseline a later pull diffs against. A
+// reused sandbox already matches local state. A new sandbox may hold files its
+// setup tasks created, so only the local dirty paths are staged; with none,
+// which is always the case under jj, the baseline is the checked-out tree.
+func (s Service) snapshotSandboxSyncRef(isNewSandbox bool, localPaths []string) error {
+	stage := "/usr/bin/git add -A && "
 	if isNewSandbox {
-		return s.snapshotSandboxSyncRefForPaths(paths)
-	}
-	return s.snapshotSandboxSyncRef()
-}
-
-func (s Service) snapshotSandboxSyncRef() error {
-	return s.snapshotSandboxSyncRefForPaths(nil)
-}
-
-func (s Service) snapshotSandboxSyncRefForPaths(paths []string) error {
-	script := `index_tree=$(/usr/bin/git write-tree) || exit 1; /usr/bin/git update-ref -d refs/rwx-sync 2>/dev/null || true; `
-	if len(paths) > 0 {
-		quoted := make([]string, len(paths))
-		for i, path := range paths {
-			quoted[i] = quoteShellArg(path)
+		stage = ""
+		if len(localPaths) > 0 {
+			quoted := make([]string, len(localPaths))
+			for i, path := range localPaths {
+				quoted[i] = quoteShellArg(path)
+			}
+			stage = "/usr/bin/git update-index --add --remove -- " + strings.Join(quoted, " ") + " && "
 		}
-		script += "/usr/bin/git update-index --add --remove -- " + strings.Join(quoted, " ") + " && "
-	} else if paths == nil {
-		script += "/usr/bin/git add -A && "
 	}
+
+	script := `index_tree=$(/usr/bin/git write-tree) || exit 1; /usr/bin/git update-ref -d refs/rwx-sync 2>/dev/null || true; `
+	script += stage
 	script += `/usr/bin/git -c user.name=rwx -c user.email=rwx -c core.hooksPath=/dev/null commit --allow-empty --no-verify -m rwx-sync >/dev/null 2>&1 && /usr/bin/git update-ref refs/rwx-sync HEAD && /usr/bin/git reset --mixed HEAD~1 >/dev/null 2>&1 && /usr/bin/git read-tree "$index_tree"`
 
 	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")

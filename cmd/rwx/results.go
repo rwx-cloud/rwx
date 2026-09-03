@@ -141,10 +141,8 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 				fmt.Println(string(resultJson))
 			} else {
 				if runIDFromGit && ResultsBranch == "" && ResultsRepo == "" && result.Commit != "" {
-					if head := service.VCSClient.GetHead(); head != "" {
-						if note := vcs.CommitMismatchNote(head, result.Commit); note != "" {
-							fmt.Println(note)
-						}
+					if note := CommitDriftNote(service.VCSClient, result.Commit); note != "" {
+						fmt.Println(note)
 					}
 				}
 				if result.TaskURL != "" {
@@ -206,6 +204,16 @@ func handleResultsTaskKeyError(err error) error {
 	}
 
 	return err
+}
+
+// CommitDriftNote warns when the branch's latest run was not made from the last
+// local commit.
+func CommitDriftNote(client vcs.Client, runCommit string) string {
+	last, err := client.GetLastCommit()
+	if err != nil || last == "" {
+		return ""
+	}
+	return vcs.CommitMismatchNote(last, runCommit)
 }
 
 func HandleAmbiguousDefinitionPathError(err error, branch, repo string) error {
