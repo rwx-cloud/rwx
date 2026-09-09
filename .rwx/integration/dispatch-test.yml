@@ -93,6 +93,7 @@ tasks:
       set -euo pipefail
 
       # Kick off a dispatch
+      exit_code=0
       kickoff=$(rwx dispatch dispatch-failure-test --ref ${{ init.ref }} --json --wait --fail-fast) || exit_code=$?
       status=$(echo "$kickoff" | tail -1 | jq -r '.ResultStatus')
       run_url=$(echo "$kickoff" | tail -1 | jq -r '.RunURL')
@@ -110,15 +111,10 @@ tasks:
         exit 1
       fi
 
-      prompt=$(echo "$kickoff" | tail -1 | jq -r '.ResultPrompt')
-      if ! echo "$prompt" | grep -q "fail-fast"; then
-        echo "Expected prompt to include 'fail-fast', but it did not."
-        echo "$kickoff"
-        exit 1
-      fi
-
-      if echo "$prompt" | grep -q "fail-slow"; then
-        echo "Expected prompt to NOT include 'fail-slow', but it did."
+      # --fail-fast must return before the run finishes
+      execution=$(echo "$kickoff" | tail -1 | jq -r '.Status.Execution')
+      if [ "$execution" != "in_progress" ]; then
+        echo "Expected run to still be in progress, got '$execution'"
         echo "$kickoff"
         exit 1
       fi
