@@ -548,6 +548,62 @@ func TestGeneratePatch(t *testing.T) {
 	})
 }
 
+func gitConfigGlobal(t *testing.T, dir, contents string) {
+	t.Helper()
+
+	path := filepath.Join(dir, "gitconfig")
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o644))
+	t.Setenv("GIT_CONFIG_GLOBAL", path)
+}
+
+func TestPatchesIgnoreHostileDiffConfig(t *testing.T) {
+	cases := []struct {
+		name   string
+		config string
+		env    map[string]string
+	}{
+		{name: "diff.external", config: "[diff]\n\texternal = $SCRIPT\n"},
+		{name: "GIT_EXTERNAL_DIFF", env: map[string]string{"GIT_EXTERNAL_DIFF": "$SCRIPT"}},
+		{name: "textconv driver", config: "[diff \"upper\"]\n\ttextconv = $SCRIPT\n[core]\n\tattributesFile = $ATTRIBUTES\n"},
+		{name: "color.ui", config: "[color]\n\tui = always\n"},
+		{name: "color.diff", config: "[color]\n\tdiff = always\n"},
+		{name: "diff.noprefix", config: "[diff]\n\tnoprefix = true\n"},
+		{name: "diff.srcPrefix and diff.dstPrefix", config: "[diff]\n\tsrcPrefix = SRC/\n\tdstPrefix = DST/\n"},
+		{name: "diff.suppressBlankEmpty", config: "[diff]\n\tsuppressBlankEmpty = true\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eachLayout(t, "clone-local-work-context", func(t *testing.T, f fixture) {
+				baseline, _, err := f.client.GeneratePatch(nil)
+				require.NoError(t, err)
+				require.Contains(t, string(baseline), "diff --git a/context.txt b/context.txt", "paths keep their a/ and b/ prefixes")
+				require.Contains(t, string(baseline), "\n+c\n", "the text change is present verbatim")
+				require.Contains(t, string(baseline), "\n \n", "blank context lines keep their leading space")
+				require.NotContains(t, string(baseline), "\x1b[", "no terminal escapes")
+
+				script := filepath.Join(f.tempDir, "mangle-diff")
+				require.NoError(t, os.WriteFile(script, []byte("#!/bin/sh\nif [ $# -eq 1 ]; then tr 'a-z' 'A-Z' < \"$1\"; else echo external-diff-output; fi\n"), 0o755))
+				attributes := filepath.Join(f.tempDir, "gitattributes")
+				// A non-colocated store is bare and reads no in-tree .gitattributes.
+				require.NoError(t, os.WriteFile(attributes, []byte("*.txt diff=upper\n"), 0o644))
+
+				expand := strings.NewReplacer("$SCRIPT", script, "$ATTRIBUTES", attributes).Replace
+				if tc.config != "" {
+					gitConfigGlobal(t, f.tempDir, expand(tc.config))
+				}
+				for name, value := range tc.env {
+					t.Setenv(name, expand(value))
+				}
+
+				patch, _, err := f.client.GeneratePatch(nil)
+				require.NoError(t, err)
+				require.Equal(t, string(baseline), string(patch))
+			})
+		})
+	}
+}
+
 func TestGeneratePatchRoundTripsThroughGitApply(t *testing.T) {
 	eachLayout(t, "clone-local-work-binary", func(t *testing.T, f fixture) {
 		readWorkingCopy := func(rel string) []byte {

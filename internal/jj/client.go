@@ -406,7 +406,7 @@ func withPathspec(args []string, pathspec []string) []string {
 }
 
 func (c *Client) diffNames(st store, base, head string, pathspec []string, extra ...string) ([]string, *vcstypes.PatchError) {
-	args := append([]string{"diff", "-z", "--name-only"}, extra...)
+	args := append(vcstypes.PatchDiffArgs("-z", "--name-only"), extra...)
 	args = append(args, base, head)
 
 	out, err := c.storeCmdIn(st, withPathspec(args, pathspec)...).Output()
@@ -465,7 +465,7 @@ func (c *Client) generatePatchData(pathspec []string) (vcstypes.PatchResult, *vc
 		return vcstypes.PatchResult{SHA: base, LFS: lfsChanged, OK: true}, nil
 	}
 
-	patchArgs := []string{"diff", base, head, "-p", "--binary"}
+	patchArgs := vcstypes.PatchDiffArgs(base, head, "-p", "--binary")
 	patch, err := c.storeCmdIn(st, withPathspec(patchArgs, pathspec)...).Output()
 	if err != nil {
 		return vcstypes.PatchResult{}, vcstypes.NewPatchError("diff_patch", "git diff -p --binary", err, "")
