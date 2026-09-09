@@ -332,3 +332,36 @@ func NewPatchError(command, display string, err error, fallbackStderr string) *P
 
 	return pe
 }
+
+// Must precede the `diff` subcommand. diff.suppressBlankEmpty has no
+// command-line equivalent.
+var patchDiffConfigOverrides = []string{"-c", "diff.suppressBlankEmpty=false"}
+
+// Our patches are machine-consumed, so the output has to be plain unified diff.
+var patchDiffFlags = []string{
+	"--no-ext-diff",
+	"--no-textconv",
+	"--no-color",
+	"--no-relative",
+	"--src-prefix=a/",
+	"--dst-prefix=b/",
+	"--submodule=short",
+	"--ignore-submodules=dirty",
+}
+
+// PatchDiffArgs returns the arguments for a `git diff` whose output is
+// machine-consumed. The caller appends the arguments for the diff it wants.
+func PatchDiffArgs(args ...string) []string {
+	out := make([]string, 0, len(patchDiffConfigOverrides)+1+len(patchDiffFlags)+len(args))
+	out = append(out, patchDiffConfigOverrides...)
+	out = append(out, "diff")
+	out = append(out, patchDiffFlags...)
+	return append(out, args...)
+}
+
+// PatchDiffCommand formats PatchDiffArgs as a shell command, for running git on
+// a remote host. Every argument it contributes is a literal flag, so no quoting
+// is required.
+func PatchDiffCommand(gitBinary string, args ...string) string {
+	return gitBinary + " " + strings.Join(PatchDiffArgs(args...), " ")
+}
