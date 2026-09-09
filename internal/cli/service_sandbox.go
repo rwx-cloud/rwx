@@ -20,6 +20,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/errors"
 	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
 	"github.com/rwx-cloud/rwx/internal/vcs"
+	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -1983,7 +1984,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 
 	// Get patch from sandbox (stdout only to avoid output capture issues after sync markers).
 	// Binary diffs need full indexes so local git apply can recreate new binary files.
-	exitCode, patch, err := s.SSHClient.ExecuteCommandWithOutput(sandboxWorktreeRootCommand("/usr/bin/git diff --binary --full-index --no-renames refs/rwx-sync"))
+	exitCode, patch, err := s.SSHClient.ExecuteCommandWithOutput(sandboxWorktreeRootCommand(vcstypes.PatchDiffCommand("/usr/bin/git", "--binary", "--full-index", "--no-renames", "refs/rwx-sync")))
 	patchBytes := len(patch)
 
 	// Reset the intent-to-add for untracked files

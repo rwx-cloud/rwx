@@ -175,7 +175,7 @@ func (c *Client) generatePatchData(pathspec []string) (vcstypes.PatchResult, *vc
 		return vcstypes.PatchResult{}, nil
 	}
 
-	diffArgs := []string{"diff", "-z", "--name-only", sha}
+	diffArgs := vcstypes.PatchDiffArgs("-z", "--name-only", sha)
 	if len(pathspec) > 0 {
 		diffArgs = append(diffArgs, "--")
 		diffArgs = append(diffArgs, pathspec...)
@@ -216,7 +216,7 @@ func (c *Client) generatePatchData(pathspec []string) (vcstypes.PatchResult, *vc
 
 	untrackedFiles := vcstypes.SplitNULPaths(untracked)
 
-	patchArgs := []string{"diff", sha, "-p", "--binary"}
+	patchArgs := vcstypes.PatchDiffArgs(sha, "-p", "--binary")
 	if len(pathspec) > 0 {
 		patchArgs = append(patchArgs, "--")
 		patchArgs = append(patchArgs, pathspec...)
@@ -356,11 +356,11 @@ func (c *Client) GenerateDirtyPatches() (vcstypes.DirtyPatches, error) {
 		}, nil
 	}
 
-	staged, err := c.diffBytes("diff", "--cached", "-p", "--binary", "--no-renames")
+	staged, err := c.diffBytes(vcstypes.PatchDiffArgs("--cached", "-p", "--binary", "--no-renames")...)
 	if err != nil {
 		return vcstypes.DirtyPatches{}, err
 	}
-	unstaged, err := c.diffBytes("diff", "-p", "--binary", "--no-renames")
+	unstaged, err := c.diffBytes(vcstypes.PatchDiffArgs("-p", "--binary", "--no-renames")...)
 	if err != nil {
 		return vcstypes.DirtyPatches{}, err
 	}
@@ -373,8 +373,8 @@ func (c *Client) changedFilesForDirtyPatch() ([]string, error) {
 	var files []string
 
 	for _, args := range [][]string{
-		{"diff", "--cached", "-z", "--name-only", "--no-renames"},
-		{"diff", "-z", "--name-only", "--no-renames"},
+		vcstypes.PatchDiffArgs("--cached", "-z", "--name-only", "--no-renames"),
+		vcstypes.PatchDiffArgs("-z", "--name-only", "--no-renames"),
 	} {
 		cmd := exec.Command(c.Binary, args...)
 		cmd.Dir = c.Dir
@@ -400,8 +400,8 @@ func (c *Client) newFilesForDirtyPatch() ([]string, error) {
 	var files []string
 
 	for _, args := range [][]string{
-		{"diff", "--cached", "-z", "--name-only", "--diff-filter=A", "--no-renames"},
-		{"diff", "-z", "--name-only", "--diff-filter=A", "--no-renames"},
+		vcstypes.PatchDiffArgs("--cached", "-z", "--name-only", "--diff-filter=A", "--no-renames"),
+		vcstypes.PatchDiffArgs("-z", "--name-only", "--diff-filter=A", "--no-renames"),
 	} {
 		cmd := exec.Command(c.Binary, args...)
 		cmd.Dir = c.Dir

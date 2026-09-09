@@ -369,6 +369,159 @@ func TestGeneratePatch(t *testing.T) {
 	})
 }
 
+func hostileDiffFixture(t *testing.T) (string, *git.Client) {
+	t.Helper()
+
+	root := t.TempDir()
+
+	subOrigin := filepath.Join(root, "sub-origin")
+	require.NoError(t, os.MkdirAll(subOrigin, 0o755))
+	mustGit(t, subOrigin, "init")
+	mustGit(t, subOrigin, "config", "user.email", "test@example.com")
+	mustGit(t, subOrigin, "config", "user.name", "Test")
+	require.NoError(t, os.WriteFile(filepath.Join(subOrigin, "a.txt"), []byte("submodule\n"), 0o644))
+	mustGit(t, subOrigin, "add", "a.txt")
+	mustGit(t, subOrigin, "commit", "-m", "submodule base")
+
+	origin := filepath.Join(root, "origin")
+	require.NoError(t, os.MkdirAll(filepath.Join(origin, "sub"), 0o755))
+	mustGit(t, origin, "init")
+	mustGit(t, origin, "config", "user.email", "test@example.com")
+	mustGit(t, origin, "config", "user.name", "Test")
+	// Committed, so enabling a textconv driver is the only difference from the baseline.
+	require.NoError(t, os.WriteFile(filepath.Join(origin, ".gitattributes"), []byte("*.txt diff=upper\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(origin, "sub", "tracked.txt"), []byte("a\n\nb\n"), 0o644))
+	mustGit(t, origin, "add", ".gitattributes", "sub/tracked.txt")
+	mustGit(t, origin, "commit", "-m", "base")
+
+	repo := filepath.Join(root, "repo")
+	mustGit(t, root, "clone", origin, "repo")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+	mustGit(t, repo, "config", "user.name", "Test")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "sub", "tracked.txt"), []byte("a\n\nb\nc\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "sub", "staged.txt"), []byte("staged\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "sub", "new.dat"), []byte{0x00, 0x01, 0x02, 'b', 'i', 'n', '\n'}, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "sub", "untracked.txt"), []byte("untracked\n"), 0o644))
+	mustGit(t, repo, "add", "sub/staged.txt", "sub/new.dat")
+	// A relative url keeps .gitmodules byte-identical across temp directories.
+	mustGit(t, repo, "-c", "protocol.file.allow=always", "submodule", "add", "../sub-origin", "sm")
+
+	return repo, &git.Client{Binary: "git", Dir: filepath.Join(repo, "sub")}
+}
+
+func requireWellFormedPatch(t *testing.T, patch string) {
+	t.Helper()
+
+	require.Contains(t, patch, "diff --git a/sub/tracked.txt b/sub/tracked.txt", "paths keep their a/ and b/ prefixes and stay relative to the repository root")
+	require.Contains(t, patch, "\n+c\n", "the text change is present verbatim")
+	require.Contains(t, patch, "\n \n", "blank context lines keep their leading space")
+	require.Contains(t, patch, "new file mode 160000", "the submodule gitlink is present as a subproject line")
+	require.Contains(t, patch, "GIT binary patch", "the binary addition is present")
+	require.NotContains(t, patch, "\x1b[", "no terminal escapes")
+}
+
+// Enabling any of these settings must leave the patch byte-identical.
+func TestPatchesIgnoreHostileDiffConfig(t *testing.T) {
+	scripts := t.TempDir()
+
+	externalDiff := filepath.Join(scripts, "external-diff")
+	require.NoError(t, os.WriteFile(externalDiff, []byte("#!/bin/sh\necho external-diff-output\n"), 0o755))
+
+	textconv := filepath.Join(scripts, "textconv")
+	require.NoError(t, os.WriteFile(textconv, []byte("#!/bin/sh\ntr 'a-z' 'A-Z' < \"$1\"\n"), 0o755))
+
+	cases := []struct {
+		name      string
+		configure func(t *testing.T, repo string)
+	}{
+		{"diff.external", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.external", externalDiff)
+		}},
+		{"GIT_EXTERNAL_DIFF", func(t *testing.T, repo string) {
+			t.Setenv("GIT_EXTERNAL_DIFF", externalDiff)
+		}},
+		{"textconv driver", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.upper.textconv", textconv)
+		}},
+		{"color.ui", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "color.ui", "always")
+		}},
+		{"color.diff", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "color.diff", "always")
+		}},
+		{"diff.noprefix", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.noprefix", "true")
+		}},
+		{"diff.mnemonicPrefix", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.mnemonicPrefix", "true")
+		}},
+		{"diff.srcPrefix and diff.dstPrefix", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.srcPrefix", "SRC/")
+			mustGit(t, repo, "config", "diff.dstPrefix", "DST/")
+		}},
+		{"diff.relative", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.relative", "true")
+		}},
+		{"diff.submodule=log", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.submodule", "log")
+		}},
+		{"diff.submodule=diff", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.submodule", "diff")
+		}},
+		{"diff.ignoreSubmodules", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.ignoreSubmodules", "all")
+		}},
+		{"submodule.<name>.ignore", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "submodule.sm.ignore", "all")
+		}},
+		{"diff.suppressBlankEmpty", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.suppressBlankEmpty", "true")
+		}},
+	}
+
+	t.Run("GeneratePatch", func(t *testing.T) {
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				repo, client := hostileDiffFixture(t)
+
+				baseline, _, err := client.GeneratePatch(nil)
+				require.NoError(t, err)
+				requireWellFormedPatch(t, string(baseline))
+
+				tc.configure(t, repo)
+
+				patch, _, err := client.GeneratePatch(nil)
+				require.NoError(t, err)
+				require.Equal(t, string(baseline), string(patch))
+			})
+		}
+	})
+
+	t.Run("GenerateDirtyPatches", func(t *testing.T) {
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				repo, client := hostileDiffFixture(t)
+
+				baseline, err := client.GenerateDirtyPatches()
+				require.NoError(t, err)
+				requireWellFormedPatch(t, string(baseline.Staged)+string(baseline.Unstaged))
+				require.Contains(t, baseline.Files, "sub/tracked.txt")
+				require.Contains(t, baseline.NewFiles, "sub/staged.txt")
+
+				tc.configure(t, repo)
+
+				patches, err := client.GenerateDirtyPatches()
+				require.NoError(t, err)
+				require.Equal(t, string(baseline.Staged), string(patches.Staged))
+				require.Equal(t, string(baseline.Unstaged), string(patches.Unstaged))
+				require.Equal(t, baseline.Files, patches.Files)
+				require.Equal(t, baseline.NewFiles, patches.NewFiles)
+			})
+		}
+	})
+}
+
 func TestGenerateDirtyPatches(t *testing.T) {
 	repo := t.TempDir()
 	mustGit(t, repo, "init")

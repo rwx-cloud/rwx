@@ -24,6 +24,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/errors"
 	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
 	"github.com/rwx-cloud/rwx/internal/vcs"
+	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
@@ -126,7 +127,7 @@ func requireCommandWrappedBySyncMarkers(t *testing.T, commands []string, command
 }
 
 func isSandboxPullDiffCommand(cmd string) bool {
-	return strings.Contains(cmd, "git diff") && strings.Contains(cmd, "refs/rwx-sync")
+	return strings.Contains(cmd, " diff ") && strings.Contains(cmd, "refs/rwx-sync")
 }
 
 func requireSandboxWorktreeRootCommand(t *testing.T, cmd string, operation string) {
@@ -1129,7 +1130,7 @@ func TestService_SyncSandbox(t *testing.T) {
 		require.Less(t, cleanIndex, applyIndex)
 
 		for _, cmd := range commands {
-			require.NotContains(t, cmd, "git diff --binary --full-index", "sync should not pull sandbox changes locally")
+			require.NotContains(t, cmd, vcstypes.PatchDiffCommand("/usr/bin/git", "--binary", "--full-index"), "sync should not pull sandbox changes locally")
 		}
 
 		require.Nil(t, findEvent(setup.drainEvents(), "sandbox.exec"))
@@ -3862,7 +3863,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			}
 			if isSandboxPullDiffCommand(cmd) {
 				foundDiffRef = true
-				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git diff --binary --full-index --no-renames refs/rwx-sync")
+				requireSandboxWorktreeRootCommand(t, cmd, vcstypes.PatchDiffCommand("/usr/bin/git", "--binary", "--full-index", "--no-renames", "refs/rwx-sync"))
 			}
 			if strings.Contains(cmd, "git reset HEAD") {
 				foundReset = true
