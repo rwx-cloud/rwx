@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,6 +75,53 @@ func NewClient(cfg Config) (Client, error) {
 
 func NewClientWithRoundTrip(rt func(*http.Request) (*http.Response, error)) Client {
 	return Client{roundTripFunc(rt)}
+}
+
+// RoundTrip retries explicit Cloud unavailability responses, including writes:
+// Cloud must reject the operation before returning 503 with Retry-After.
+func (c Client) RoundTrip(req *http.Request) (*http.Response, error) {
+	for attempt := 0; ; attempt++ {
+		resp, err := c.RoundTripper.RoundTrip(req)
+		if err != nil || resp.StatusCode != http.StatusServiceUnavailable || attempt >= 4 {
+			return resp, err
+		}
+		delay, ok := retryAfterDelay(resp.Header.Get("Retry-After"), time.Now())
+		if !ok || (req.Body != nil && req.Body != http.NoBody && req.GetBody == nil) {
+			return resp, nil
+		}
+		resp.Body.Close()
+		timer := time.NewTimer(delay)
+		select {
+		case <-req.Context().Done():
+			timer.Stop()
+			return nil, req.Context().Err()
+		case <-timer.C:
+		}
+		next := req.Clone(req.Context())
+		if req.GetBody != nil {
+			next.Body, err = req.GetBody()
+			if err != nil {
+				return nil, errors.Wrap(err, "unable to replay HTTP request body")
+			}
+		}
+		req = next
+	}
+}
+
+func retryAfterDelay(value string, now time.Time) (time.Duration, bool) {
+	value = strings.TrimSpace(value)
+	if value != "" && strings.Trim(value, "0123456789") == "" {
+		seconds, err := strconv.ParseUint(value, 10, 63)
+		if err != nil || seconds > uint64((1<<63-1)/time.Second) {
+			return 0, false
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+	when, err := http.ParseTime(value)
+	if err != nil {
+		return 0, false
+	}
+	return max(0, when.Sub(now)), true
 }
 
 func (c Client) GetSkillContent() (string, error) {
