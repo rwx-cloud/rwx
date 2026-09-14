@@ -41,9 +41,6 @@ func newRetryCommand(use, short string, targetType api.RetryTargetType, groupID 
 		Use:     use,
 		Short:   short,
 		Args:    cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			result, err := service.Retry(cli.RetryConfig{
 				Target: api.RetryTarget{

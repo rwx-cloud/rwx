@@ -39,9 +39,6 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 
     rwx docs pull /results`,
 		Args: cobra.MaximumNArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			taskKeySet := cmd.Flags().Changed("task")

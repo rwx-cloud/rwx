@@ -14,12 +14,9 @@ var (
 	PullCmd *cobra.Command
 )
 
-func InitPull(requireAccessToken func() error, getService func() cli.Service, useJsonOutput func() bool) {
+func InitPull(getService func() cli.Service, useJsonOutput func() bool) {
 	PullCmd = &cobra.Command{
 		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID := args[0]
 

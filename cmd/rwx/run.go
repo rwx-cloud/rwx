@@ -57,7 +57,7 @@ var (
 				)
 			}
 
-			return requireAccessToken()
+			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {

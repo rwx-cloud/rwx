@@ -16,12 +16,9 @@ var (
 	PushCmd *cobra.Command
 )
 
-func InitPush(requireAccessToken func() error, getService func() cli.Service, useJsonOutput func() bool) {
+func InitPush(getService func() cli.Service, useJsonOutput func() bool) {
 	PushCmd = &cobra.Command{
 		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			openURL := open.Run
 			if !pushImageOpen {

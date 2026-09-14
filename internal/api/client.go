@@ -82,6 +82,10 @@ func NewClientWithRoundTrip(rt func(*http.Request) (*http.Response, error)) Clie
 func (c Client) RoundTrip(req *http.Request) (*http.Response, error) {
 	for attempt := 0; ; attempt++ {
 		resp, err := c.RoundTripper.RoundTrip(req)
+		if err == nil && resp.StatusCode == http.StatusUnauthorized {
+			defer resp.Body.Close()
+			return nil, decodeResponseJSON(resp, nil)
+		}
 		if err != nil || resp.StatusCode != http.StatusServiceUnavailable || attempt >= 4 {
 			return resp, err
 		}
@@ -1775,7 +1779,13 @@ func decodeResponseJSON(resp *http.Response, result any) error {
 // failures (401/403/404) from server-side issues (5xx).
 func classifyHTTPStatusError(statusCode int, errMsg string) error {
 	switch {
-	case statusCode == http.StatusUnauthorized, statusCode == http.StatusForbidden:
+	case statusCode == http.StatusUnauthorized:
+		return errors.WrapSentinel(errors.New(errMsg+"\n\n"+
+			"This command requires authentication with RWX Cloud. "+
+			"You can authenticate via the `rwx login` command, or supply the "+
+			"`--access-token` option or `RWX_ACCESS_TOKEN` environment variable.\n\n"+
+			"Once you do so, go ahead and run the command again."), errors.ErrUnauthenticated)
+	case statusCode == http.StatusForbidden:
 		return errors.WrapSentinel(errors.New(errMsg), errors.ErrUnauthenticated)
 	case statusCode == http.StatusNotFound:
 		return errors.Wrap(ErrNotFound, errMsg)

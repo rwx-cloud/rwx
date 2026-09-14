@@ -33,9 +33,6 @@ FILE PATCHING
   produce an error. Commit and push those changes before starting the sandbox.
 `,
 	Args: cobra.MaximumNArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configFile := cli.FindDefaultSandboxConfigFile()
 		if len(args) > 0 {
@@ -173,9 +170,6 @@ CONFIG FILE
   sandbox entry point, and must be dependent on a task that uses git/clone.
 `,
 	Args: cobra.ArbitraryArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get command args after --
 		dashIndex := cmd.ArgsLenAtDash()
@@ -444,9 +438,6 @@ var sandboxListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List sandbox sessions with status",
 	Args:  cobra.NoArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
 		result, err := service.ListSandboxes(cli.ListSandboxesConfig{
@@ -472,9 +463,6 @@ var sandboxStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop a sandbox session",
 	Args:  cobra.NoArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
 		result, err := service.StopSandbox(cli.StopSandboxConfig{
@@ -542,9 +530,6 @@ var sandboxResetCmd = &cobra.Command{
 	Use:   "reset [config-file]",
 	Short: "Stop and restart a sandbox",
 	Args:  cobra.MaximumNArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configFile := cli.FindDefaultSandboxConfigFile()
 		if len(args) > 0 {
@@ -611,7 +596,7 @@ func requireExperimentalSandboxAccess() error {
 	if os.Getenv("RWX_EXPERIMENTAL") != "true" {
 		return fmt.Errorf("this command is experimental; set RWX_EXPERIMENTAL=true to use it")
 	}
-	return requireAccessToken()
+	return nil
 }
 
 func init() {

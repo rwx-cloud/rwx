@@ -41,9 +41,6 @@ cursor to --cursor to fetch the next page.
 
 For a given run's full payload, run 'rwx results <id> --json'.`,
 		Args: cobra.NoArgs,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 
