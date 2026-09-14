@@ -17,9 +17,6 @@ var (
 
 	logsCmd = &cobra.Command{
 		GroupID: "outputs",
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskKeySet := cmd.Flags().Changed("task")
 

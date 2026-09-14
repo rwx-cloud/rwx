@@ -25,14 +25,10 @@ var (
 	BuildCmd *cobra.Command
 )
 
-func InitBuild(requireAccessToken func() error, parseInitParameters func([]string) (map[string]string, error), getService func() cli.Service, useJsonOutput func() bool) {
+func InitBuild(parseInitParameters func([]string) (map[string]string, error), getService func() cli.Service, useJsonOutput func() bool) {
 	BuildCmd = &cobra.Command{
 		Args: cobra.MaximumNArgs(1),
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireAccessToken(); err != nil {
-				return err
-			}
-
 			if buildNoPull && len(buildTags) > 0 {
 				return fmt.Errorf("cannot use --tag with --no-pull: no image will be pulled to tag")
 			}

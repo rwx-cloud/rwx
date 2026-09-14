@@ -13,7 +13,7 @@ var (
 	ListCmd *cobra.Command
 )
 
-func InitList(requireAccessToken func() error, getService func() cli.Service, useJsonOutput func() bool) {
+func InitList(getService func() cli.Service, useJsonOutput func() bool) {
 	ListCmd = &cobra.Command{
 		Args: func(cmd *cobra.Command, args []string) error {
 			taskKeySet := cmd.Flags().Changed("task")
@@ -27,9 +27,6 @@ func InitList(requireAccessToken func() error, getService func() cli.Service, us
 				}
 			}
 			return nil
-		},
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskKeySet := cmd.Flags().Changed("task")

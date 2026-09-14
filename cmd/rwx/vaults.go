@@ -19,9 +19,6 @@ var (
 	createVaultRepoPerms []string
 
 	vaultsCreateCmd = &cobra.Command{
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			_, err := service.CreateVault(cli.CreateVaultConfig{
@@ -49,9 +46,6 @@ var (
 	secretsSetFile  string
 
 	vaultsSecretsSetCmd = &cobra.Command{
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var secrets []string
 			if len(args) >= 0 {
@@ -78,9 +72,6 @@ var (
 
 	vaultsSecretsDeleteCmd = &cobra.Command{
 		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			_, err := service.DeleteSecret(cli.DeleteSecretConfig{
@@ -108,9 +99,6 @@ var (
 	varsSetFile  string
 
 	vaultsVarsSetCmd = &cobra.Command{
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var vars []string
 			if len(args) >= 0 {
@@ -136,9 +124,6 @@ var (
 
 	vaultsVarsShowCmd = &cobra.Command{
 		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			_, err := service.ShowVar(cli.ShowVarConfig{
@@ -159,9 +144,6 @@ var (
 
 	vaultsVarsDeleteCmd = &cobra.Command{
 		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			_, err := service.DeleteVar(cli.DeleteVarConfig{
@@ -191,9 +173,6 @@ var (
 	oidcTokenCreateProvider string
 
 	vaultsOidcTokensCreateCmd = &cobra.Command{
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			_, err := service.CreateVaultOidcToken(cli.CreateVaultOidcTokenConfig{
@@ -217,9 +196,6 @@ var (
 	setSecretsFile  string
 
 	vaultsSetSecretsCmd = &cobra.Command{
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var secrets []string
 			if len(args) >= 0 {

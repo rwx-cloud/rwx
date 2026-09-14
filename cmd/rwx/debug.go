@@ -11,9 +11,6 @@ var DebugSession string
 var debugCmd = &cobra.Command{
 	GroupID: "execution",
 	Args:    cobra.ExactArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return service.DebugTask(cli.DebugTaskConfig{DebugKey: args[0], Session: DebugSession})
 	},

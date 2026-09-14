@@ -12,9 +12,6 @@ var SSHSessionMaxDuration string
 var sshCmd = &cobra.Command{
 	GroupID: "execution",
 	Args:    cobra.ExactArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return service.AttachSSHSession(cli.AttachSSHSessionConfig{
 			TaskID:      args[0],

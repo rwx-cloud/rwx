@@ -22,9 +22,6 @@ var (
 
 	lintCmd = &cobra.Command{
 		GroupID: "definitions",
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			outputFormat := LintOutputFormat
 			if cmd.Flags().Changed("json") {

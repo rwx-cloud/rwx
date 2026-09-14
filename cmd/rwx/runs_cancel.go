@@ -15,9 +15,6 @@ var runsCancelCmd = &cobra.Command{
 	Short: "Cancel a run",
 	Long:  `Cancel a run that is in progress.`,
 	Args:  cobra.ExactArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		result, err := service.CancelRun(cli.CancelRunConfig{RunID: args[0]})
 		if err != nil {

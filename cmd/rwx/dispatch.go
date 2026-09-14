@@ -26,9 +26,6 @@ var (
 	dispatchCmd = &cobra.Command{
 		GroupID: "api",
 		Args:    cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dispatchKey := args[0]
 

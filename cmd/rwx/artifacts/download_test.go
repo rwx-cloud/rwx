@@ -9,7 +9,7 @@ import (
 )
 
 func TestDownloadOutputFlagSurface(t *testing.T) {
-	InitDownload(func() error { return nil }, func() cli.Service { return cli.Service{} }, func() bool { return false })
+	InitDownload(func() cli.Service { return cli.Service{} }, func() bool { return false })
 	flags := DownloadCmd.Flags()
 
 	require.NotNil(t, flags.Lookup("output"))

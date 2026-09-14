@@ -16,9 +16,9 @@ var imageCmd = &cobra.Command{
 var pushCmd *cobra.Command
 
 func init() {
-	image.InitPush(requireAccessToken, func() cli.Service { return service }, useJsonOutput)
-	image.InitBuild(requireAccessToken, ParseInitParameters, func() cli.Service { return service }, useJsonOutput)
-	image.InitPull(requireAccessToken, func() cli.Service { return service }, useJsonOutput)
+	image.InitPush(func() cli.Service { return service }, useJsonOutput)
+	image.InitBuild(ParseInitParameters, func() cli.Service { return service }, useJsonOutput)
+	image.InitPull(func() cli.Service { return service }, useJsonOutput)
 	imageCmd.AddCommand(image.PushCmd)
 	imageCmd.AddCommand(image.BuildCmd)
 	imageCmd.AddCommand(image.PullCmd)
