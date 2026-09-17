@@ -67,3 +67,8 @@ tasks:
     call: ${{ run.dir }}/integration/whoami-test.yml
     init:
       ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-vaults-test
+    call: ${{ run.dir }}/integration/vaults-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
