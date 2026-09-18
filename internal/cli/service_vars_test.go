@@ -101,6 +101,35 @@ func TestService_SetVars(t *testing.T) {
 	})
 }
 
+func TestService_ListVars(t *testing.T) {
+	t.Run("prints names and values", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockAPI.MockListVars = func(cfg api.ListVarsConfig) (*api.ListVarsResult, error) {
+			require.Equal(t, "deploys", cfg.VaultName)
+			return &api.ListVarsResult{Vars: []api.Var{
+				{Name: "API_URL", Value: "https://example.com"},
+				{Name: "REGION", Value: "us-east-1"},
+			}}, nil
+		}
+
+		result, err := s.service.ListVars(cli.ListVarsConfig{Vault: "deploys"})
+		require.NoError(t, err)
+		require.Len(t, result.Vars, 2)
+		require.Equal(t, "NAME     VALUE\nAPI_URL  https://example.com\nREGION   us-east-1\n", s.mockStdout.String())
+	})
+
+	t.Run("uses PascalCase JSON fields", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockAPI.MockListVars = func(cfg api.ListVarsConfig) (*api.ListVarsResult, error) {
+			return &api.ListVarsResult{Vars: []api.Var{{Name: "API_URL", Value: "https://example.com"}}}, nil
+		}
+
+		_, err := s.service.ListVars(cli.ListVarsConfig{Vault: "default", Json: true})
+		require.NoError(t, err)
+		require.JSONEq(t, `{"Vars":[{"Name":"API_URL","Value":"https://example.com"}]}`, s.mockStdout.String())
+	})
+}
+
 func TestService_ShowVar(t *testing.T) {
 	t.Run("shows a var", func(t *testing.T) {
 		s := setupTest(t)
