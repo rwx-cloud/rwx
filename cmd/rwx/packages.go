@@ -6,6 +6,7 @@ import (
 )
 
 var packagesCmd = &cobra.Command{
+	Aliases: []string{"package"},
 	GroupID: "definitions",
 	Hidden:  true,
 	Short:   "Manage RWX packages",
@@ -14,7 +15,33 @@ var packagesCmd = &cobra.Command{
 
 var (
 	PackagesAllowMajorVersionChange bool
+	PackagesBuildTimestamp          string
 	PackagesShowNoReadme            bool
+
+	packagesBuildCmd = &cobra.Command{
+		Args: cobra.MaximumNArgs(1),
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			return requireAccessToken()
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			directory := "."
+			if len(args) == 1 {
+				directory = args[0]
+			}
+
+			_, err := service.BuildPackage(cli.PackageBuildConfig{
+				Directory: directory,
+				Timestamp: PackagesBuildTimestamp,
+				Json:      useJsonOutput(),
+			})
+			return err
+		},
+		Short: "Build and upload a package",
+		Long: "Build and upload a package.\n" +
+			"Zips the contents of the given directory (the current directory by default), " +
+			"uploads it to RWX, and prints the resulting content digest.",
+		Use: "build [flags] [directory]",
+	}
 
 	packagesListCmd = &cobra.Command{
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -66,9 +93,11 @@ var (
 )
 
 func init() {
+	packagesBuildCmd.Flags().StringVar(&PackagesBuildTimestamp, "timestamp", "", "normalize file modification times in the zip to this `timestamp` (format: YYYYMMDDHHmm) for reproducible builds")
 	packagesShowCmd.Flags().BoolVar(&PackagesShowNoReadme, "no-readme", false, "hide the readme documentation")
 	packagesUpdateCmd.Flags().BoolVar(&PackagesAllowMajorVersionChange, "allow-major-version-change", false, "update packages to the latest major version")
 	addRwxDirFlag(packagesUpdateCmd)
+	packagesCmd.AddCommand(packagesBuildCmd)
 	packagesCmd.AddCommand(packagesListCmd)
 	packagesCmd.AddCommand(packagesShowCmd)
 	packagesCmd.AddCommand(packagesUpdateCmd)
