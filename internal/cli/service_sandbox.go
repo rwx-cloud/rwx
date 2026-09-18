@@ -641,9 +641,10 @@ func (s Service) TunnelSandbox(cfg TunnelSandboxConfig) (*SandboxTunnelResult, e
 		return nil, fmt.Errorf("unable to use background process %q: %w\n\nStart it with:\n  %s", cfg.Key, err, startCommand)
 	}
 	if process.Status != "running" {
+		logsCommand := fmt.Sprintf("rwx sandbox background logs --key %s", cfg.Key)
 		return nil, fmt.Errorf(
-			"background process %q is not running (status: %s)\n\nStart it with:\n  %s",
-			cfg.Key, process.Status, startCommand,
+			"background process %q is not running (status: %s)\n\nView logs with:\n  %s\n\nStart it with:\n  %s",
+			cfg.Key, process.Status, logsCommand, startCommand,
 		)
 	}
 
