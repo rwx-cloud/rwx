@@ -1731,27 +1731,42 @@ func TestService_TunnelSandbox(t *testing.T) {
 		require.ErrorContains(t, err, "Start it with:\n  rwx sandbox background --key missing -- <command>")
 	})
 
-	t.Run("does not tunnel to a stopped managed process", func(t *testing.T) {
-		setup, commands := setupTunnel(t)
-		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
-			*commands = append(*commands, command)
-			if strings.HasPrefix(command, "__rwx_sandbox_process_status__ ") {
-				return 0, `{"key":"web","status":"stopped"}`, nil
+	for _, tc := range []struct {
+		status string
+		runID  string
+	}{
+		{status: "exited"},
+		{status: "stopped", runID: "run-sandbox"},
+	} {
+		t.Run("shows logs and start commands for managed process with status "+tc.status, func(t *testing.T) {
+			setup, commands := setupTunnel(t)
+			setup.mockVCS.MockGetBranch = "main"
+			configFile := setup.absConfig(".rwx/sandbox.yml")
+			seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+				"main:" + configFile: {RunID: "run-sandbox", ConfigFile: configFile},
+			})
+			setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+				*commands = append(*commands, command)
+				if strings.HasPrefix(command, "__rwx_sandbox_process_status__ ") {
+					return 0, fmt.Sprintf(`{"key":"rails-web","status":%q}`, tc.status), nil
+				}
+				return 0, "", nil
 			}
-			return 0, "", nil
-		}
-		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
-			require.Fail(t, "a stopped process must not open a tunnel")
-			return rwxssh.TunnelResult{}, nil
-		}
+			setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+				require.Fail(t, "a non-running process must not open a tunnel")
+				return rwxssh.TunnelResult{}, nil
+			}
 
-		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{
-			Key: "web", TargetPort: 3001, RunID: "run-sandbox", Json: true,
+			_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{
+				Key: "rails-web", TargetPort: 3001, RunID: tc.runID, Json: true,
+			})
+
+			require.EqualError(t, err, fmt.Sprintf(
+				"background process \"rails-web\" is not running (status: %s)\n\nView logs with:\n  rwx sandbox background logs --key rails-web\n\nStart it with:\n  rwx sandbox background --key rails-web -- <command>",
+				tc.status,
+			))
 		})
-
-		require.ErrorContains(t, err, `background process "web" is not running (status: stopped)`)
-		require.ErrorContains(t, err, "Start it with:\n  rwx sandbox background --key web -- <command>")
-	})
+	}
 
 	t.Run("validates the tunnel key and sandbox port", func(t *testing.T) {
 		setup := setupTest(t)
