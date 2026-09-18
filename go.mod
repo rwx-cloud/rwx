@@ -2,7 +2,7 @@ module github.com/rwx-cloud/rwx
 
 go 1.26.0
 
-toolchain go1.26.4
+toolchain go1.27.1
 
 require (
 	al.essio.dev/pkg/shellescape v1.6.1
