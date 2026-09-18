@@ -312,10 +312,9 @@ the port is forwarded locally and its localhost URL is printed.`,
 }
 
 var sandboxBackgroundRestartCmd = &cobra.Command{
-	Use:    "restart",
-	Short:  "Sync changes and restart a sandbox background process",
-	Hidden: true,
-	Args:   cobra.NoArgs,
+	Use:   "restart",
+	Short: "Sync changes and restart a sandbox background process",
+	Args:  cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireExperimentalSandboxAccess()
 	},
@@ -373,10 +372,9 @@ var sandboxTunnelCmd = &cobra.Command{
 }
 
 var sandboxBackgroundStopCmd = &cobra.Command{
-	Use:    "stop",
-	Short:  "Stop a sandbox background process",
-	Hidden: true,
-	Args:   cobra.NoArgs,
+	Use:   "stop",
+	Short: "Stop a sandbox background process",
+	Args:  cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireExperimentalSandboxAccess()
 	},
@@ -402,10 +400,9 @@ var sandboxBackgroundStopCmd = &cobra.Command{
 }
 
 var sandboxBackgroundLogsCmd = &cobra.Command{
-	Use:    "logs",
-	Short:  "Show logs for a sandbox background process",
-	Hidden: true,
-	Args:   cobra.NoArgs,
+	Use:   "logs",
+	Short: "Show logs for a sandbox background process",
+	Args:  cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireExperimentalSandboxAccess()
 	},

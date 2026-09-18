@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -32,12 +33,25 @@ func TestSandboxBackgroundCommandIsHidden(t *testing.T) {
 	require.Nil(t, sandboxBackgroundCmd.Flags().Lookup("dir"))
 	require.Nil(t, sandboxBackgroundCmd.Flags().Lookup("init"))
 	require.Equal(t, "restart", sandboxBackgroundRestartCmd.Use)
-	require.True(t, sandboxBackgroundRestartCmd.Hidden)
+	require.False(t, sandboxBackgroundRestartCmd.Hidden)
 	require.Equal(t, "stop", sandboxBackgroundStopCmd.Use)
-	require.True(t, sandboxBackgroundStopCmd.Hidden)
+	require.False(t, sandboxBackgroundStopCmd.Hidden)
 	require.Equal(t, "logs", sandboxBackgroundLogsCmd.Use)
-	require.True(t, sandboxBackgroundLogsCmd.Hidden)
+	require.False(t, sandboxBackgroundLogsCmd.Hidden)
 	require.NotNil(t, sandboxBackgroundLogsCmd.Flags().Lookup("follow"))
+}
+
+func TestSandboxBackgroundHelpListsSubcommands(t *testing.T) {
+	originalOutput := sandboxBackgroundCmd.OutOrStdout()
+	t.Cleanup(func() { sandboxBackgroundCmd.SetOut(originalOutput) })
+	var output bytes.Buffer
+	sandboxBackgroundCmd.SetOut(&output)
+
+	require.NoError(t, sandboxBackgroundCmd.Help())
+	require.Contains(t, output.String(), "Available Commands:")
+	require.Regexp(t, `(?m)^\s+restart\s+Sync changes and restart a sandbox background process$`, output.String())
+	require.Regexp(t, `(?m)^\s+stop\s+Stop a sandbox background process$`, output.String())
+	require.Regexp(t, `(?m)^\s+logs\s+Show logs for a sandbox background process$`, output.String())
 }
 
 func TestSandboxBackgroundNameAndKeyFlags(t *testing.T) {
