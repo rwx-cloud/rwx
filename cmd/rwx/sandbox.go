@@ -237,18 +237,23 @@ CONFIG FILE
 }
 
 var sandboxPushCmd = &cobra.Command{
-	Use:    "push",
+	Use:    "push [config-file]",
 	Short:  "Push local changes to a sandbox",
 	Hidden: true,
-	Args:   cobra.NoArgs,
+	Args:   cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireExperimentalSandboxAccess()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var configFile string
+		if len(args) > 0 {
+			configFile = cli.AbsConfigFile(args[0])
+		}
 		useJson := useJsonOutput()
 		result, err := service.SyncSandbox(cli.SyncSandboxConfig{
-			RunID: sandboxRunID,
-			Json:  useJson,
+			ConfigFile: configFile,
+			RunID:      sandboxRunID,
+			Json:       useJson,
 		})
 		if err != nil {
 			return err
@@ -267,7 +272,7 @@ var sandboxPushCmd = &cobra.Command{
 }
 
 var sandboxBackgroundCmd = &cobra.Command{
-	Use:    "background -- <command>",
+	Use:    "background [config-file] -- <command>",
 	Short:  "Start or replace a sandbox background process",
 	Hidden: true,
 	Long: `Start or replace a named managed process in an existing sandbox.
@@ -280,14 +285,19 @@ the port is forwarded locally and its localhost URL is printed.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dashIndex := cmd.ArgsLenAtDash()
 		if dashIndex < 0 || dashIndex >= len(args) {
-			return fmt.Errorf("No command specified. Usage: rwx sandbox background -- <command>")
+			return fmt.Errorf("No command specified. Usage: rwx sandbox background [config-file] -- <command>")
 		}
-		if dashIndex != 0 {
-			return fmt.Errorf("Unexpected arguments before '--'. Usage: rwx sandbox background -- <command>")
+		if dashIndex > 1 {
+			return fmt.Errorf("Unexpected arguments before '--'. Usage: rwx sandbox background [config-file] -- <command>")
+		}
+		var configFile string
+		if dashIndex == 1 {
+			configFile = cli.AbsConfigFile(args[0])
 		}
 
 		useJson := useJsonOutput()
 		result, err := service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			ConfigFile: configFile,
 			Command:    args[dashIndex:],
 			Name:       sandboxBackgroundName,
 			TargetPort: sandboxBackgroundPort,
@@ -312,18 +322,23 @@ the port is forwarded locally and its localhost URL is printed.`,
 }
 
 var sandboxBackgroundRestartCmd = &cobra.Command{
-	Use:   "restart",
+	Use:   "restart [config-file]",
 	Short: "Sync changes and restart a sandbox background process",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireExperimentalSandboxAccess()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var configFile string
+		if len(args) > 0 {
+			configFile = cli.AbsConfigFile(args[0])
+		}
 		useJson := useJsonOutput()
 		result, err := service.RestartSandboxBackground(cli.SandboxBackgroundConfig{
-			Name:  sandboxBackgroundName,
-			RunID: sandboxRunID,
-			Json:  useJson,
+			ConfigFile: configFile,
+			Name:       sandboxBackgroundName,
+			RunID:      sandboxRunID,
+			Json:       useJson,
 		})
 		if err != nil {
 			return err
@@ -340,16 +355,21 @@ var sandboxBackgroundRestartCmd = &cobra.Command{
 }
 
 var sandboxTunnelCmd = &cobra.Command{
-	Use:    "tunnel",
+	Use:    "tunnel [config-file]",
 	Short:  "Expose a sandbox background process through a local tunnel",
 	Hidden: true,
-	Args:   cobra.NoArgs,
+	Args:   cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireExperimentalSandboxAccess()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var configFile string
+		if len(args) > 0 {
+			configFile = cli.AbsConfigFile(args[0])
+		}
 		useJson := useJsonOutput()
 		result, err := service.TunnelSandbox(cli.TunnelSandboxConfig{
+			ConfigFile: configFile,
 			Key:        sandboxTunnelKey,
 			TargetPort: sandboxTunnelPort,
 			LocalPort:  sandboxTunnelLocalPort,
@@ -372,18 +392,23 @@ var sandboxTunnelCmd = &cobra.Command{
 }
 
 var sandboxBackgroundStopCmd = &cobra.Command{
-	Use:   "stop",
+	Use:   "stop [config-file]",
 	Short: "Stop a sandbox background process",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireExperimentalSandboxAccess()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var configFile string
+		if len(args) > 0 {
+			configFile = cli.AbsConfigFile(args[0])
+		}
 		useJson := useJsonOutput()
 		result, err := service.StopSandboxBackground(cli.SandboxBackgroundConfig{
-			Name:  sandboxBackgroundName,
-			RunID: sandboxRunID,
-			Json:  useJson,
+			ConfigFile: configFile,
+			Name:       sandboxBackgroundName,
+			RunID:      sandboxRunID,
+			Json:       useJson,
 		})
 		if err != nil {
 			return err
@@ -400,22 +425,27 @@ var sandboxBackgroundStopCmd = &cobra.Command{
 }
 
 var sandboxBackgroundLogsCmd = &cobra.Command{
-	Use:   "logs",
+	Use:   "logs [config-file]",
 	Short: "Show logs for a sandbox background process",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		return requireExperimentalSandboxAccess()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var configFile string
+		if len(args) > 0 {
+			configFile = cli.AbsConfigFile(args[0])
+		}
 		useJson := useJsonOutput()
 		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		result, err := service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
-			Context: ctx,
-			Name:    sandboxBackgroundName,
-			RunID:   sandboxRunID,
-			Json:    useJson,
-			Follow:  sandboxBackgroundFollow,
+			ConfigFile: configFile,
+			Context:    ctx,
+			Name:       sandboxBackgroundName,
+			RunID:      sandboxRunID,
+			Json:       useJson,
+			Follow:     sandboxBackgroundFollow,
 		})
 		if err != nil {
 			return err
