@@ -74,11 +74,13 @@ type ExecSandboxConfig struct {
 }
 
 type SyncSandboxConfig struct {
-	RunID string
-	Json  bool
+	ConfigFile string
+	RunID      string
+	Json       bool
 }
 
 type BackgroundSandboxConfig struct {
+	ConfigFile string
 	Command    []string
 	Name       string
 	TargetPort int
@@ -89,12 +91,14 @@ type BackgroundSandboxConfig struct {
 }
 
 type SandboxBackgroundConfig struct {
-	Name  string
-	RunID string
-	Json  bool
+	ConfigFile string
+	Name       string
+	RunID      string
+	Json       bool
 }
 
 type TunnelSandboxConfig struct {
+	ConfigFile string
 	Key        string
 	TargetPort int
 	LocalPort  int
@@ -104,11 +108,12 @@ type TunnelSandboxConfig struct {
 }
 
 type SandboxBackgroundLogsConfig struct {
-	Context context.Context
-	Name    string
-	RunID   string
-	Json    bool
-	Follow  bool
+	ConfigFile string
+	Context    context.Context
+	Name       string
+	RunID      string
+	Json       bool
+	Follow     bool
 }
 
 type ListSandboxesConfig struct {
@@ -549,6 +554,7 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 
 func (s Service) SyncSandbox(cfg SyncSandboxConfig) (*SyncSandboxResult, error) {
 	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		ConfigFile:      cfg.ConfigFile,
 		RunID:           cfg.RunID,
 		Json:            cfg.Json,
 		RequireExisting: true,
@@ -582,6 +588,7 @@ func (s Service) BackgroundSandbox(cfg BackgroundSandboxConfig) (*SandboxBackgro
 	}
 
 	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		ConfigFile:      cfg.ConfigFile,
 		RunID:           cfg.RunID,
 		Json:            cfg.Json,
 		RequireExisting: true,
@@ -622,6 +629,7 @@ func (s Service) TunnelSandbox(cfg TunnelSandboxConfig) (*SandboxTunnelResult, e
 	}
 
 	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		ConfigFile:      cfg.ConfigFile,
 		RunID:           cfg.RunID,
 		Json:            cfg.Json,
 		RequireExisting: true,
@@ -697,6 +705,7 @@ func (s Service) RestartSandboxBackground(cfg SandboxBackgroundConfig) (*Sandbox
 		return nil, err
 	}
 	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		ConfigFile:      cfg.ConfigFile,
 		RunID:           cfg.RunID,
 		Json:            cfg.Json,
 		RequireExisting: true,
@@ -722,6 +731,7 @@ func (s Service) StopSandboxBackground(cfg SandboxBackgroundConfig) (*SandboxBac
 		return nil, err
 	}
 	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		ConfigFile:      cfg.ConfigFile,
 		RunID:           cfg.RunID,
 		Json:            cfg.Json,
 		RequireExisting: true,
@@ -764,6 +774,7 @@ func (s Service) LogsSandboxBackground(cfg SandboxBackgroundLogsConfig) (*Sandbo
 		return nil, err
 	}
 	sandbox, err := s.prepareSandboxOperation(sandboxOperationConfig{
+		ConfigFile:      cfg.ConfigFile,
 		RunID:           cfg.RunID,
 		Json:            cfg.Json,
 		RequireExisting: true,
@@ -1216,9 +1227,6 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 				found = true
 			} else if len(activeSessions) > 1 {
 				UnlockSandboxStorage(lockFile)
-				if cfg.RequireExisting {
-					return nil, fmt.Errorf("Multiple active sandboxes found for branch %s.\nUse --id to select one.", branch)
-				}
 				return nil, fmt.Errorf("Multiple active sandboxes found for branch %s.\nSpecify a config file to select one, or use --id to specify a run ID.", branch)
 			}
 		}
