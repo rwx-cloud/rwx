@@ -19,10 +19,11 @@ import (
 type CliState struct {
 	Branch     string `json:"branch"`
 	ConfigFile string `json:"configFile"`
+	Repository string `json:"repository,omitempty"`
 }
 
-func EncodeCliState(branch, configFile string) string {
-	state := CliState{Branch: branch, ConfigFile: configFile}
+func EncodeCliState(branch, configFile, repository string) string {
+	state := CliState{Branch: branch, ConfigFile: configFile, Repository: repository}
 	data, _ := json.Marshal(state)
 	return base64.StdEncoding.EncodeToString(data)
 }

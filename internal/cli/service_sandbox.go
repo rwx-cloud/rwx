@@ -441,7 +441,7 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 		Title:          title,
 		InitParameters: cfg.InitParameters,
 		Patchable:      true,
-		CliState:       EncodeCliState(branch, cfg.ConfigFile),
+		CliState:       EncodeCliState(branch, cfg.ConfigFile, normalizeGitRepository(s.VCSClient.GetOriginUrl())),
 	})
 
 	if err != nil {
@@ -1159,6 +1159,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 		}
 
 		var session *SandboxSession
+		var activeSessions []SandboxSession
 		found := false
 
 		if cfg.ConfigFile != "" {
@@ -1203,7 +1204,6 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 			// Filter to only active sessions. A ready sandbox reports
 			// Polling.Completed=true with Sandboxable=true; only prune when
 			// the run finished without becoming sandboxable.
-			var activeSessions []SandboxSession
 			for _, sess := range sessions {
 				connInfo, err := s.APIClient.GetSandboxConnectionInfo(sess.RunID, sess.ScopedToken)
 				if err == nil && (connInfo.Sandboxable || !connInfo.Polling.Completed) {
@@ -1215,91 +1215,150 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 				}
 			}
 			_ = storage.Save()
-
-			if len(activeSessions) == 1 {
-				runID = activeSessions[0].RunID
-				configFile = activeSessions[0].ConfigFile
-				scopedToken = activeSessions[0].ScopedToken
-				sessionRunURL = activeSessions[0].RunURL
-				storedConfigHash = activeSessions[0].ConfigHash
-				execCount = activeSessions[0].ExecCount
-				resetNagShown = activeSessions[0].ResetNagShown
-				found = true
-			} else if len(activeSessions) > 1 {
-				UnlockSandboxStorage(lockFile)
-				return nil, fmt.Errorf("Multiple active sandboxes found for branch %s.\nSpecify a config file to select one, or use --id to specify a run ID.", branch)
-			}
 		}
 
-		// Resolve config file once for both remote recovery and auto-create
 		cfgFile := cfg.ConfigFile
 		if cfgFile == "" {
 			cfgFile = FindDefaultSandboxConfigFile()
 		}
 
+		var historicalRuns []api.RunSummary
+		selectedFromHistory := false
 		if !found {
-			// Check if a matching sandbox already exists remotely
-			listResult, listErr := s.APIClient.ListSandboxRuns(s.Stderr)
-			if listErr == nil {
-				for _, run := range listResult.Runs {
-					if run.CliState == nil || *run.CliState == "" {
+			listResult, listErr := s.APIClient.ListHistoricalSandboxRuns(s.Stderr)
+			if listErr != nil {
+				UnlockSandboxStorage(lockFile)
+				return nil, errors.Wrap(listErr, "unable to list historical sandbox runs")
+			}
+			repository := normalizeGitRepository(s.VCSClient.GetOriginUrl())
+			repositoryRoot := s.VCSClient.GetTopLevel()
+			for _, run := range listResult.Runs {
+				if run.CliState == nil || *run.CliState == "" {
+					continue
+				}
+				state, decErr := DecodeCliState(*run.CliState)
+				if decErr != nil {
+					continue
+				}
+				if state.Repository != "" {
+					if state.Repository != repository {
 						continue
 					}
-					state, decErr := DecodeCliState(*run.CliState)
-					if decErr != nil {
+				}
+				if repositoryRoot != "" {
+					relativeConfig, relErr := filepath.Rel(repositoryRoot, state.ConfigFile)
+					if relErr != nil || relativeConfig == ".." || strings.HasPrefix(relativeConfig, ".."+string(filepath.Separator)) {
 						continue
 					}
-					branchMatch := state.Branch == branch
-					if !branchMatch && IsDetachedBranch(branch) && IsDetachedBranch(state.Branch) {
-						storedSHA := DetachedShortSHA(state.Branch)
-						if storedSHA != "" {
-							branchMatch = s.VCSClient.IsAncestor(storedSHA, "HEAD")
-						}
+				}
+				branchMatch := state.Branch == branch
+				if !branchMatch && IsDetachedBranch(branch) && IsDetachedBranch(state.Branch) {
+					storedSHA := DetachedShortSHA(state.Branch)
+					if storedSHA != "" {
+						branchMatch = s.VCSClient.IsAncestor(storedSHA, "HEAD")
 					}
-					if branchMatch && state.ConfigFile == cfgFile {
-						// Verify the remote sandbox is still alive before reusing.
-						// A ready sandbox reports Polling.Completed=true with Sandboxable=true;
-						// only skip when the run finished without becoming sandboxable.
-						connInfo, connErr := s.APIClient.GetSandboxConnectionInfo(run.ID, "")
-						if connErr != nil || (connInfo.Polling.Completed && !connInfo.Sandboxable) {
-							continue
-						}
-
-						runID = run.ID
-						configFile = cfgFile
-						sessionRunURL = run.RunURL
-
-						// Create a scoped token for this recovered session
-						tokenResult, tokenErr := s.APIClient.CreateSandboxToken(api.CreateSandboxTokenConfig{
-							RunID: run.ID,
-						})
-						if tokenErr != nil {
-							fmt.Fprintf(s.Stderr, "Warning: Unable to create scoped token: %v\n", tokenErr)
-						} else {
-							scopedToken = tokenResult.Token
-						}
-
-						// Store locally so future execs find it without an API call
-						storage.SetSession(branch, cfgFile, SandboxSession{
-							RunID:       run.ID,
-							ConfigFile:  cfgFile,
-							ScopedToken: scopedToken,
-							RunURL:      run.RunURL,
-							ConfigHash:  HashConfigFile(cfgFile),
-						})
-						if saveErr := storage.Save(); saveErr != nil {
-							fmt.Fprintf(s.Stderr, "Warning: Unable to save sandbox session: %v\n", saveErr)
-						}
-
-						found = true
-						break
+				}
+				if branchMatch {
+					historicalRuns = append(historicalRuns, run)
+					if state.ConfigFile == cfgFile {
+						selectedFromHistory = true
 					}
+				}
+			}
+		}
+
+		nonDefaultDefinitionUsed := false
+		if cfg.ConfigFile == "" {
+			for _, activeSession := range activeSessions {
+				if activeSession.ConfigFile != cfgFile {
+					nonDefaultDefinitionUsed = true
+				}
+			}
+			for _, run := range historicalRuns {
+				state, decErr := DecodeCliState(*run.CliState)
+				if decErr == nil && state.ConfigFile != cfgFile {
+					nonDefaultDefinitionUsed = true
+				}
+			}
+		}
+
+		if !found {
+			for _, activeSession := range activeSessions {
+				if activeSession.ConfigFile == cfgFile {
+					runID = activeSession.RunID
+					configFile = activeSession.ConfigFile
+					scopedToken = activeSession.ScopedToken
+					sessionRunURL = activeSession.RunURL
+					storedConfigHash = activeSession.ConfigHash
+					execCount = activeSession.ExecCount
+					resetNagShown = activeSession.ResetNagShown
+					found = true
+					break
+				}
+			}
+		}
+
+		if !found {
+			for _, run := range historicalRuns {
+				if run.CliState == nil || *run.CliState == "" {
+					continue
+				}
+				state, decErr := DecodeCliState(*run.CliState)
+				if decErr != nil {
+					continue
+				}
+				if state.ConfigFile == cfgFile {
+					// Verify the remote sandbox is still alive before reusing.
+					// A ready sandbox reports Polling.Completed=true with Sandboxable=true;
+					// only skip when the run finished without becoming sandboxable.
+					connInfo, connErr := s.APIClient.GetSandboxConnectionInfo(run.ID, "")
+					if connErr != nil || (connInfo.Polling.Completed && !connInfo.Sandboxable) {
+						continue
+					}
+
+					runID = run.ID
+					configFile = cfgFile
+					sessionRunURL = run.RunURL
+
+					// Create a scoped token for this recovered session
+					tokenResult, tokenErr := s.APIClient.CreateSandboxToken(api.CreateSandboxTokenConfig{
+						RunID: run.ID,
+					})
+					if tokenErr != nil {
+						fmt.Fprintf(s.Stderr, "Warning: Unable to create scoped token: %v\n", tokenErr)
+					} else {
+						scopedToken = tokenResult.Token
+					}
+
+					// Store locally so future execs find it without an API call
+					storage.SetSession(branch, cfgFile, SandboxSession{
+						RunID:       run.ID,
+						ConfigFile:  cfgFile,
+						ScopedToken: scopedToken,
+						RunURL:      run.RunURL,
+						ConfigHash:  HashConfigFile(cfgFile),
+					})
+					if saveErr := storage.Save(); saveErr != nil {
+						fmt.Fprintf(s.Stderr, "Warning: Unable to save sandbox session: %v\n", saveErr)
+					}
+
+					found = true
+					break
 				}
 			}
 		}
 
 		if !found && cfg.RequireExisting {
 			UnlockSandboxStorage(lockFile)
+			if nonDefaultDefinitionUsed {
+				s.recordTelemetry("sandbox.ambiguous_selection", map[string]any{
+					"resolution": "definition_required",
+				})
+				return nil, fmt.Errorf("No active sandbox is using the default definition for branch %s.\nSpecify a config file to select a non-default sandbox, or use --id to specify a run ID.", branch)
+			}
+			if selectedFromHistory {
+				return nil, fmt.Errorf("The sandbox selected from %s is no longer active.\nStart a replacement with 'rwx sandbox exec', specify another config file, or use --id to select an existing run.", cfgFile)
+			}
 			return nil, fmt.Errorf("No active sandbox found for branch %s.\nStart one with 'rwx sandbox start' or use --id to select an existing run.", branch)
 		}
 
@@ -1334,6 +1393,12 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 		}
 
 		if !found {
+			if nonDefaultDefinitionUsed {
+				fmt.Fprintf(s.Stderr, "Warning: A non-default sandbox definition has been used for branch %s. Starting a new sandbox with the default definition at %s.\n", branch, cfgFile)
+				s.recordTelemetry("sandbox.ambiguous_selection", map[string]any{
+					"resolution": "start_default",
+				})
+			}
 			// Pass the lock to StartSandbox so the "no session found → create
 			// new sandbox → persist session" sequence is atomic. StartSandbox
 			// will release it after the initial session is saved.
