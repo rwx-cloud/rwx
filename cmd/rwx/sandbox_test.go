@@ -11,6 +11,7 @@ import (
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
+	internalerrors "github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
@@ -225,6 +226,7 @@ func TestSandboxCommandsSelectDefinition(t *testing.T) {
 					return
 				}
 				if scenario == "omitted definition" {
+					require.ErrorIs(t, err, internalerrors.ErrSandboxDefinitionRequired)
 					require.ErrorContains(t, err, "No active sandbox is using the default definition")
 					require.ErrorContains(t, err, "Specify a config file to select a non-default sandbox, or use --id")
 					require.Equal(t, expectedChecks, checks)

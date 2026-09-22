@@ -4895,6 +4895,7 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 
 		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
 
+		require.ErrorIs(t, err, errors.ErrSandboxDefinitionRequired)
 		require.EqualError(t, err, "No active sandbox is using the default definition for branch detached@bbbbbbb.\nSpecify a config file to select a non-default sandbox, or use --id to specify a run ID.")
 		event := findEvent(setup.drainEvents(), "sandbox.ambiguous_selection")
 		require.NotNil(t, event)
@@ -4924,6 +4925,7 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 
 		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
 
+		require.ErrorIs(t, err, errors.ErrSandboxDefinitionRequired)
 		require.EqualError(t, err, "No active sandbox is using the default definition for branch main.\nSpecify a config file to select a non-default sandbox, or use --id to specify a run ID.")
 	})
 

@@ -1354,7 +1354,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 				s.recordTelemetry("sandbox.ambiguous_selection", map[string]any{
 					"resolution": "definition_required",
 				})
-				return nil, fmt.Errorf("No active sandbox is using the default definition for branch %s.\nSpecify a config file to select a non-default sandbox, or use --id to specify a run ID.", branch)
+				return nil, errors.WrapSentinel(fmt.Errorf("No active sandbox is using the default definition for branch %s.\nSpecify a config file to select a non-default sandbox, or use --id to specify a run ID.", branch), errors.ErrSandboxDefinitionRequired)
 			}
 			if selectedFromHistory {
 				return nil, fmt.Errorf("The sandbox selected from %s is no longer active.\nStart a replacement with 'rwx sandbox exec', specify another config file, or use --id to select an existing run.", cfgFile)
