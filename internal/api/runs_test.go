@@ -246,6 +246,49 @@ func TestAPIClient_ListRuns(t *testing.T) {
 	})
 }
 
+func TestAPIClient_ListSandboxRuns(t *testing.T) {
+	t.Run("keeps the active-only filter", func(t *testing.T) {
+		c := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			query := req.URL.Query()
+			require.Equal(t, "sandboxed", query.Get("result_status"))
+			require.Equal(t, "in_progress", query.Get("execution_status"))
+			require.Equal(t, "true", query.Get("my_runs"))
+			return &http.Response{StatusCode: 200, Body: jsonBody(t, api.ListRunsResult{})}, nil
+		})
+
+		_, err := c.ListSandboxRuns(io.Discard)
+		require.NoError(t, err)
+	})
+
+	t.Run("paginates historical runs without an execution filter", func(t *testing.T) {
+		next := "page-2"
+		requests := 0
+		c := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			requests++
+			query := req.URL.Query()
+			require.Equal(t, "sandboxed", query.Get("result_status"))
+			require.Empty(t, query.Get("execution_status"))
+			require.Empty(t, query.Get("my_runs"))
+			if requests == 1 {
+				require.Empty(t, query.Get("cursor"))
+				return &http.Response{StatusCode: 200, Body: jsonBody(t, api.ListRunsResult{
+					Runs:       []api.RunSummary{{ID: "run-1"}},
+					Pagination: api.ListRunsPagination{NextCursor: &next},
+				})}, nil
+			}
+			require.Equal(t, next, query.Get("cursor"))
+			return &http.Response{StatusCode: 200, Body: jsonBody(t, api.ListRunsResult{
+				Runs: []api.RunSummary{{ID: "run-2"}},
+			})}, nil
+		})
+
+		result, err := c.ListHistoricalSandboxRuns(io.Discard)
+		require.NoError(t, err)
+		require.Equal(t, []string{"run-1", "run-2"}, []string{result.Runs[0].ID, result.Runs[1].ID})
+		require.Equal(t, 2, requests)
+	})
+}
+
 // TestRunStatus_StatusHashShape pins the shared RunStatus to the status_hash shape
 // emitted by both the runs index `status` and results details, and guards against
 // regressing onto the divergent `runs#show` `run_status` shape.

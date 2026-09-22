@@ -61,6 +61,7 @@ type API struct {
 	MockGetRunPromptByTaskKey                         func(string, string) (string, error)
 	MockGetSandboxInitTemplate                        func() (api.SandboxInitTemplateResult, error)
 	MockListSandboxRuns                               func() (*api.ListSandboxRunsResult, error)
+	MockListHistoricalSandboxRuns                     func() (*api.ListSandboxRunsResult, error)
 	MockCancelRun                                     func(runID, scopedToken string) error
 }
 
@@ -437,6 +438,17 @@ func (c *API) ListSandboxRuns(_ io.Writer) (*api.ListSandboxRunsResult, error) {
 	}
 
 	return nil, errors.New("MockListSandboxRuns was not configured")
+}
+
+func (c *API) ListHistoricalSandboxRuns(_ io.Writer) (*api.ListSandboxRunsResult, error) {
+	if c.MockListHistoricalSandboxRuns != nil {
+		return c.MockListHistoricalSandboxRuns()
+	}
+	if c.MockListSandboxRuns != nil {
+		return c.MockListSandboxRuns()
+	}
+
+	return nil, errors.New("MockListHistoricalSandboxRuns was not configured")
 }
 
 func (c *API) CancelRun(runID, scopedToken string) error {
