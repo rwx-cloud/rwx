@@ -9,7 +9,7 @@ UNTRACKED_CONTENT="untracked-survives-content"
 
 cleanup() {
   rm -f "${UNTRACKED_FILE}" setup-artifact.txt
-  "${RWX_CLI}" sandbox stop 2>/dev/null || true
+  "${RWX_CLI}" sandbox stop "${SCRIPT_DIR}/definitions/sandbox-setup-sync.yml" 2>/dev/null || true
 }
 trap cleanup EXIT
 
