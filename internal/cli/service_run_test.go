@@ -17,6 +17,81 @@ import (
 
 var _ cli.APIClient = (*mocks.API)(nil)
 
+func TestService_InitiateRunUTF8(t *testing.T) {
+	for _, directory := range []string{".rwx", ".mint"} {
+		t.Run(directory, func(t *testing.T) {
+			s := setupTest(t)
+			dir := filepath.Join(s.tmp, directory)
+			require.NoError(t, os.MkdirAll(filepath.Join(dir, "scripts", "__pycache__"), 0o755))
+			runPath := filepath.Join(dir, "ci.yml")
+			// Omitting base forces a reload after the default base is inserted.
+			require.NoError(t, os.WriteFile(runPath, []byte("tasks:\n  - key: hello\n    run: echo café\n"), 0o644))
+			valid := "café 日本語 🚀 �\x00\n"
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "unicode.txt"), []byte(valid), 0o644))
+			invalidFiles := map[string][]byte{
+				"scripts/__pycache__/example.pyc": []byte(strings.Repeat("\xff", 6*1024*1024)),
+				"invalid.yml":                     {0xc3, 0x28},
+			}
+			for path, contents := range invalidFiles {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, path), contents, 0o644))
+			}
+			s.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
+				return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
+			}
+			s.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+				return &api.PackageVersionsResult{}, nil
+			}
+			called := false
+			s.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+				called = true
+				require.Len(t, cfg.TaskDefinitions, 1)
+				require.Contains(t, cfg.TaskDefinitions[0].FileContents, "café")
+				require.Contains(t, cfg.TaskDefinitions[0].FileContents, "ubuntu:24.04")
+				files := make(map[string]string)
+				for _, entry := range cfg.RwxDirectory {
+					files[entry.Path] = entry.FileContents
+				}
+				require.Equal(t, valid, files["unicode.txt"])
+				for path := range invalidFiles {
+					require.NotContains(t, files, path)
+				}
+				return &api.InitiateRunResult{RunID: "run-id", RunURL: "https://cloud.rwx.com/run-id"}, nil
+			}
+			_, err := s.service.InitiateRun(cli.InitiateRunConfig{MintFilePath: runPath, RwxDirectory: dir})
+			require.NoError(t, err)
+			require.True(t, called)
+			for path, contents := range invalidFiles {
+				warning := fmt.Sprintf("Warning: skipping %q because it is not valid UTF-8", filepath.Join(dir, path))
+				require.Equal(t, 1, strings.Count(s.mockStderr.String(), warning))
+				actual, err := os.ReadFile(filepath.Join(dir, path))
+				require.NoError(t, err)
+				require.Equal(t, contents, actual)
+			}
+		})
+	}
+
+	for _, path := range []string{".rwx/ci.yml", "outside.yml"} {
+		t.Run("rejects "+path, func(t *testing.T) {
+			s := setupTest(t)
+			dir := filepath.Join(s.tmp, ".rwx")
+			require.NoError(t, os.MkdirAll(dir, 0o755))
+			runPath := filepath.Join(s.tmp, path)
+			contents := []byte("tasks: []\n# invalid: \xff\n")
+			require.NoError(t, os.WriteFile(runPath, contents, 0o644))
+			s.mockAPI.MockInitiateRun = func(api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+				t.Fatal("invalid run definition must not be submitted")
+				return nil, nil
+			}
+			_, err := s.service.InitiateRun(cli.InitiateRunConfig{MintFilePath: runPath, RwxDirectory: dir})
+			require.EqualError(t, err, fmt.Sprintf("run definition %q is not valid UTF-8", runPath))
+			actual, err := os.ReadFile(runPath)
+			require.NoError(t, err)
+			require.Equal(t, contents, actual)
+			require.Empty(t, s.mockStderr.String())
+		})
+	}
+}
+
 func TestService_InitiatingRun(t *testing.T) {
 	t.Run("with a specific mint file and no specific directory", func(t *testing.T) {
 		t.Run("with a .mint directory", func(t *testing.T) {
