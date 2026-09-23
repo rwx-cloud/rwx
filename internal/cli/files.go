@@ -238,6 +238,10 @@ func rwxDirectoryEntries(dir string) ([]RwxDirectoryEntry, error) {
 }
 
 func readRwxDirectoryEntries(paths []string, relativeTo string) ([]RwxDirectoryEntry, error) {
+	return readRwxDirectoryEntriesMatching(paths, relativeTo, nil)
+}
+
+func readRwxDirectoryEntriesMatching(paths []string, relativeTo string, include func(RwxDirectoryEntry) bool) ([]RwxDirectoryEntry, error) {
 	entries := make([]RwxDirectoryEntry, 0)
 	var totalSize int
 	var patchSize int
@@ -264,6 +268,10 @@ func readRwxDirectoryEntries(paths []string, relativeTo string) ([]RwxDirectoryE
 				if slices.Contains(skipDirs, entry.Path) {
 					return filepath.SkipDir
 				}
+			}
+
+			if include != nil && !include(entry) {
+				return nil
 			}
 
 			totalSize += entrySize

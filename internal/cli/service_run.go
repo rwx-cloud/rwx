@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
@@ -165,6 +166,14 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		return nil, err
 	}
 
+	runDefinitionBytes, err := os.ReadFile(runDefinitionPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to read run definition %q", runDefinitionPath)
+	}
+	if !utf8.Valid(runDefinitionBytes) {
+		return nil, fmt.Errorf("run definition %q is not valid UTF-8", runDefinitionPath)
+	}
+
 	missingDependency := s.VCSClient.MissingDependency()
 	vcsInstalled := missingDependency == ""
 	insideRepository := s.VCSClient.IsInsideWorkTree()
@@ -281,8 +290,19 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		}
 	}
 
-	// Load directory entries
-	entries, err := rwxDirectoryEntries(rwxDirectoryPath)
+	// Filter before size accounting, and warn only once if files are reloaded.
+	warnedPaths := make(map[string]bool)
+	includeUploadEntry := func(entry RwxDirectoryEntry) bool {
+		if utf8.ValidString(entry.FileContents) {
+			return true
+		}
+		if !warnedPaths[entry.Path] {
+			fmt.Fprintf(s.Stderr, "Warning: skipping %q because it is not valid UTF-8\n\n", filepath.Join(rwxDirectoryPath, entry.Path))
+			warnedPaths[entry.Path] = true
+		}
+		return false
+	}
+	entries, err := readRwxDirectoryEntriesMatching([]string{rwxDirectoryPath}, rwxDirectoryPath, includeUploadEntry)
 	if err != nil {
 		if errors.Is(err, errors.ErrFileNotExists) && tempRwxDir == "" {
 			// User explicitly specified a directory that doesn't exist
@@ -309,7 +329,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		if err != nil {
 			return errors.Wrapf(err, "unable to reload %q", relativeRunDefinitionPath)
 		}
-		rwxDirectoryEntries, err := rwxDirectoryEntries(rwxDirectoryPath)
+		rwxDirectoryEntries, err := readRwxDirectoryEntriesMatching([]string{rwxDirectoryPath}, rwxDirectoryPath, includeUploadEntry)
 		if err != nil && !errors.Is(err, errors.ErrFileNotExists) {
 			return errors.Wrapf(err, "unable to reload rwx directory %q", rwxDirectoryPath)
 		}
