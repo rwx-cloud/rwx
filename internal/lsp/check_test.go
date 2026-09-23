@@ -2,10 +2,54 @@ package lsp
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestRunCheckProtocolAccessToken(t *testing.T) {
+	for _, token := range []string{"resolved-token", ""} {
+		t.Run(token, func(t *testing.T) {
+			reader, writer := io.Pipe()
+			defer reader.Close()
+			defer writer.Close()
+			serverReader, clientWriter := io.Pipe()
+			defer serverReader.Close()
+			defer clientWriter.Close()
+			conn := newJSONRPCConn(reader, clientWriter)
+			server := newJSONRPCConn(serverReader, writer)
+			messages := make(chan jsonrpcMessage, 1)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			go conn.readLoop(ctx)
+			go func() {
+				message, err := server.readMessage()
+				if err != nil {
+					return
+				}
+				messages <- message
+				response := `{"jsonrpc":"2.0","id":1,"result":{}}`
+				_, _ = fmt.Fprintf(writer, "Content-Length: %d\r\n\r\n%s", len(response), response)
+				_, _ = server.readMessage()
+			}()
+
+			_, _, err := runCheckProtocol(ctx, conn, t.TempDir(), nil, false, token)
+			require.NoError(t, err)
+			message := <-messages
+			require.Equal(t, "initialize", message.Method)
+			var params struct {
+				InitializationOptions map[string]string `json:"initializationOptions"`
+			}
+			require.NoError(t, json.Unmarshal(message.Params, &params))
+			require.Equal(t, map[string]string{"accessToken": token}, params.InitializationOptions)
+		})
+	}
+}
 
 func TestOutputCheckMultiLine_NoDiagnostics(t *testing.T) {
 	var buf bytes.Buffer

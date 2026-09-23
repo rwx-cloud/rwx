@@ -102,6 +102,17 @@ tasks:
         run: echo "hello"
       EOF
 
+      cat > "$tmpdir/.rwx/private-package.yml" << 'EOF'
+      package:
+        visibility: private
+        name: acme/internal
+        version: 1.0.0
+
+      tasks:
+        - key: hello
+          run: echo "private package"
+      EOF
+
       if ! rwx lint -d "$tmpdir" --warnings-as-errors; then
         echo "Lint failed on valid config"
         exit 1
