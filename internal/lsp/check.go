@@ -29,6 +29,7 @@ const (
 )
 
 type CheckConfig struct {
+	AccessToken        string
 	RwxDirectory       string
 	OutputFormat       CheckOutputFormat
 	Timeout            time.Duration
@@ -144,7 +145,7 @@ func Check(ctx context.Context, cfg CheckConfig, stdout io.Writer) (*CheckResult
 	conn := newJSONRPCConn(stdoutPipe, stdinPipe)
 	go conn.readLoop(ctx)
 
-	diagnostics, fixes, err := runCheckProtocol(ctx, conn, rwxDirectoryPath, yamlFiles, cfg.Fix)
+	diagnostics, fixes, err := runCheckProtocol(ctx, conn, rwxDirectoryPath, yamlFiles, cfg.Fix, cfg.AccessToken)
 
 	// Always attempt graceful shutdown regardless of diagnostic errors
 	shutdownErr := shutdownServer(conn, stdinPipe, cmd)
@@ -195,7 +196,7 @@ func Check(ctx context.Context, cfg CheckConfig, stdout io.Writer) (*CheckResult
 	return result, nil
 }
 
-func runCheckProtocol(ctx context.Context, conn *jsonrpcConn, rwxDirectoryPath string, yamlFiles []cli.RwxDirectoryEntry, fix bool) ([]CheckDiagnostic, []fileFixResult, error) {
+func runCheckProtocol(ctx context.Context, conn *jsonrpcConn, rwxDirectoryPath string, yamlFiles []cli.RwxDirectoryEntry, fix bool, accessToken string) ([]CheckDiagnostic, []fileFixResult, error) {
 	// initialize
 	initParams := map[string]any{
 		"processId": nil,
@@ -205,6 +206,9 @@ func runCheckProtocol(ctx context.Context, conn *jsonrpcConn, rwxDirectoryPath s
 			},
 		},
 		"rootUri": pathToURI(rwxDirectoryPath),
+		"initializationOptions": map[string]any{
+			"accessToken": accessToken,
+		},
 	}
 	_, err := conn.request(ctx, "initialize", initParams)
 	if err != nil {

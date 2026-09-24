@@ -26,7 +26,7 @@ const minNodeMajor = 18
 // (but >= minNodeMajor) is allowed but produces a non-blocking warning.
 const recommendedNodeMajor = 22
 
-func Serve(collector *telemetry.Collector) (int, error) {
+func Serve(collector *telemetry.Collector, accessToken string) (int, error) {
 	nodePath, warning, err := findNode(collector)
 	if err != nil {
 		return 0, err
@@ -40,7 +40,7 @@ func Serve(collector *telemetry.Collector) (int, error) {
 		return 0, err
 	}
 
-	return runServer(nodePath, serverJS)
+	return runServer(nodePath, serverJS, accessToken)
 }
 
 // findNode resolves the node binary on PATH and validates its major version.
@@ -206,8 +206,9 @@ func cleanStaleBundles(parentDir string, currentName string) {
 	}
 }
 
-func runServer(nodePath string, serverJS string) (int, error) {
+func runServer(nodePath string, serverJS string, accessToken string) (int, error) {
 	cmd := exec.Command(nodePath, serverJS, "--stdio")
+	cmd.Env = append(os.Environ(), "RWX_ACCESS_TOKEN="+accessToken)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

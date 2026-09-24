@@ -11,6 +11,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRunServerAccessToken(t *testing.T) {
+	for _, token := range []string{"resolved-token", ""} {
+		t.Run(token, func(t *testing.T) {
+			t.Setenv("RWX_ACCESS_TOKEN", "inherited-token")
+			script := filepath.Join(t.TempDir(), "server.sh")
+			require.NoError(t, os.WriteFile(script, []byte(fmt.Sprintf("test \"$RWX_ACCESS_TOKEN\" = %q\n", token)), 0o600))
+			code, err := runServer("/bin/sh", script, token)
+			require.NoError(t, err)
+			require.Zero(t, code)
+			require.Equal(t, "inherited-token", os.Getenv("RWX_ACCESS_TOKEN"))
+		})
+	}
+}
+
 func TestFindNode_ReturnsErrorWhenNotOnPath(t *testing.T) {
 	t.Setenv("PATH", "")
 

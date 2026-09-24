@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/rwx-cloud/rwx/internal/accesstoken"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/lsp"
@@ -41,6 +42,10 @@ var (
 						return nil, err
 					}
 					cfg.TelemetryCollector = telemetryCollector
+					cfg.AccessToken, err = accesstoken.Get(accessTokenBackend, AccessToken)
+					if err != nil {
+						return nil, err
+					}
 
 					checkResult, err := lsp.Check(cmd.Context(), cfg, os.Stdout)
 					if err != nil {
