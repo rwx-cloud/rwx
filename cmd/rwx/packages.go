@@ -16,13 +16,11 @@ var packagesCmd = &cobra.Command{
 var (
 	PackagesAllowMajorVersionChange bool
 	PackagesBuildTimestamp          string
+	PackagesBuildPrivate            bool
 	PackagesShowNoReadme            bool
 
 	packagesBuildCmd = &cobra.Command{
 		Args: cobra.MaximumNArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			directory := "."
 			if len(args) == 1 {
@@ -32,6 +30,7 @@ var (
 			_, err := service.BuildPackage(cli.PackageBuildConfig{
 				Directory: directory,
 				Timestamp: PackagesBuildTimestamp,
+				Private:   PackagesBuildPrivate,
 				Json:      useJsonOutput(),
 			})
 			return err
@@ -39,7 +38,9 @@ var (
 		Short: "Build and upload a package",
 		Long: "Build and upload a package.\n" +
 			"Zips the contents of the given directory (the current directory by default), " +
-			"uploads it to RWX, and prints the resulting content digest.",
+			"uploads it to RWX, and prints the resulting content digest.\n" +
+			"Visibility is read from the package manifest (public when omitted). " +
+			"Use --private to set visibility to private in the archive without changing files on disk.",
 		Use: "build [flags] [directory]",
 	}
 
@@ -94,6 +95,7 @@ var (
 
 func init() {
 	packagesBuildCmd.Flags().StringVar(&PackagesBuildTimestamp, "timestamp", "", "normalize file modification times in the zip to this `timestamp` (format: YYYYMMDDHHmm) for reproducible builds")
+	packagesBuildCmd.Flags().BoolVar(&PackagesBuildPrivate, "private", false, "restrict the uploaded package to its owning organization")
 	packagesShowCmd.Flags().BoolVar(&PackagesShowNoReadme, "no-readme", false, "hide the readme documentation")
 	packagesUpdateCmd.Flags().BoolVar(&PackagesAllowMajorVersionChange, "allow-major-version-change", false, "update packages to the latest major version")
 	addRwxDirFlag(packagesUpdateCmd)

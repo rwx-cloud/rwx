@@ -27,11 +27,15 @@ func TestPackagesBuildAcceptsAnOptionalDirectory(t *testing.T) {
 	require.Error(t, packagesBuildCmd.Args(packagesBuildCmd, []string{"a", "b"}))
 }
 
-func TestPackagesBuildExposesTimestampFlagAndRequiresAuth(t *testing.T) {
+func TestPackagesBuildExposesBuildFlags(t *testing.T) {
 	flag := packagesBuildCmd.Flags().Lookup("timestamp")
 	require.NotNil(t, flag, "build should expose the --timestamp flag")
 	require.Equal(t, "", flag.DefValue, "timestamp normalization should be opt-in")
 
-	// Uploading requires an authenticated API call.
-	require.NotNil(t, packagesBuildCmd.PreRunE)
+	private := packagesBuildCmd.Flags().Lookup("private")
+	require.NotNil(t, private, "build should expose the --private flag")
+	require.Equal(t, "false", private.DefValue, "manifest visibility should be preserved by default")
+
+	// Authentication can be supplied by a proxy rather than a local token.
+	require.Nil(t, packagesBuildCmd.PreRunE)
 }

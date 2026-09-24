@@ -96,6 +96,16 @@ func TestAPIClient_UploadPackage(t *testing.T) {
 				want: "mint-leaf.yml did not contain a name",
 			},
 			{
+				name: "invalid visibility",
+				body: `{"error":"Package visibility must be public or private"}`,
+				want: "Package visibility must be public or private",
+			},
+			{
+				name: "private package owned by another organization",
+				body: `{"error":"Package is not accessible to this organization"}`,
+				want: "Package is not accessible to this organization",
+			},
+			{
 				name: "invalid version",
 				body: `{"error":"mint-leaf.yml did not contain a valid version"}`,
 				want: "mint-leaf.yml did not contain a valid version",

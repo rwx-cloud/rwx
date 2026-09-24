@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -39,6 +40,137 @@ func readZip(t *testing.T, contents []byte) map[string]*zip.File {
 		entries[f.Name] = f
 	}
 	return entries
+}
+
+func TestService_BuildPrivatePackage(t *testing.T) {
+	for _, filename := range []string{"rwx-package.yml", "mint-leaf.yml"} {
+		for _, tc := range []struct {
+			name     string
+			manifest string
+			want     string
+		}{
+			{
+				name:     "adds legacy visibility",
+				manifest: "# keep this comment\nname: acme/thing\n",
+				want:     "name: acme/thing\nvisibility: private\n",
+			},
+			{
+				name:     "overrides legacy visibility",
+				manifest: "# keep this comment\nname: acme/thing\nvisibility: public\n",
+				want:     "name: acme/thing\nvisibility: private\n",
+			},
+			{
+				name:     "overrides wrapped visibility",
+				manifest: "# keep this comment\npackage:\n  name: acme/thing\n  visibility: public\ntasks:\n  - key: hello\n    run: echo ${{ params.message }}\n",
+				want:     "package:\n  name: acme/thing\n  visibility: private\ntasks:\n  - key: hello\n    run: echo ${{ params.message }}\n",
+			},
+		} {
+			t.Run(filename+"/"+tc.name, func(t *testing.T) {
+				s := setupTest(t)
+				dir := t.TempDir()
+				manifestPath := filepath.Join(dir, filename)
+				require.NoError(t, os.WriteFile(manifestPath, []byte(tc.manifest), 0o644))
+				before, err := os.Stat(manifestPath)
+				require.NoError(t, err)
+
+				var archives [][]byte
+				s.mockAPI.MockUploadPackage = func(cfg api.UploadPackageConfig) (*api.UploadPackageResult, error) {
+					data, err := io.ReadAll(cfg.Contents)
+					require.NoError(t, err)
+					archives = append(archives, data)
+					return &api.UploadPackageResult{Digest: "private-digest"}, nil
+				}
+				for range 2 {
+					result, err := s.service.BuildPackage(cli.PackageBuildConfig{
+						Directory: dir,
+						Private:   true,
+						Timestamp: "202601020304",
+					})
+					require.NoError(t, err)
+					require.Equal(t, "private-digest", result.Digest)
+				}
+				require.Equal(t, archives[0], archives[1])
+				entry := readZip(t, archives[0])[filename]
+				reader, err := entry.Open()
+				require.NoError(t, err)
+				defer reader.Close()
+				contents, err := io.ReadAll(reader)
+				require.NoError(t, err)
+				require.YAMLEq(t, tc.want, string(contents))
+				require.Contains(t, string(contents), "# keep this comment")
+				require.Equal(t, time.Date(2026, 1, 2, 3, 4, 0, 0, time.UTC), entry.Modified.UTC())
+
+				onDisk, err := os.ReadFile(manifestPath)
+				require.NoError(t, err)
+				require.Equal(t, tc.manifest, string(onDisk))
+				after, err := os.Stat(manifestPath)
+				require.NoError(t, err)
+				require.Equal(t, before.ModTime(), after.ModTime())
+			})
+		}
+	}
+}
+
+func TestService_BuildPackageManifestSelection(t *testing.T) {
+	for _, private := range []bool{false, true} {
+		t.Run(fmt.Sprintf("private=%t", private), func(t *testing.T) {
+			s := setupTest(t)
+			dir := t.TempDir()
+			modern := "name: acme/modern\nvisibility: private\n"
+			legacy := "name: acme/legacy\nvisibility: public\n"
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "rwx-package.yml"), []byte(modern), 0o644))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "mint-leaf.yml"), []byte(legacy), 0o644))
+			var uploaded []byte
+			s.mockAPI.MockUploadPackage = func(cfg api.UploadPackageConfig) (*api.UploadPackageResult, error) {
+				var err error
+				uploaded, err = io.ReadAll(cfg.Contents)
+				require.NoError(t, err)
+				return &api.UploadPackageResult{Digest: "digest"}, nil
+			}
+			_, err := s.service.BuildPackage(cli.PackageBuildConfig{Directory: dir, Private: private})
+			require.NoError(t, err)
+			for name, entry := range readZip(t, uploaded) {
+				reader, err := entry.Open()
+				require.NoError(t, err)
+				defer reader.Close()
+				contents, err := io.ReadAll(reader)
+				require.NoError(t, err)
+				if name == "rwx-package.yml" {
+					require.Equal(t, modern, string(contents), "only the manifest Cloud uses should be rewritten")
+				} else if private {
+					require.YAMLEq(t, "name: acme/legacy\nvisibility: private\n", string(contents))
+				} else {
+					require.Equal(t, legacy, string(contents))
+				}
+			}
+		})
+	}
+}
+
+func TestService_BuildPrivatePackageRejectsInvalidManifest(t *testing.T) {
+	for _, manifest := range []string{"", "name: [", "- not-a-mapping\n", "package: true\n", "name: one\n---\nname: two\n"} {
+		t.Run(manifest, func(t *testing.T) {
+			s := setupTest(t)
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "mint-leaf.yml"), []byte(manifest), 0o644))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "rwx-package.yml"), []byte("name: acme/valid\n"), 0o644))
+			s.mockAPI.MockUploadPackage = func(cfg api.UploadPackageConfig) (*api.UploadPackageResult, error) {
+				t.Fatal("must not upload or fall back to another manifest when --private cannot be applied")
+				return nil, nil
+			}
+			_, err := s.service.BuildPackage(cli.PackageBuildConfig{Directory: dir, Private: true})
+			require.Error(t, err)
+		})
+	}
+	t.Run("missing manifest", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockAPI.MockUploadPackage = func(cfg api.UploadPackageConfig) (*api.UploadPackageResult, error) {
+			t.Fatal("must not upload without a private manifest")
+			return nil, nil
+		}
+		_, err := s.service.BuildPackage(cli.PackageBuildConfig{Directory: t.TempDir(), Private: true})
+		require.ErrorContains(t, err, "--private requires rwx-package.yml or mint-leaf.yml")
+	})
 }
 
 func TestService_BuildPackage(t *testing.T) {
