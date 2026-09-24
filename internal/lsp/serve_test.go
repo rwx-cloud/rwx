@@ -12,9 +12,6 @@ import (
 )
 
 func TestRunServerAccessToken(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("relies on POSIX shell")
-	}
 	for _, token := range []string{"resolved-token", ""} {
 		t.Run(token, func(t *testing.T) {
 			t.Setenv("RWX_ACCESS_TOKEN", "inherited-token")
