@@ -12,7 +12,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/goccy/go-yaml/ast"
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
 )
@@ -23,7 +22,6 @@ const PackageTimestampLayout = "200601021504"
 type PackageBuildConfig struct {
 	Directory string
 	Timestamp string
-	Private   bool
 	Json      bool
 }
 
@@ -66,7 +64,7 @@ func (s Service) BuildPackage(cfg PackageBuildConfig) (result *PackageBuildResul
 		return nil, errors.Errorf("%q is not a directory", directory)
 	}
 
-	archive, err := zipDirectory(directory, modTime, cfg.Private)
+	archive, err := zipDirectory(directory, modTime)
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to zip %q", directory)
 	}
@@ -100,16 +98,7 @@ func (s Service) BuildPackage(cfg PackageBuildConfig) (result *PackageBuildResul
 // non-nil, every entry's modification time is normalized in the zip header
 // rather than on disk, so the archive is reproducible without mutating the
 // source tree.
-func zipDirectory(root string, modTime *time.Time, private bool) ([]byte, error) {
-	var manifestName string
-	var manifestContents []byte
-	if private {
-		var err error
-		manifestName, manifestContents, err = privatePackageManifest(root)
-		if err != nil {
-			return nil, err
-		}
-	}
+func zipDirectory(root string, modTime *time.Time) ([]byte, error) {
 	var relPaths []string
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -173,12 +162,6 @@ func zipDirectory(root string, modTime *time.Time, private bool) ([]byte, error)
 			continue
 		}
 
-		if rel == manifestName {
-			if _, err := entry.Write(manifestContents); err != nil {
-				return nil, err
-			}
-			continue
-		}
 		if err := copyFileInto(entry, path); err != nil {
 			return nil, err
 		}
@@ -189,38 +172,6 @@ func zipDirectory(root string, modTime *time.Time, private bool) ([]byte, error)
 	}
 
 	return buf.Bytes(), nil
-}
-
-func privatePackageManifest(root string) (string, []byte, error) {
-	// Cloud prefers the legacy manifest when both filenames are present.
-	for _, name := range []string{"mint-leaf.yml", "rwx-package.yml"} {
-		doc, err := ParseYAMLFile(filepath.Join(root, name))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return "", nil, errors.Wrapf(err, "unable to read package manifest %q", name)
-		}
-		if len(doc.astFile.Docs) != 1 {
-			return "", nil, errors.Errorf("package manifest %q must contain one YAML document", name)
-		}
-		metadataPath := "$"
-		if doc.HasPackage() {
-			metadataPath = "$.package"
-		}
-		metadata, err := doc.getNodeAtPath(metadataPath)
-		if err != nil {
-			return "", nil, err
-		}
-		if _, ok := metadata.(*ast.MappingNode); !ok {
-			return "", nil, errors.Errorf("package metadata in %q must be a mapping", name)
-		}
-		if err := doc.SetAtPath(metadataPath+".visibility", "private"); err != nil {
-			return "", nil, errors.Wrapf(err, "unable to set private visibility in %q", name)
-		}
-		return name, doc.Bytes(), nil
-	}
-	return "", nil, errors.New("--private requires rwx-package.yml or mint-leaf.yml at the package root")
 }
 
 func copyFileInto(w io.Writer, path string) error {

@@ -32,9 +32,7 @@ func TestPackagesBuildExposesBuildFlags(t *testing.T) {
 	require.NotNil(t, flag, "build should expose the --timestamp flag")
 	require.Equal(t, "", flag.DefValue, "timestamp normalization should be opt-in")
 
-	private := packagesBuildCmd.Flags().Lookup("private")
-	require.NotNil(t, private, "build should expose the --private flag")
-	require.Equal(t, "false", private.DefValue, "manifest visibility should be preserved by default")
+	require.Nil(t, packagesBuildCmd.Flags().Lookup("private"), "visibility is controlled by the manifest")
 
 	// Authentication can be supplied by a proxy rather than a local token.
 	require.Nil(t, packagesBuildCmd.PreRunE)
