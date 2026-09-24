@@ -17,6 +17,14 @@ type PackagePublishResult struct {
 }
 
 func (s Service) PublishPackage(cfg PackagePublishConfig) (*PackagePublishResult, error) {
+	var name, version string
+	if !cfg.Json {
+		metadata, err := s.APIClient.GetPackageDocumentation(cfg.Digest)
+		if err != nil {
+			return nil, errors.Wrapf(err, "unable to look up package %s before publishing", cfg.Digest)
+		}
+		name, version = metadata.Name, metadata.Version
+	}
 	if err := s.APIClient.PublishPackage(cfg.Digest); err != nil {
 		return nil, errors.Wrapf(err, "unable to publish package %s", cfg.Digest)
 	}
@@ -26,7 +34,7 @@ func (s Service) PublishPackage(cfg PackagePublishConfig) (*PackagePublishResult
 			return nil, errors.Wrap(err, "unable to encode JSON output")
 		}
 	} else {
-		fmt.Fprintf(s.Stdout, "Published package with digest: %s\n", result.Digest)
+		fmt.Fprintf(s.Stdout, "Published package %s %s with digest: %s\n", name, version, result.Digest)
 	}
 	return result, nil
 }
