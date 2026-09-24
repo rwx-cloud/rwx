@@ -22,6 +22,7 @@ const PackageTimestampLayout = "200601021504"
 type PackageBuildConfig struct {
 	Directory string
 	Timestamp string
+	Publish   bool
 	Json      bool
 }
 
@@ -81,6 +82,13 @@ func (s Service) BuildPackage(cfg PackageBuildConfig) (result *PackageBuildResul
 	}
 
 	result = &PackageBuildResult{Digest: uploaded.Digest}
+
+	if cfg.Publish {
+		if _, err := s.PublishPackage(PackagePublishConfig{Digest: uploaded.Digest, Json: cfg.Json}); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
 
 	if cfg.Json {
 		if err := json.NewEncoder(s.Stdout).Encode(result); err != nil {

@@ -1149,6 +1149,25 @@ func (c Client) UploadPackage(cfg UploadPackageConfig) (*UploadPackageResult, er
 	return &result, nil
 }
 
+func (c Client) PublishPackage(digest string) error {
+	body, err := json.Marshal(map[string]string{"digest": digest})
+	if err != nil {
+		return errors.Wrap(err, "unable to encode package digest")
+	}
+	req, err := http.NewRequest(http.MethodPost, "/mint/api/leaves/publish", bytes.NewReader(body))
+	if err != nil {
+		return errors.Wrap(err, "unable to create new HTTP request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+	return decodeResponseJSON(resp, &struct{}{})
+}
+
 func (c Client) GetPackageDocumentation(packageName string) (*PackageDocumentationResult, error) {
 	endpoint := fmt.Sprintf("/mint/api/leaves/%s/documentation", packageName)
 

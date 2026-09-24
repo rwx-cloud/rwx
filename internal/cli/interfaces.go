@@ -37,6 +37,7 @@ type APIClient interface {
 	GetPackageVersions() (*api.PackageVersionsResult, error)
 	GetPackageDocumentation(packageName string) (*api.PackageDocumentationResult, error)
 	UploadPackage(api.UploadPackageConfig) (*api.UploadPackageResult, error)
+	PublishPackage(digest string) error
 	GetDefaultBase() (api.DefaultBaseResult, error)
 	StartImagePush(cfg api.StartImagePushConfig) (api.StartImagePushResult, error)
 	ImagePushStatus(pushID string) (api.ImagePushStatusResult, error)

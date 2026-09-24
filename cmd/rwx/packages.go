@@ -16,6 +16,7 @@ var packagesCmd = &cobra.Command{
 var (
 	PackagesAllowMajorVersionChange bool
 	PackagesBuildTimestamp          string
+	PackagesBuildPublish            bool
 	PackagesShowNoReadme            bool
 
 	packagesBuildCmd = &cobra.Command{
@@ -29,6 +30,7 @@ var (
 			_, err := service.BuildPackage(cli.PackageBuildConfig{
 				Directory: directory,
 				Timestamp: PackagesBuildTimestamp,
+				Publish:   PackagesBuildPublish,
 				Json:      useJsonOutput(),
 			})
 			return err
@@ -37,8 +39,20 @@ var (
 		Long: "Build and upload a package.\n" +
 			"Zips the contents of the given directory (the current directory by default), " +
 			"uploads it to RWX, and prints the resulting content digest.\n" +
-			"Visibility is read from the package manifest (public when omitted).",
+			"Use --publish to publish the uploaded digest. " +
+			"Visibility is read from the package manifest (public when omitted); publishing does not change it.",
 		Use: "build [flags] [directory]",
+	}
+
+	packagesPublishCmd = &cobra.Command{
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.PublishPackage(cli.PackagePublishConfig{Digest: args[0], Json: useJsonOutput()})
+			return err
+		},
+		Short: "Publish an uploaded package",
+		Long:  "Publish an uploaded package by digest without changing its manifest visibility.",
+		Use:   "publish [flags] <digest>",
 	}
 
 	packagesListCmd = &cobra.Command{
@@ -92,10 +106,12 @@ var (
 
 func init() {
 	packagesBuildCmd.Flags().StringVar(&PackagesBuildTimestamp, "timestamp", "", "normalize file modification times in the zip to this `timestamp` (format: YYYYMMDDHHmm) for reproducible builds")
+	packagesBuildCmd.Flags().BoolVar(&PackagesBuildPublish, "publish", false, "publish the package after uploading it")
 	packagesShowCmd.Flags().BoolVar(&PackagesShowNoReadme, "no-readme", false, "hide the readme documentation")
 	packagesUpdateCmd.Flags().BoolVar(&PackagesAllowMajorVersionChange, "allow-major-version-change", false, "update packages to the latest major version")
 	addRwxDirFlag(packagesUpdateCmd)
 	packagesCmd.AddCommand(packagesBuildCmd)
+	packagesCmd.AddCommand(packagesPublishCmd)
 	packagesCmd.AddCommand(packagesListCmd)
 	packagesCmd.AddCommand(packagesShowCmd)
 	packagesCmd.AddCommand(packagesUpdateCmd)
