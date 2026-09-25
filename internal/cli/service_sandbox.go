@@ -613,7 +613,7 @@ func (s Service) BackgroundSandbox(cfg BackgroundSandboxConfig) (*SandboxBackgro
 	}
 	process.Key = cfg.Name
 	process.TargetPort = cfg.TargetPort
-	return s.finishSandboxBackground(sandbox, process, cfg.LocalPort, cfg.Scheme, cfg.Json, "Started")
+	return s.finishSandboxBackground(sandbox, process, cfg.LocalPort, cfg.Scheme, cfg.Json, sandboxSelectionHint(cfg.ConfigFile, cfg.RunID), "Started")
 }
 
 func (s Service) TunnelSandbox(cfg TunnelSandboxConfig) (*SandboxTunnelResult, error) {
@@ -641,7 +641,8 @@ func (s Service) TunnelSandbox(cfg TunnelSandboxConfig) (*SandboxTunnelResult, e
 	}
 	defer sandbox.close()
 
-	startCommand := fmt.Sprintf("rwx sandbox background --key %s -- <command>", cfg.Key)
+	selection := sandboxSelectionHint(cfg.ConfigFile, cfg.RunID)
+	startCommand := fmt.Sprintf("rwx sandbox background%s --key %s -- <command>", selection, shellescape.Quote(cfg.Key))
 	process, err := s.executeSandboxProcessDirective(sandboxDirectiveProcessStatus, struct {
 		Key string `json:"key"`
 	}{Key: cfg.Key}, "get status for")
@@ -649,7 +650,7 @@ func (s Service) TunnelSandbox(cfg TunnelSandboxConfig) (*SandboxTunnelResult, e
 		return nil, fmt.Errorf("unable to use background process %q: %w\n\nStart it with:\n  %s", cfg.Key, err, startCommand)
 	}
 	if process.Status != "running" {
-		logsCommand := fmt.Sprintf("rwx sandbox background logs --key %s", cfg.Key)
+		logsCommand := fmt.Sprintf("rwx sandbox background logs%s --key %s", selection, shellescape.Quote(cfg.Key))
 		return nil, fmt.Errorf(
 			"background process %q is not running (status: %s)\n\nView logs with:\n  %s\n\nStart it with:\n  %s",
 			cfg.Key, process.Status, logsCommand, startCommand,
@@ -723,7 +724,7 @@ func (s Service) RestartSandboxBackground(cfg SandboxBackgroundConfig) (*Sandbox
 		return nil, err
 	}
 	process.Key = cfg.Name
-	return s.finishSandboxBackground(sandbox, process, 0, "", cfg.Json, "Restarted")
+	return s.finishSandboxBackground(sandbox, process, 0, "", cfg.Json, sandboxSelectionHint(cfg.ConfigFile, cfg.RunID), "Restarted")
 }
 
 func (s Service) StopSandboxBackground(cfg SandboxBackgroundConfig) (*SandboxBackgroundResult, error) {
@@ -933,7 +934,17 @@ func (s Service) executeSandboxProcessDirective(directive string, request any, a
 	return process, nil
 }
 
-func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandboxProcessResponse, localPort int, scheme string, jsonMode bool, action string) (*SandboxBackgroundResult, error) {
+func sandboxSelectionHint(configFile, runID string) string {
+	if runID != "" {
+		return " --id " + shellescape.Quote(runID)
+	}
+	if configFile != "" {
+		return " " + shellescape.Quote(relativePathFromWd(configFile))
+	}
+	return ""
+}
+
+func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandboxProcessResponse, localPort int, scheme string, jsonMode bool, selection, action string) (*SandboxBackgroundResult, error) {
 	result := sandboxBackgroundResult(sandbox.runID, process)
 	stateDirectory, err := sandboxTunnelStateDirectory()
 	if err != nil {
@@ -1002,9 +1013,9 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 		if result.URL != "" {
 			fmt.Fprintf(s.Stdout, "Preview %q: %s\n\n", process.Key, result.URL)
 			fmt.Fprintln(s.Stdout, "After local edits:")
-			fmt.Fprintln(s.Stdout, "  Hot reload:    rwx sandbox push")
-			fmt.Fprintf(s.Stdout, "  Hard restart:  rwx sandbox background restart --key %s\n\n", process.Key)
-			fmt.Fprintln(s.Stdout, "rwx sandbox exec -- <command> syncs local changes before it runs.")
+			fmt.Fprintf(s.Stdout, "  Hot reload:    rwx sandbox push%s\n", selection)
+			fmt.Fprintf(s.Stdout, "  Hard restart:  rwx sandbox background restart%s --key %s\n\n", selection, shellescape.Quote(process.Key))
+			fmt.Fprintf(s.Stdout, "rwx sandbox exec%s -- <command> syncs local changes before it runs.\n", selection)
 		} else {
 			fmt.Fprintf(s.Stdout, "%s background process %q.\n", action, process.Key)
 		}

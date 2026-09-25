@@ -1369,30 +1369,76 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		require.False(t, hasTargetPort)
 	})
 
-	t.Run("prints preview URL and update commands in text mode", func(t *testing.T) {
-		setup, _ := setupBackground(t)
-		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
-			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: "https"}, nil
-		}
+	for _, tc := range []struct {
+		name       string
+		configFile string
+		runID      string
+		selection  string
+		workingDir string
+	}{
+		{name: "implicit default"},
+		{name: "explicit default", configFile: ".rwx/sandbox.yml", selection: " .rwx/sandbox.yml"},
+		{name: "explicit custom", configFile: ".rwx/custom.yml", selection: " .rwx/custom.yml"},
+		{name: "quoted definition", configFile: ".rwx/custom sandbox.yml", selection: " '.rwx/custom sandbox.yml'"},
+		{name: "inside rwx directory", configFile: ".rwx/custom.yml", selection: " custom.yml", workingDir: ".rwx"},
+		{name: "sibling directory", configFile: ".rwx/custom.yml", selection: " ../.rwx/custom.yml", workingDir: "app"},
+		{name: "explicit ID", runID: "run-preview", selection: " --id run-preview"},
+		{name: "ID overrides definition", configFile: ".rwx/custom.yml", runID: "run-preview", selection: " --id run-preview"},
+	} {
+		for _, restart := range []bool{false, true} {
+			t.Run(fmt.Sprintf("preview hints/%s/restart=%t", tc.name, restart), func(t *testing.T) {
+				setup, _ := setupBackground(t)
+				if tc.workingDir != "" {
+					workingDir := filepath.Join(setup.tmp, tc.workingDir)
+					require.NoError(t, os.MkdirAll(workingDir, 0o755))
+					require.NoError(t, os.Chdir(workingDir))
+				}
+				setup.mockVCS.MockGetBranch = "main"
+				configFile := setup.absConfig(".rwx/sandbox.yml")
+				explicitConfig := ""
+				if tc.configFile != "" {
+					configFile = setup.absConfig(tc.configFile)
+					explicitConfig = configFile
+				}
+				seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+					"main:" + configFile: {RunID: "run-preview", ConfigFile: configFile},
+				})
+				setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+					if strings.HasPrefix(command, "__rwx_sandbox_process_start__ ") || strings.HasPrefix(command, "__rwx_sandbox_process_restart__ ") {
+						return 0, `{"key":"web","status":"running","targetPort":3100}`, nil
+					}
+					return 0, "", nil
+				}
+				setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+					return rwxssh.TunnelResult{LocalPort: 8310, Scheme: "https"}, nil
+				}
 
-		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
-			Command:    []string{"bin/server"},
-			Name:       "web",
-			TargetPort: 3100,
-			Scheme:     "https",
-			RunID:      "run-preview",
-		})
+				var result *cli.SandboxBackgroundResult
+				var err error
+				if restart {
+					result, err = setup.service.RestartSandboxBackground(cli.SandboxBackgroundConfig{
+						Name: "web", RunID: tc.runID, ConfigFile: explicitConfig,
+					})
+				} else {
+					result, err = setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+						Command: []string{"bin/server"}, Name: "web", TargetPort: 3100, Scheme: "https",
+						RunID: tc.runID, ConfigFile: explicitConfig,
+					})
+				}
 
-		require.NoError(t, err)
-		require.Equal(t, `Preview "web": https://127.0.0.1:8310
+				require.NoError(t, err)
+				require.Equal(t, "run-preview", result.RunID)
+				require.Equal(t, fmt.Sprintf(`Preview "web": https://127.0.0.1:8310
 
 After local edits:
-  Hot reload:    rwx sandbox push
-  Hard restart:  rwx sandbox background restart --key web
+  Hot reload:    rwx sandbox push%s
+  Hard restart:  rwx sandbox background restart%s --key web
 
-rwx sandbox exec -- <command> syncs local changes before it runs.
-`, setup.mockStdout.String())
-	})
+rwx sandbox exec%s -- <command> syncs local changes before it runs.
+`, tc.selection, tc.selection, tc.selection), setup.mockStdout.String())
+			})
+		}
+	}
 
 	t.Run("rejects a local port without a sandbox port", func(t *testing.T) {
 		setup := setupTest(t)
@@ -1728,20 +1774,39 @@ func TestService_TunnelSandbox(t *testing.T) {
 
 		require.ErrorContains(t, err, `unable to use background process "missing"`)
 		require.ErrorContains(t, err, `sandbox process "missing" was not found`)
-		require.ErrorContains(t, err, "Start it with:\n  rwx sandbox background --key missing -- <command>")
+		require.ErrorContains(t, err, "Start it with:\n  rwx sandbox background --id run-sandbox --key missing -- <command>")
 	})
 
 	for _, tc := range []struct {
-		status string
-		runID  string
+		status     string
+		runID      string
+		configFile string
+		selection  string
+		workingDir string
 	}{
 		{status: "exited"},
-		{status: "stopped", runID: "run-sandbox"},
+		{status: "stopped", runID: "run-sandbox", selection: " --id run-sandbox"},
+		{status: "exited", configFile: ".rwx/custom.yml", selection: " .rwx/custom.yml"},
+		{status: "stopped", configFile: ".rwx/sandbox.yml", selection: " .rwx/sandbox.yml"},
+		{status: "exited", configFile: ".rwx/custom sandbox.yml", selection: " '.rwx/custom sandbox.yml'"},
+		{status: "stopped", configFile: ".rwx/custom.yml", selection: " custom.yml", workingDir: ".rwx"},
+		{status: "exited", configFile: ".rwx/custom.yml", selection: " ../.rwx/custom.yml", workingDir: "app"},
+		{status: "stopped", configFile: ".rwx/custom.yml", runID: "run-sandbox", selection: " --id run-sandbox"},
 	} {
 		t.Run("shows logs and start commands for managed process with status "+tc.status, func(t *testing.T) {
 			setup, commands := setupTunnel(t)
+			if tc.workingDir != "" {
+				workingDir := filepath.Join(setup.tmp, tc.workingDir)
+				require.NoError(t, os.MkdirAll(workingDir, 0o755))
+				require.NoError(t, os.Chdir(workingDir))
+			}
 			setup.mockVCS.MockGetBranch = "main"
 			configFile := setup.absConfig(".rwx/sandbox.yml")
+			explicitConfig := ""
+			if tc.configFile != "" {
+				configFile = setup.absConfig(tc.configFile)
+				explicitConfig = configFile
+			}
 			seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 				"main:" + configFile: {RunID: "run-sandbox", ConfigFile: configFile},
 			})
@@ -1758,12 +1823,12 @@ func TestService_TunnelSandbox(t *testing.T) {
 			}
 
 			_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{
-				Key: "rails-web", TargetPort: 3001, RunID: tc.runID, Json: true,
+				Key: "rails-web", TargetPort: 3001, RunID: tc.runID, ConfigFile: explicitConfig, Json: true,
 			})
 
 			require.EqualError(t, err, fmt.Sprintf(
-				"background process \"rails-web\" is not running (status: %s)\n\nView logs with:\n  rwx sandbox background logs --key rails-web\n\nStart it with:\n  rwx sandbox background --key rails-web -- <command>",
-				tc.status,
+				"background process \"rails-web\" is not running (status: %s)\n\nView logs with:\n  rwx sandbox background logs%s --key rails-web\n\nStart it with:\n  rwx sandbox background%s --key rails-web -- <command>",
+				tc.status, tc.selection, tc.selection,
 			))
 		})
 	}

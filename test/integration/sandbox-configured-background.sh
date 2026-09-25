@@ -23,7 +23,7 @@ if missing_tunnel_output=$("${RWX_CLI}" sandbox tunnel \
   exit 1
 fi
 
-if [[ "$missing_tunnel_output" != *"rwx sandbox background --key missing-web -- <command>"* ]]; then
+if [[ "$missing_tunnel_output" != *"rwx sandbox background --id $SANDBOX_RUN_ID --key missing-web -- <command>"* ]]; then
   echo "missing background process error did not explain how to start one"
   echo "$missing_tunnel_output"
   exit 1
