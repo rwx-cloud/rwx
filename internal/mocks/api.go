@@ -8,6 +8,11 @@ import (
 )
 
 type API struct {
+	MockListCrons                               func() (*api.ListCronsResult, error)
+	MockShowCron                                func(string) (*api.CronResult, error)
+	MockPauseCron                               func(string) (*api.CronResult, error)
+	MockResumeCron                              func(string) (*api.CronResult, error)
+	MockSnoozeCron                              func(string, string) (*api.CronResult, error)
 	MockGetSkillContent                         func() (string, error)
 	MockGetSkillLatestVersion                   func() (string, error)
 	MockInitiateRun                             func(api.InitiateRunConfig) (*api.InitiateRunResult, error)

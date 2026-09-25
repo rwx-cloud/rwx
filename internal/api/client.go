@@ -2016,6 +2016,7 @@ func parseAmbiguousDefinitionPathError(body io.Reader) error {
 func extractErrorMessage(reader io.Reader) string {
 	errorStruct := struct {
 		Error         string         `json:"error,omitempty"`
+		Errors        []string       `json:"errors,omitempty"`
 		ErrorMessages []ErrorMessage `json:"error_messages,omitempty"`
 	}{}
 
@@ -2036,6 +2037,10 @@ func extractErrorMessage(reader io.Reader) string {
 	// Fallback to Error field
 	if errorStruct.Error != "" {
 		return errorStruct.Error
+	}
+
+	if len(errorStruct.Errors) > 0 {
+		return strings.Join(errorStruct.Errors, "\n")
 	}
 
 	// Fallback to an empty string
