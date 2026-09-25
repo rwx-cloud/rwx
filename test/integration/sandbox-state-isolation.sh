@@ -8,10 +8,10 @@ start_sandbox
 trap stop_sandbox EXIT
 
 echo "revert-test content" > revert-test.txt
-"${RWX_CLI}" sandbox exec -- cat revert-test.txt > /dev/null
+"${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- cat revert-test.txt > /dev/null
 rm -f revert-test.txt
 
-"${RWX_CLI}" sandbox exec -- echo "exec after local revert"
+"${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- echo "exec after local revert"
 
 if [ -f revert-test.txt ]; then
   echo "revert-test.txt was pulled back from sandbox after being reverted locally"

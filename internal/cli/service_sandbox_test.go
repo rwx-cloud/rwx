@@ -276,7 +276,7 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 			},
 		})
 
-		remoteCliState := cli.EncodeCliState("develop", setup.absConfig(".rwx/sandbox.yml"))
+		remoteCliState := cli.EncodeCliState("develop", setup.absConfig(".rwx/sandbox.yml"), "")
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
 				Runs: []api.RunSummary{
@@ -336,7 +336,7 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 		})
 
 		// Remote has a run with cli_state pointing to the same key but different run ID
-		remoteCliState := cli.EncodeCliState("main", setup.absConfig(".rwx/sandbox.yml"))
+		remoteCliState := cli.EncodeCliState("main", setup.absConfig(".rwx/sandbox.yml"), "")
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
 				Runs: []api.RunSummary{
@@ -4657,12 +4657,15 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		configFile := setup.absConfig(".rwx/sandbox.yml")
 
 		// Encode cli_state matching branch+configFile
-		encodedState := cli.EncodeCliState(branch, configFile)
+		encodedState := cli.EncodeCliState(branch, configFile, "")
 
-		// No local session — ListSandboxRuns returns a matching run
-		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
 				Runs: []api.RunSummary{
+					{
+						ID:       "run-inactive",
+						CliState: &encodedState,
+					},
 					{
 						ID:       "run-recovered",
 						RunURL:   "https://cloud.rwx.com/runs/run-recovered",
@@ -4678,7 +4681,100 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		}
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			if id == "run-inactive" {
+				return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
+			}
 			require.Equal(t, "run-recovered", id)
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        address,
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
+			return nil
+		}
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			return 0, nil
+		}
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
+			return nil, nil, nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			Command: []string{"echo", "hello"},
+			Json:    true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-recovered", result.RunID)
+		require.Equal(t, "https://cloud.rwx.com/runs/run-recovered", result.RunURL)
+
+		// Verify the session was stored locally
+		storage, err := cli.LoadSandboxStorage()
+		require.NoError(t, err)
+		session, found := storage.GetSession(branch, configFile)
+		require.True(t, found)
+		require.Equal(t, "run-recovered", session.RunID)
+		require.Equal(t, "recovered-token", session.ScopedToken)
+	})
+
+	t.Run("explicit definition starts a replacement from inactive history", func(t *testing.T) {
+		setup := setupTest(t)
+
+		// Set HOME so sandbox storage is writable in the test temp dir
+		originalHome := os.Getenv("HOME")
+		os.Setenv("HOME", setup.tmp)
+		t.Cleanup(func() { os.Setenv("HOME", originalHome) })
+
+		rwxDir := filepath.Join(setup.tmp, ".rwx")
+		require.NoError(t, os.MkdirAll(rwxDir, 0o755))
+		configFile := filepath.Join(rwxDir, "other.yml")
+		require.NoError(t, os.WriteFile(configFile, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+
+		address := "192.168.1.1:22"
+		encodedState := cli.EncodeCliState("main", configFile, "")
+
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-inactive", CliState: &encodedState}}}, nil
+		}
+
+		// Mock the full auto-create path
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+
+		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
+			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
+		}
+		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{
+				LatestMajor: make(map[string]string),
+				LatestMinor: make(map[string]map[string]string),
+			}, nil
+		}
+
+		var initiatedRun bool
+		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			initiatedRun = true
+			state, err := cli.DecodeCliState(cfg.CliState)
+			require.NoError(t, err)
+			require.Equal(t, configFile, state.ConfigFile)
+			require.Equal(t, "github.com/example/repo", state.Repository)
+			return &api.InitiateRunResult{
+				RunID:  "run-new",
+				RunURL: "https://cloud.rwx.com/mint/runs/run-new",
+			}, nil
+		}
+		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
+			return &api.CreateSandboxTokenResult{Token: "new-token"}, nil
+		}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			if id == "run-inactive" {
+				return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
+			}
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -4704,91 +4800,174 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		})
 
 		require.NoError(t, err)
-		require.Equal(t, "run-recovered", result.RunID)
-		require.Equal(t, "https://cloud.rwx.com/runs/run-recovered", result.RunURL)
-
-		// Verify the session was stored locally
-		storage, err := cli.LoadSandboxStorage()
-		require.NoError(t, err)
-		session, found := storage.GetSession(branch, configFile)
-		require.True(t, found)
-		require.Equal(t, "run-recovered", session.RunID)
-		require.Equal(t, "recovered-token", session.ScopedToken)
-	})
-
-	t.Run("falls through to auto-create when no remote match", func(t *testing.T) {
-		setup := setupTest(t)
-
-		// Set HOME so sandbox storage is writable in the test temp dir
-		originalHome := os.Getenv("HOME")
-		os.Setenv("HOME", setup.tmp)
-		t.Cleanup(func() { os.Setenv("HOME", originalHome) })
-
-		// Create .rwx directory and sandbox config file
-		rwxDir := filepath.Join(setup.tmp, ".rwx")
-		require.NoError(t, os.MkdirAll(rwxDir, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
-
-		address := "192.168.1.1:22"
-
-		// ListSandboxRuns returns no matching runs
-		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
-		}
-
-		// Mock the full auto-create path
-		setup.mockVCS.MockGetBranch = "main"
-		setup.mockVCS.MockGetCommit = "abc123"
-		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
-
-		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
-			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
-		}
-		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
-			return &api.PackageVersionsResult{
-				LatestMajor: make(map[string]string),
-				LatestMinor: make(map[string]map[string]string),
-			}, nil
-		}
-
-		var initiatedRun bool
-		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
-			initiatedRun = true
-			return &api.InitiateRunResult{
-				RunID:  "run-new",
-				RunURL: "https://cloud.rwx.com/mint/runs/run-new",
-			}, nil
-		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "new-token"}, nil
-		}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
-			return api.SandboxConnectionInfo{
-				Sandboxable:    true,
-				Address:        address,
-				PrivateUserKey: sandboxPrivateTestKey,
-				PublicHostKey:  sandboxPublicTestKey,
-			}, nil
-		}
-
-		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error {
-			return nil
-		}
-		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
-			return 0, nil
-		}
-		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
-			return nil, nil, nil
-		}
-
-		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
-			Command: []string{"echo", "hello"},
-			Json:    true,
-		})
-
-		require.NoError(t, err)
 		require.Equal(t, "run-new", result.RunID)
 		require.True(t, initiatedRun, "should have initiated a new run")
+	})
+
+	t.Run("selects the active default session despite non-default history", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		firstConfig := setup.absConfig(".rwx/sandbox.yml")
+		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+			"main:" + firstConfig: {
+				RunID:      "run-first",
+				ConfigFile: firstConfig,
+			},
+		})
+		selectionComplete := errors.New("selection complete")
+		connectionChecks := 0
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			connectionChecks++
+			require.Equal(t, "run-first", id)
+			if connectionChecks == 2 {
+				return api.SandboxConnectionInfo{}, selectionComplete
+			}
+			return api.SandboxConnectionInfo{Sandboxable: true}, nil
+		}
+		first := cli.EncodeCliState("main", firstConfig, "github.com/example/repo")
+		duplicate := cli.EncodeCliState("main", firstConfig, "github.com/example/repo")
+		second := cli.EncodeCliState("main", setup.absConfig(".rwx/second.yml"), "github.com/example/repo")
+		otherBranch := cli.EncodeCliState("other", setup.absConfig(".rwx/third.yml"), "github.com/example/repo")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{
+				{ID: "run-first", CliState: &first},
+				{ID: "run-first-older", CliState: &duplicate},
+				{ID: "run-second", CliState: &second},
+				{ID: "run-other-branch", CliState: &otherBranch},
+			}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.ErrorIs(t, err, selectionComplete)
+		require.Equal(t, 2, connectionChecks)
+		require.Nil(t, findEvent(setup.drainEvents(), "sandbox.ambiguous_selection"))
+	})
+
+	t.Run("ignores history from other repositories", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/current.git"
+		setup.mockVCS.MockGetTopLevel = setup.tmp
+		foreign := cli.EncodeCliState("main", setup.absConfig(".rwx/foreign.yml"), "github.com/example/other")
+		legacy := cli.EncodeCliState("main", "/other/repo/.rwx/legacy.yml", "")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{
+				{ID: "run-foreign", CliState: &foreign},
+				{ID: "run-legacy", CliState: &legacy},
+			}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.EqualError(t, err, "No active sandbox found for branch main.\nStart one with 'rwx sandbox start' or use --id to select an existing run.")
+	})
+
+	t.Run("ignores history from another checkout of the same repository", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetTopLevel = setup.tmp
+		otherCheckout := cli.EncodeCliState("main", "/other/checkout/.rwx/sandbox.yml", "github.com/example/repo")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-other-checkout", CliState: &otherCheckout}}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.EqualError(t, err, "No active sandbox found for branch main.\nStart one with 'rwx sandbox start' or use --id to select an existing run.")
+	})
+
+	t.Run("matches detached history by ancestry", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetShortHead = "bbbbbbb"
+		setup.mockVCS.MockIsAncestor = func(candidateSHA, headRef string) bool {
+			require.Equal(t, "aaaaaaa", candidateSHA)
+			require.Equal(t, "HEAD", headRef)
+			return true
+		}
+		configFile := setup.absConfig(".rwx/only.yml")
+		state := cli.EncodeCliState("detached@aaaaaaa", configFile, "")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-inactive", CliState: &state}}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.ErrorIs(t, err, errors.ErrSandboxDefinitionRequired)
+		require.EqualError(t, err, "No active sandbox is using the default definition for branch detached@bbbbbbb.\nSpecify a config file to select a non-default sandbox, or use --id to specify a run ID.")
+		event := findEvent(setup.drainEvents(), "sandbox.ambiguous_selection")
+		require.NotNil(t, event)
+		require.Equal(t, "definition_required", event.Props["resolution"])
+	})
+
+	t.Run("returns historical lookup errors", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return nil, errors.New("history unavailable")
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.EqualError(t, err, "unable to list historical sandbox runs: history unavailable")
+	})
+
+	t.Run("sole remote non-default history requires explicit selection", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		configFile := setup.absConfig(".rwx/only.yml")
+		state := cli.EncodeCliState("main", configFile, "")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-inactive", CliState: &state}}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.ErrorIs(t, err, errors.ErrSandboxDefinitionRequired)
+		require.EqualError(t, err, "No active sandbox is using the default definition for branch main.\nSpecify a config file to select a non-default sandbox, or use --id to specify a run ID.")
+	})
+
+	t.Run("implicit exec starts the default after non-default history", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		defaultConfig := setup.absConfig(".rwx/sandbox.yml")
+		require.NoError(t, os.WriteFile(defaultConfig, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+		customConfig := setup.absConfig(".rwx/only.yml")
+		state := cli.EncodeCliState("main", customConfig, "")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-custom", CliState: &state}}}, nil
+		}
+		startAttempted := errors.New("start attempted")
+		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
+			return api.DefaultBaseResult{}, startAttempted
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{Command: []string{"true"}, Json: true})
+
+		require.ErrorIs(t, err, startAttempted)
+		require.Equal(t, "Warning: A non-default sandbox definition has been used for branch main. Starting a new sandbox with the default definition at "+defaultConfig+".\n", setup.mockStderr.String())
+		event := findEvent(setup.drainEvents(), "sandbox.ambiguous_selection")
+		require.NotNil(t, event)
+		require.Equal(t, "start_default", event.Props["resolution"])
+	})
+
+	t.Run("explicit historical selection reports when the sandbox is inactive", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		configFile := setup.absConfig(".rwx/only.yml")
+		state := cli.EncodeCliState("main", configFile, "")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-inactive", CliState: &state}}}, nil
+		}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{ConfigFile: configFile, Key: "web", TargetPort: 3000, Json: true})
+
+		require.EqualError(t, err, "The sandbox selected from "+configFile+" is no longer active.\nStart a replacement with 'rwx sandbox exec', specify another config file, or use --id to select an existing run.")
 	})
 }
 
@@ -4940,7 +5119,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		setup := setupTest(t)
 
 		expiredConfig := setup.absConfig(".rwx/expired.yml")
-		activeConfig := setup.absConfig(".rwx/active.yml")
+		activeConfig := setup.absConfig(".rwx/sandbox.yml")
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"detached:" + expiredConfig: {
 				RunID:      "run-expired",
@@ -4963,6 +5142,10 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 				PrivateUserKey: sandboxPrivateTestKey,
 				PublicHostKey:  sandboxPublicTestKey,
 			}, nil
+		}
+		activeState := cli.EncodeCliState("detached", activeConfig, "")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-active", CliState: &activeState}}}, nil
 		}
 		var closedRunIDs []string
 		setup.mockTunnel.MockCloseAll = func(runID, stateDirectory string) error {

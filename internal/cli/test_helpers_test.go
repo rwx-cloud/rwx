@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/mocks"
 	"github.com/rwx-cloud/rwx/internal/telemetry"
@@ -63,6 +64,9 @@ func setupTest(t *testing.T) *testSetup {
 	require.NoError(t, err)
 	require.NoError(t, os.Mkdir(filepath.Join(setup.tmp, ".rwx"), 0o755))
 	setup.mockAPI = new(mocks.API)
+	setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+		return &api.ListSandboxRunsResult{}, nil
+	}
 	setup.mockSSH = new(mocks.SSH)
 	setup.mockTunnel = new(mocks.SSHTunnelManager)
 	setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {

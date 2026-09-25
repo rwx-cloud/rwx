@@ -37,6 +37,7 @@ func TestClassifyError(t *testing.T) {
 		{"lsp_error", errors.ErrLSP, "lsp_error"},
 		{"ambiguous_task_key", errors.ErrAmbiguousTaskKey, "ambiguous_task_key"},
 		{"ambiguous_definition_path", errors.ErrAmbiguousDefinitionPath, "ambiguous_definition_path"},
+		{"sandbox_definition_required", errors.ErrSandboxDefinitionRequired, "sandbox_definition_required"},
 		{"network_transient_error", errors.ErrNetworkTransient, "network_transient_error"},
 		{"sandbox_setup_failure", errors.ErrSandboxSetupFailure, "sandbox_setup_failure"},
 		{"sandbox_no_git_dir", errors.ErrSandboxNoGitDir, "sandbox_no_git_dir"},

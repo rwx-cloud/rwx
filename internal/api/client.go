@@ -1869,17 +1869,34 @@ func (c Client) CancelRun(runID, scopedToken string) error {
 }
 
 func (c Client) ListSandboxRuns(retryProgress io.Writer) (*ListSandboxRunsResult, error) {
-	result, err := c.ListRuns(ListRunsConfig{
-		ResultStatuses:    []string{"sandboxed"},
-		ExecutionStatuses: []string{"in_progress"},
-		MyRuns:            true,
-		RetryProgress:     retryProgress,
-	})
-	if err != nil {
-		return nil, err
-	}
+	return c.listSandboxRuns([]string{"in_progress"}, true, retryProgress)
+}
 
-	return &ListSandboxRunsResult{Runs: result.Runs}, nil
+func (c Client) ListHistoricalSandboxRuns(retryProgress io.Writer) (*ListSandboxRunsResult, error) {
+	return c.listSandboxRuns(nil, false, retryProgress)
+}
+
+func (c Client) listSandboxRuns(executionStatuses []string, myRuns bool, retryProgress io.Writer) (*ListSandboxRunsResult, error) {
+	result := &ListSandboxRunsResult{}
+	cursor := ""
+	for {
+		page, err := c.ListRuns(ListRunsConfig{
+			ResultStatuses:    []string{"sandboxed"},
+			ExecutionStatuses: executionStatuses,
+			MyRuns:            myRuns,
+			Cursor:            cursor,
+			RetryProgress:     retryProgress,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		result.Runs = append(result.Runs, page.Runs...)
+		if page.Pagination.NextCursor == nil {
+			return result, nil
+		}
+		cursor = *page.Pagination.NextCursor
+	}
 }
 
 func (c Client) GetSandboxInitTemplate() (SandboxInitTemplateResult, error) {

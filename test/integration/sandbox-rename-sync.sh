@@ -20,7 +20,7 @@ cleanup() {
   rm -f "${PUSH_NEW}" "${PULL_NEW}"
   git restore "${PUSH_OLD}" "${PULL_OLD}" 2>/dev/null || true
   rm -f setup-artifact.txt
-  "${RWX_CLI}" sandbox stop 2>/dev/null || true
+  "${RWX_CLI}" sandbox stop "${SANDBOX_CONFIG}" 2>/dev/null || true
 }
 trap cleanup EXIT
 
