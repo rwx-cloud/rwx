@@ -30,12 +30,14 @@ tasks:
       org=$(rwx whoami --json | jq -r '.organization_slug')
       tmpdir=$(mktemp -d)
       cat > "$tmpdir/rwx-package.yml" << EOF
-      name: $org/rwx-cli-integration-test
-      version: 0.0.1
-      description: Fixture uploaded by the rwx CLI integration suite
-      tasks:
-        - key: noop
-          run: echo hello
+      package:
+        name: $org/rwx-cli-integration-test
+        version: 0.0.1
+        description: Fixture uploaded by the rwx CLI integration suite
+        visibility: private
+        tasks:
+          - key: noop
+            run: echo hello
       EOF
       echo "# rwx-cli-integration-test" > "$tmpdir/README.md"
 
@@ -60,12 +62,14 @@ tasks:
       org=$(rwx whoami --json | jq -r '.organization_slug')
       tmpdir=$(mktemp -d)
       cat > "$tmpdir/rwx-package.yml" << EOF
-      name: $org/rwx-cli-integration-test
-      version: 0.0.1
-      description: Fixture uploaded by the rwx CLI integration suite
-      tasks:
-        - key: noop
-          run: echo hello
+      package:
+        name: $org/rwx-cli-integration-test
+        version: 0.0.1
+        description: Fixture uploaded by the rwx CLI integration suite
+        visibility: private
+        tasks:
+          - key: noop
+            run: echo hello
       EOF
       echo "# rwx-cli-integration-test" > "$tmpdir/README.md"
 
@@ -104,12 +108,14 @@ tasks:
       org=$(rwx whoami --json | jq -r '.organization_slug')
       tmpdir=$(mktemp -d)
       cat > "$tmpdir/rwx-package.yml" << EOF
-      name: $org/rwx-cli-integration-test
-      version: 0.0.1
-      description: Fixture uploaded by the rwx CLI integration suite
-      tasks:
-        - key: noop
-          run: echo hello
+      package:
+        name: $org/rwx-cli-integration-test
+        version: 0.0.1
+        description: Fixture uploaded by the rwx CLI integration suite
+        visibility: private
+        tasks:
+          - key: noop
+            run: echo hello
       EOF
       echo "# rwx-cli-integration-test" > "$tmpdir/README.md"
 
@@ -162,7 +168,7 @@ tasks:
 
       # Missing README.md
       d=$(mktemp -d)
-      printf 'name: %s/rwx-cli-integration-test\nversion: 0.0.1\ndescription: d\ntasks:\n  - key: noop\n    run: echo hi\n' "$org" > "$d/rwx-package.yml"
+      printf 'package:\n  name: %s/rwx-cli-integration-test\n  version: 0.0.1\n  description: d\n  visibility: private\n  tasks:\n    - key: noop\n      run: echo hi\n' "$org" > "$d/rwx-package.yml"
       assert_error "missing README.md" "Upload did not contain README.md" "$d"
 
       # Invalid YAML
@@ -174,19 +180,19 @@ tasks:
       # Manifest without a name
       d=$(mktemp -d)
       echo "# readme" > "$d/README.md"
-      printf 'description: no name here\n' > "$d/rwx-package.yml"
-      assert_error "missing name" "did not contain a name" "$d"
+      printf 'package:\n  description: no name here\n' > "$d/rwx-package.yml"
+      assert_error "missing name" 'did not contain a `name` within the `package` field' "$d"
 
       # Version that is not semver
       d=$(mktemp -d)
       echo "# readme" > "$d/README.md"
-      printf 'name: %s/rwx-cli-integration-test\nversion: not-a-version\ndescription: d\ntasks:\n  - key: noop\n    run: echo hi\n' "$org" > "$d/rwx-package.yml"
+      printf 'package:\n  name: %s/rwx-cli-integration-test\n  version: not-a-version\n  description: d\n  visibility: private\n  tasks:\n    - key: noop\n      run: echo hi\n' "$org" > "$d/rwx-package.yml"
       assert_error "invalid version" "did not contain a valid version" "$d"
 
       # Package name owned by a different organization
       d=$(mktemp -d)
       echo "# readme" > "$d/README.md"
-      printf 'name: not-your-org/rwx-cli-integration-test\nversion: 0.0.1\ndescription: d\ntasks:\n  - key: noop\n    run: echo hi\n' > "$d/rwx-package.yml"
+      printf 'package:\n  name: not-your-org/rwx-cli-integration-test\n  version: 0.0.1\n  description: d\n  visibility: private\n  tasks:\n    - key: noop\n      run: echo hi\n' > "$d/rwx-package.yml"
       assert_error "wrong organization" "but request was made under organization" "$d"
     env:
       RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
@@ -198,7 +204,7 @@ tasks:
 
       tmpdir=$(mktemp -d)
       echo "# readme" > "$tmpdir/README.md"
-      printf 'name: rwx/rwx-cli-integration-test\nversion: 0.0.1\ndescription: d\ntasks:\n  - key: noop\n    run: echo hi\n' > "$tmpdir/rwx-package.yml"
+      printf 'package:\n  name: rwx/rwx-cli-integration-test\n  version: 0.0.1\n  description: d\n  visibility: private\n  tasks:\n    - key: noop\n      run: echo hi\n' > "$tmpdir/rwx-package.yml"
 
       if output=$(rwx package build "$tmpdir" --access-token rwxp_not_a_real_token 2>&1); then
         echo "expected a non-zero exit with an invalid access token"
@@ -222,7 +228,7 @@ tasks:
 
       tmpdir=$(mktemp -d)
       echo "# readme" > "$tmpdir/README.md"
-      printf 'name: rwx/rwx-cli-integration-test\nversion: 0.0.1\ndescription: d\ntasks:\n  - key: noop\n    run: echo hi\n' > "$tmpdir/rwx-package.yml"
+      printf 'package:\n  name: rwx/rwx-cli-integration-test\n  version: 0.0.1\n  description: d\n  visibility: private\n  tasks:\n    - key: noop\n      run: echo hi\n' > "$tmpdir/rwx-package.yml"
 
       if output=$(rwx package build "$tmpdir" --timestamp 2026-01-02 2>&1); then
         echo "expected a non-zero exit for a malformed timestamp"
