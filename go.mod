@@ -6,7 +6,7 @@ toolchain go1.27.1
 
 require (
 	al.essio.dev/pkg/shellescape v1.6.1
-	charm.land/bubbletea/v2 v2.0.9
+	charm.land/bubbletea/v2 v2.0.10
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/briandowns/spinner v1.23.2
 	github.com/distribution/reference v0.6.0
