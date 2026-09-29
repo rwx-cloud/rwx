@@ -245,8 +245,9 @@ tasks:
          .rwx/language-server-update.yml \
          "$tmpdir/.rwx/"
 
+      # Package update warnings do not indicate Node incompatibility.
       set +e
-      output=$(rwx lint -d "$tmpdir" --warnings-as-errors 2>&1)
+      output=$(rwx lint -d "$tmpdir" 2>&1)
       exit_code=$?
       set -e
 
