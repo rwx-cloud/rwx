@@ -163,3 +163,136 @@ func TestService_CreateVaultOidcToken(t *testing.T) {
 		require.Contains(t, s.mockStdout.String(), `"DocumentationURL":"https://www.rwx.com/docs/oidc"`)
 	})
 }
+
+func testVaultOidcToken() api.VaultOidcToken {
+	return api.VaultOidcToken{
+		ID:               "token-1",
+		Vault:            api.VaultIdentity{ID: "vault-1", Name: "deploys"},
+		Name:             "aws",
+		Audience:         "sts.amazonaws.com",
+		Subject:          "org:acme:vault:deploys",
+		Expression:       "${{ vaults.deploys.oidc.aws }}",
+		DocumentationURL: "https://www.rwx.com/docs/oidc-aws",
+	}
+}
+
+func configureVaultOidcTokenResolution(s *testSetup) {
+	s.mockAPI.MockListVaults = func() (*api.ListVaultsResult, error) {
+		return &api.ListVaultsResult{Vaults: []api.Vault{{ID: "vault-1", Name: "deploys"}}}, nil
+	}
+	s.mockAPI.MockListVaultOidcTokens = func(cfg api.ListVaultOidcTokensConfig) (*api.ListVaultOidcTokensResult, error) {
+		return &api.ListVaultOidcTokensResult{OidcTokens: []api.VaultOidcToken{testVaultOidcToken()}}, nil
+	}
+}
+
+func TestService_ListVaultOidcTokens(t *testing.T) {
+	t.Run("resolves a vault name and prints complete JSON state", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockAPI.MockListVaults = func() (*api.ListVaultsResult, error) {
+			return &api.ListVaultsResult{Vaults: []api.Vault{{ID: "vault-1", Name: "deploys"}}}, nil
+		}
+		s.mockAPI.MockListVaultOidcTokens = func(cfg api.ListVaultOidcTokensConfig) (*api.ListVaultOidcTokensResult, error) {
+			require.Equal(t, "vault-1", cfg.VaultID)
+			return &api.ListVaultOidcTokensResult{OidcTokens: []api.VaultOidcToken{testVaultOidcToken()}}, nil
+		}
+
+		result, err := s.service.ListVaultOidcTokens(cli.ListVaultOidcTokensConfig{Vault: "deploys", Json: true})
+
+		require.NoError(t, err)
+		require.Len(t, result.OidcTokens, 1)
+		require.JSONEq(t, `{"OidcTokens":[{"ID":"token-1","Vault":{"ID":"vault-1","Name":"deploys"},"Name":"aws","Audience":"sts.amazonaws.com","Subject":"org:acme:vault:deploys","Expression":"${{ vaults.deploys.oidc.aws }}","DocumentationURL":"https://www.rwx.com/docs/oidc-aws"}]}`, s.mockStdout.String())
+	})
+
+	t.Run("prints an empty message", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockAPI.MockListVaults = func() (*api.ListVaultsResult, error) {
+			return &api.ListVaultsResult{Vaults: []api.Vault{{ID: "vault-1", Name: "deploys"}}}, nil
+		}
+		s.mockAPI.MockListVaultOidcTokens = func(cfg api.ListVaultOidcTokensConfig) (*api.ListVaultOidcTokensResult, error) {
+			return &api.ListVaultOidcTokensResult{}, nil
+		}
+
+		_, err := s.service.ListVaultOidcTokens(cli.ListVaultOidcTokensConfig{Vault: "deploys"})
+
+		require.NoError(t, err)
+		require.Equal(t, "No OIDC tokens found in vault \"deploys\".\n", s.mockStdout.String())
+	})
+}
+
+func TestService_ShowVaultOidcToken(t *testing.T) {
+	s := setupTest(t)
+	configureVaultOidcTokenResolution(s)
+	s.mockAPI.MockShowVaultOidcToken = func(cfg api.ShowVaultOidcTokenConfig) (*api.ShowVaultOidcTokenResult, error) {
+		require.Equal(t, "vault-1", cfg.VaultID)
+		require.Equal(t, "token-1", cfg.TokenID)
+		result := testVaultOidcToken()
+		return &result, nil
+	}
+
+	result, err := s.service.ShowVaultOidcToken(cli.VaultOidcTokenConfig{Vault: "deploys", Token: "aws"})
+
+	require.NoError(t, err)
+	require.Equal(t, "token-1", result.ID)
+	require.Contains(t, s.mockStdout.String(), "ID: token-1")
+	require.Contains(t, s.mockStdout.String(), "Vault: deploys (vault-1)")
+	require.Contains(t, s.mockStdout.String(), "Documentation: https://www.rwx.com/docs/oidc-aws")
+}
+
+func TestService_UpdateVaultOidcToken(t *testing.T) {
+	t.Run("resolves names and updates name and audience", func(t *testing.T) {
+		s := setupTest(t)
+		configureVaultOidcTokenResolution(s)
+		s.mockAPI.MockUpdateVaultOidcToken = func(cfg api.UpdateVaultOidcTokenConfig) (*api.UpdateVaultOidcTokenResult, error) {
+			require.Equal(t, "vault-1", cfg.VaultID)
+			require.Equal(t, "token-1", cfg.TokenID)
+			require.Equal(t, "production", cfg.Name)
+			require.Equal(t, "https://example.com", cfg.Audience)
+			result := testVaultOidcToken()
+			result.Name = cfg.Name
+			result.Audience = cfg.Audience
+			return &result, nil
+		}
+
+		result, err := s.service.UpdateVaultOidcToken(cli.UpdateVaultOidcTokenConfig{
+			Vault: "deploys", Token: "aws", Name: "production", Audience: "https://example.com", Json: true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "production", result.Name)
+		require.Contains(t, s.mockStdout.String(), `"ID":"token-1"`)
+		require.Contains(t, s.mockStdout.String(), `"Audience":"https://example.com"`)
+	})
+
+	t.Run("requires at least one change", func(t *testing.T) {
+		s := setupTest(t)
+		_, err := s.service.UpdateVaultOidcToken(cli.UpdateVaultOidcTokenConfig{Vault: "deploys", Token: "aws"})
+		require.ErrorContains(t, err, "provide --name, --audience, or both")
+	})
+}
+
+func TestService_DeleteVaultOidcToken(t *testing.T) {
+	t.Run("requires confirmation in non-interactive environments", func(t *testing.T) {
+		s := setupTest(t)
+		configureVaultOidcTokenResolution(s)
+
+		_, err := s.service.DeleteVaultOidcToken(cli.DeleteVaultOidcTokenConfig{Vault: "deploys", Token: "aws"})
+
+		require.ErrorContains(t, err, "use --yes to confirm")
+	})
+
+	t.Run("deletes the resolved token and returns IDs", func(t *testing.T) {
+		s := setupTest(t)
+		configureVaultOidcTokenResolution(s)
+		s.mockAPI.MockDeleteVaultOidcToken = func(cfg api.DeleteVaultOidcTokenConfig) (*api.DeleteVaultOidcTokenResult, error) {
+			require.Equal(t, "vault-1", cfg.VaultID)
+			require.Equal(t, "token-1", cfg.TokenID)
+			return &api.DeleteVaultOidcTokenResult{}, nil
+		}
+
+		result, err := s.service.DeleteVaultOidcToken(cli.DeleteVaultOidcTokenConfig{Vault: "deploys", Token: "aws", Json: true, Yes: true})
+
+		require.NoError(t, err)
+		require.Equal(t, "token-1", result.ID)
+		require.JSONEq(t, `{"ID":"token-1","Vault":{"ID":"vault-1","Name":"deploys"},"Name":"aws"}`, s.mockStdout.String())
+	})
+}
