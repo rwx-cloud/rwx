@@ -12,8 +12,8 @@ import (
 func TestResolveRunIDFromGitContext(t *testing.T) {
 	t.Run("resolves run ID from branch and repository", func(t *testing.T) {
 		setup := setupTest(t)
-		setup.mockGit.MockGetBranch = "my-branch"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockVCS.MockGetBranch = "my-branch"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			require.Equal(t, "my-branch", cfg.BranchName)
 			require.Equal(t, "rwx", cfg.RepositoryName)
@@ -27,8 +27,8 @@ func TestResolveRunIDFromGitContext(t *testing.T) {
 
 	t.Run("returns error when branch is empty", func(t *testing.T) {
 		setup := setupTest(t)
-		setup.mockGit.MockGetBranch = ""
-		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockVCS.MockGetBranch = ""
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
 
 		_, err := setup.service.ResolveRunIDFromGitContext()
 		require.Error(t, err)
@@ -37,8 +37,8 @@ func TestResolveRunIDFromGitContext(t *testing.T) {
 
 	t.Run("returns error when origin URL is empty", func(t *testing.T) {
 		setup := setupTest(t)
-		setup.mockGit.MockGetBranch = "my-branch"
-		setup.mockGit.MockGetOriginUrl = ""
+		setup.mockVCS.MockGetBranch = "my-branch"
+		setup.mockVCS.MockGetOriginUrl = ""
 
 		_, err := setup.service.ResolveRunIDFromGitContext()
 		require.Error(t, err)
@@ -47,8 +47,8 @@ func TestResolveRunIDFromGitContext(t *testing.T) {
 
 	t.Run("returns error when no run found", func(t *testing.T) {
 		setup := setupTest(t)
-		setup.mockGit.MockGetBranch = "my-branch"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockVCS.MockGetBranch = "my-branch"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			return api.RunStatusResult{}, api.ErrNotFound
 		}
@@ -60,8 +60,8 @@ func TestResolveRunIDFromGitContext(t *testing.T) {
 
 	t.Run("uses branch override when provided", func(t *testing.T) {
 		setup := setupTest(t)
-		setup.mockGit.MockGetBranch = "my-branch"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockVCS.MockGetBranch = "my-branch"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			require.Equal(t, "other-branch", cfg.BranchName)
 			require.Equal(t, "rwx", cfg.RepositoryName)
@@ -77,8 +77,8 @@ func TestResolveRunIDFromGitContext(t *testing.T) {
 
 	t.Run("uses repo override when provided", func(t *testing.T) {
 		setup := setupTest(t)
-		setup.mockGit.MockGetBranch = "my-branch"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockVCS.MockGetBranch = "my-branch"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			require.Equal(t, "my-branch", cfg.BranchName)
 			require.Equal(t, "other-repo", cfg.RepositoryName)
@@ -94,8 +94,8 @@ func TestResolveRunIDFromGitContext(t *testing.T) {
 
 	t.Run("passes definition path to API", func(t *testing.T) {
 		setup := setupTest(t)
-		setup.mockGit.MockGetBranch = "my-branch"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockVCS.MockGetBranch = "my-branch"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			require.Equal(t, ".rwx/ci.yml", cfg.DefinitionPath)
 			return api.RunStatusResult{RunID: "run-def"}, nil
@@ -110,8 +110,8 @@ func TestResolveRunIDFromGitContext(t *testing.T) {
 
 	t.Run("passes through ambiguous definition path error without wrapping", func(t *testing.T) {
 		setup := setupTest(t)
-		setup.mockGit.MockGetBranch = "my-branch"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockVCS.MockGetBranch = "my-branch"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			return api.RunStatusResult{}, &api.AmbiguousDefinitionPathError{
 				Message:                 "Multiple definitions found",
@@ -131,8 +131,8 @@ func TestResolveRunIDFromGitContext(t *testing.T) {
 
 	t.Run("skips implicit branch when commit SHA is provided", func(t *testing.T) {
 		setup := setupTest(t)
-		setup.mockGit.MockGetBranch = "my-branch"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockVCS.MockGetBranch = "my-branch"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			require.Equal(t, "", cfg.BranchName)
 			require.Equal(t, "rwx", cfg.RepositoryName)
@@ -149,8 +149,8 @@ func TestResolveRunIDFromGitContext(t *testing.T) {
 
 	t.Run("uses explicit branch with commit SHA", func(t *testing.T) {
 		setup := setupTest(t)
-		setup.mockGit.MockGetBranch = "my-branch"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockVCS.MockGetBranch = "my-branch"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			require.Equal(t, "explicit-branch", cfg.BranchName)
 			require.Equal(t, "abc123", cfg.CommitSha)
@@ -167,8 +167,8 @@ func TestResolveRunIDFromGitContext(t *testing.T) {
 
 	t.Run("returns error when run ID is empty in response", func(t *testing.T) {
 		setup := setupTest(t)
-		setup.mockGit.MockGetBranch = "my-branch"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
+		setup.mockVCS.MockGetBranch = "my-branch"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:rwx-cloud/rwx.git"
 		setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 			return api.RunStatusResult{RunID: ""}, nil
 		}

@@ -10,7 +10,7 @@ import (
 
 	"github.com/rwx-cloud/rwx/internal/cli"
 	internalerrors "github.com/rwx-cloud/rwx/internal/errors"
-	"github.com/rwx-cloud/rwx/internal/git"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 	"github.com/spf13/pflag"
 )
 
@@ -96,7 +96,7 @@ func recordTelemetry(err error, start time.Time) {
 			props["error_message"] = scrubErrorMessage(err.Error())
 		}
 		if errType == "patch_failed" {
-			props["patch_error_reason"] = git.PatchFailureReason(err)
+			props["patch_error_reason"] = vcs.PatchFailureReason(err)
 		}
 		if errType == "unknown_command" {
 			if attempt := extractUnknownCommandAttempt(err); attempt != "" {
@@ -194,6 +194,8 @@ func classifyError(err error) string {
 		return "ambiguous_task_key"
 	case errors.Is(err, internalerrors.ErrAmbiguousDefinitionPath):
 		return "ambiguous_definition_path"
+	case errors.Is(err, internalerrors.ErrSandboxDefinitionRequired):
+		return "sandbox_definition_required"
 	case errors.Is(err, internalerrors.ErrNetworkTransient):
 		return "network_transient_error"
 	case errors.Is(err, internalerrors.ErrSandboxSetupFailure):

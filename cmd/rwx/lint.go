@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/rwx-cloud/rwx/internal/accesstoken"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/lsp"
@@ -22,9 +23,6 @@ var (
 
 	lintCmd = &cobra.Command{
 		GroupID: "definitions",
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			outputFormat := LintOutputFormat
 			if cmd.Flags().Changed("json") {
@@ -44,6 +42,10 @@ var (
 						return nil, err
 					}
 					cfg.TelemetryCollector = telemetryCollector
+					cfg.AccessToken, err = accesstoken.Get(accessTokenBackend, AccessToken)
+					if err != nil {
+						return nil, err
+					}
 
 					checkResult, err := lsp.Check(cmd.Context(), cfg, os.Stdout)
 					if err != nil {

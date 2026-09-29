@@ -20,7 +20,7 @@ var (
 	DownloadCmd *cobra.Command
 )
 
-func InitDownload(requireAccessToken func() error, getService func() cli.Service, useJsonOutput func() bool) {
+func InitDownload(getService func() cli.Service, useJsonOutput func() bool) {
 	DownloadCmd = &cobra.Command{
 		Args: func(cmd *cobra.Command, args []string) error {
 			taskKeySet := cmd.Flags().Changed("task")
@@ -53,9 +53,6 @@ func InitDownload(requireAccessToken func() error, getService func() cli.Service
 				}
 			}
 			return nil
-		},
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskKeySet := cmd.Flags().Changed("task")

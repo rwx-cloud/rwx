@@ -1,0 +1,21 @@
+#!/bin/bash
+set -euo pipefail
+
+git init -q -b main origin
+cd origin
+printf 'hello\n' > base.txt
+git add -A
+git commit -qm "base commit"
+
+# The base commit patches are expected to be based on.
+git rev-parse HEAD
+cd ..
+
+jj git clone $COLOCATE origin repo
+cd repo
+
+# jj does not advance bookmarks, so committing leaves `feature` behind on @'s
+# ancestor rather than carrying it along.
+jj bookmark set feature -r @
+printf 'hello\nfeature work\n' > base.txt
+jj commit -m "feature work"

@@ -9,7 +9,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/errors"
-	"github.com/rwx-cloud/rwx/internal/git"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 
 	"github.com/skratchdot/open-golang/open"
 	"github.com/spf13/cobra"
@@ -39,9 +39,6 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 
     rwx docs pull /results`,
 		Args: cobra.MaximumNArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			taskKeySet := cmd.Flags().Changed("task")
@@ -141,10 +138,8 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 				fmt.Println(string(resultJson))
 			} else {
 				if runIDFromGit && ResultsBranch == "" && ResultsRepo == "" && result.Commit != "" {
-					if head := service.GitClient.GetHead(); head != "" {
-						if note := git.CommitMismatchNote(head, result.Commit); note != "" {
-							fmt.Println(note)
-						}
+					if note := CommitDriftNote(service.VCSClient, result.Commit); note != "" {
+						fmt.Println(note)
 					}
 				}
 				if result.TaskURL != "" {
@@ -206,6 +201,16 @@ func handleResultsTaskKeyError(err error) error {
 	}
 
 	return err
+}
+
+// CommitDriftNote warns when the branch's latest run was not made from the last
+// local commit.
+func CommitDriftNote(client vcs.Client, runCommit string) string {
+	last, err := client.GetLastCommit()
+	if err != nil || last == "" {
+		return ""
+	}
+	return vcs.CommitMismatchNote(last, runCommit)
 }
 
 func HandleAmbiguousDefinitionPathError(err error, branch, repo string) error {

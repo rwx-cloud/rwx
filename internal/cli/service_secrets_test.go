@@ -94,6 +94,38 @@ func TestService_SettingSecrets(t *testing.T) {
 	})
 }
 
+func TestService_ListSecrets(t *testing.T) {
+	description := "Production API key"
+
+	t.Run("prints names and metadata without values", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockAPI.MockListSecrets = func(cfg api.ListSecretsConfig) (*api.ListSecretsResult, error) {
+			require.Equal(t, "deploys", cfg.VaultName)
+			return &api.ListSecretsResult{Secrets: []api.SecretInfo{
+				{Name: "API_KEY", Description: &description},
+				{Name: "ZEBRA"},
+			}}, nil
+		}
+
+		result, err := s.service.ListSecrets(cli.ListSecretsConfig{Vault: "deploys"})
+		require.NoError(t, err)
+		require.Len(t, result.Secrets, 2)
+		require.Equal(t, "NAME     DESCRIPTION\nAPI_KEY  Production API key\nZEBRA    \n", s.mockStdout.String())
+	})
+
+	t.Run("uses PascalCase JSON fields", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockAPI.MockListSecrets = func(cfg api.ListSecretsConfig) (*api.ListSecretsResult, error) {
+			return &api.ListSecretsResult{Secrets: []api.SecretInfo{{Name: "API_KEY", Description: &description}}}, nil
+		}
+
+		_, err := s.service.ListSecrets(cli.ListSecretsConfig{Vault: "default", Json: true})
+		require.NoError(t, err)
+		require.JSONEq(t, `{"Secrets":[{"Name":"API_KEY","Description":"Production API key"}]}`, s.mockStdout.String())
+		require.NotContains(t, s.mockStdout.String(), "Value")
+	})
+}
+
 func TestService_DeleteSecret(t *testing.T) {
 	t.Run("deletes a secret", func(t *testing.T) {
 		s := setupTest(t)

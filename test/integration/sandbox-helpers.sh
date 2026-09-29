@@ -35,5 +35,11 @@ start_sandbox() {
 }
 
 stop_sandbox() {
-  "${RWX_CLI}" sandbox stop
+  if [ -z "${SANDBOX_RUN_ID:-}" ]; then
+    echo "No sandbox run ID available to stop" >&2
+    return 1
+  fi
+  # Parallel tests can discover each other's sandboxes, so cleanup must target
+  # only the run created by this test.
+  "${RWX_CLI}" sandbox stop --id "$SANDBOX_RUN_ID"
 }

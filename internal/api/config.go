@@ -184,6 +184,29 @@ type CreateVaultRepoPermission struct {
 
 type CreateVaultResult struct{}
 
+type ListVaultsResult struct {
+	Vaults []Vault `json:"vaults"`
+}
+
+type Vault struct {
+	Name                  string                      `json:"name"`
+	LockStatus            string                      `json:"lock_status"`
+	RepositoryPermissions []CreateVaultRepoPermission `json:"repository_permissions"`
+}
+
+type ListSecretsConfig struct {
+	VaultName string
+}
+
+type ListSecretsResult struct {
+	Secrets []SecretInfo `json:"secrets"`
+}
+
+type SecretInfo struct {
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+}
+
 type DeleteSecretConfig struct {
 	SecretName string
 	VaultName  string
@@ -211,6 +234,14 @@ type ShowVarConfig struct {
 type ShowVarResult struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
+}
+
+type ListVarsConfig struct {
+	VaultName string
+}
+
+type ListVarsResult struct {
+	Vars []Var `json:"vars"`
 }
 
 type DeleteVarConfig struct {
@@ -243,6 +274,15 @@ type PackageVersionsResult struct {
 	LatestMajor map[string]string            `json:"latest_major"`
 	LatestMinor map[string]map[string]string `json:"latest_minor"`
 	Packages    map[string]ApiPackageInfo    `json:"packages"`
+}
+
+type UploadPackageConfig struct {
+	FileName string
+	Contents io.Reader
+}
+
+type UploadPackageResult struct {
+	Digest string `json:"digest"`
 }
 
 type PackageDocumentationParameter struct {

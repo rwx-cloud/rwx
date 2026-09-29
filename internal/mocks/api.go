@@ -8,6 +8,11 @@ import (
 )
 
 type API struct {
+	MockListCrons                               func() (*api.ListCronsResult, error)
+	MockShowCron                                func(string) (*api.CronResult, error)
+	MockPauseCron                               func(string) (*api.CronResult, error)
+	MockResumeCron                              func(string) (*api.CronResult, error)
+	MockSnoozeCron                              func(string, string) (*api.CronResult, error)
 	MockGetSkillContent                         func() (string, error)
 	MockGetSkillLatestVersion                   func() (string, error)
 	MockInitiateRun                             func(api.InitiateRunConfig) (*api.InitiateRunResult, error)
@@ -22,13 +27,18 @@ type API struct {
 	MockCreateDocsToken                         func() (*api.DocsTokenResult, error)
 	MockSetSecretsInVault                       func(api.SetSecretsInVaultConfig) (*api.SetSecretsInVaultResult, error)
 	MockCreateVault                             func(api.CreateVaultConfig) (*api.CreateVaultResult, error)
+	MockListVaults                              func() (*api.ListVaultsResult, error)
+	MockListSecrets                             func(api.ListSecretsConfig) (*api.ListSecretsResult, error)
 	MockCreateVaultOidcToken                    func(api.CreateVaultOidcTokenConfig) (*api.CreateVaultOidcTokenResult, error)
 	MockDeleteSecret                            func(api.DeleteSecretConfig) (*api.DeleteSecretResult, error)
 	MockSetVar                                  func(api.SetVarConfig) (*api.SetVarResult, error)
 	MockShowVar                                 func(api.ShowVarConfig) (*api.ShowVarResult, error)
+	MockListVars                                func(api.ListVarsConfig) (*api.ListVarsResult, error)
 	MockDeleteVar                               func(api.DeleteVarConfig) (*api.DeleteVarResult, error)
 	MockGetPackageVersions                      func() (*api.PackageVersionsResult, error)
 	MockGetPackageDocumentation                 func(string) (*api.PackageDocumentationResult, error)
+	MockUploadPackage                           func(api.UploadPackageConfig) (*api.UploadPackageResult, error)
+	MockPublishPackage                          func(string) error
 	MockInitiateDispatch                        func(api.InitiateDispatchConfig) (*api.InitiateDispatchResult, error)
 	MockGetDispatch                             func(api.GetDispatchConfig) (*api.GetDispatchResult, error)
 	MockGetDefaultBase                          func() (api.DefaultBaseResult, error)
@@ -58,6 +68,7 @@ type API struct {
 	MockGetRunPromptByTaskKey                         func(string, string) (string, error)
 	MockGetSandboxInitTemplate                        func() (api.SandboxInitTemplateResult, error)
 	MockListSandboxRuns                               func() (*api.ListSandboxRunsResult, error)
+	MockListHistoricalSandboxRuns                     func() (*api.ListSandboxRunsResult, error)
 	MockCancelRun                                     func(runID, scopedToken string) error
 }
 
@@ -173,6 +184,22 @@ func (c *API) CreateVault(cfg api.CreateVaultConfig) (*api.CreateVaultResult, er
 	return nil, errors.New("MockCreateVault was not configured")
 }
 
+func (c *API) ListVaults() (*api.ListVaultsResult, error) {
+	if c.MockListVaults != nil {
+		return c.MockListVaults()
+	}
+
+	return nil, errors.New("MockListVaults was not configured")
+}
+
+func (c *API) ListSecrets(cfg api.ListSecretsConfig) (*api.ListSecretsResult, error) {
+	if c.MockListSecrets != nil {
+		return c.MockListSecrets(cfg)
+	}
+
+	return nil, errors.New("MockListSecrets was not configured")
+}
+
 func (c *API) CreateVaultOidcToken(cfg api.CreateVaultOidcTokenConfig) (*api.CreateVaultOidcTokenResult, error) {
 	if c.MockCreateVaultOidcToken != nil {
 		return c.MockCreateVaultOidcToken(cfg)
@@ -205,6 +232,14 @@ func (c *API) ShowVar(cfg api.ShowVarConfig) (*api.ShowVarResult, error) {
 	return nil, errors.New("MockShowVar was not configured")
 }
 
+func (c *API) ListVars(cfg api.ListVarsConfig) (*api.ListVarsResult, error) {
+	if c.MockListVars != nil {
+		return c.MockListVars(cfg)
+	}
+
+	return nil, errors.New("MockListVars was not configured")
+}
+
 func (c *API) DeleteVar(cfg api.DeleteVarConfig) (*api.DeleteVarResult, error) {
 	if c.MockDeleteVar != nil {
 		return c.MockDeleteVar(cfg)
@@ -227,6 +262,22 @@ func (c *API) GetPackageDocumentation(packageName string) (*api.PackageDocumenta
 	}
 
 	return nil, errors.New("MockGetPackageDocumentation was not configured")
+}
+
+func (c *API) UploadPackage(cfg api.UploadPackageConfig) (*api.UploadPackageResult, error) {
+	if c.MockUploadPackage != nil {
+		return c.MockUploadPackage(cfg)
+	}
+
+	return nil, errors.New("MockUploadPackage was not configured")
+}
+
+func (c *API) PublishPackage(digest string) error {
+	if c.MockPublishPackage != nil {
+		return c.MockPublishPackage(digest)
+	}
+
+	return errors.New("MockPublishPackage was not configured")
 }
 
 func (c *API) InitiateDispatch(cfg api.InitiateDispatchConfig) (*api.InitiateDispatchResult, error) {
@@ -410,6 +461,17 @@ func (c *API) ListSandboxRuns(_ io.Writer) (*api.ListSandboxRunsResult, error) {
 	}
 
 	return nil, errors.New("MockListSandboxRuns was not configured")
+}
+
+func (c *API) ListHistoricalSandboxRuns(_ io.Writer) (*api.ListSandboxRunsResult, error) {
+	if c.MockListHistoricalSandboxRuns != nil {
+		return c.MockListHistoricalSandboxRuns()
+	}
+	if c.MockListSandboxRuns != nil {
+		return c.MockListSandboxRuns()
+	}
+
+	return nil, errors.New("MockListHistoricalSandboxRuns was not configured")
 }
 
 func (c *API) CancelRun(runID, scopedToken string) error {

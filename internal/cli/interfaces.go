@@ -2,10 +2,8 @@ package cli
 
 import (
 	"io"
-	"os/exec"
 
 	"github.com/rwx-cloud/rwx/internal/api"
-	"github.com/rwx-cloud/rwx/internal/git"
 	"github.com/rwx-cloud/rwx/internal/ssh"
 
 	gossh "golang.org/x/crypto/ssh"
@@ -28,13 +26,23 @@ type APIClient interface {
 	CreateDocsToken() (*api.DocsTokenResult, error)
 	SetSecretsInVault(api.SetSecretsInVaultConfig) (*api.SetSecretsInVaultResult, error)
 	CreateVault(api.CreateVaultConfig) (*api.CreateVaultResult, error)
+	ListVaults() (*api.ListVaultsResult, error)
+	ListCrons() (*api.ListCronsResult, error)
+	ShowCron(string) (*api.CronResult, error)
+	PauseCron(string) (*api.CronResult, error)
+	ResumeCron(string) (*api.CronResult, error)
+	SnoozeCron(string, string) (*api.CronResult, error)
+	ListSecrets(api.ListSecretsConfig) (*api.ListSecretsResult, error)
 	CreateVaultOidcToken(api.CreateVaultOidcTokenConfig) (*api.CreateVaultOidcTokenResult, error)
 	DeleteSecret(api.DeleteSecretConfig) (*api.DeleteSecretResult, error)
 	SetVar(api.SetVarConfig) (*api.SetVarResult, error)
 	ShowVar(api.ShowVarConfig) (*api.ShowVarResult, error)
+	ListVars(api.ListVarsConfig) (*api.ListVarsResult, error)
 	DeleteVar(api.DeleteVarConfig) (*api.DeleteVarResult, error)
 	GetPackageVersions() (*api.PackageVersionsResult, error)
 	GetPackageDocumentation(packageName string) (*api.PackageDocumentationResult, error)
+	UploadPackage(api.UploadPackageConfig) (*api.UploadPackageResult, error)
+	PublishPackage(digest string) error
 	GetDefaultBase() (api.DefaultBaseResult, error)
 	StartImagePush(cfg api.StartImagePushConfig) (api.StartImagePushResult, error)
 	ImagePushStatus(pushID string) (api.ImagePushStatusResult, error)
@@ -57,6 +65,7 @@ type APIClient interface {
 	GetRunPromptByTaskKey(runID, taskKey string) (string, error)
 	GetSandboxInitTemplate() (api.SandboxInitTemplateResult, error)
 	ListSandboxRuns(retryProgress io.Writer) (*api.ListSandboxRunsResult, error)
+	ListHistoricalSandboxRuns(retryProgress io.Writer) (*api.ListSandboxRunsResult, error)
 	CancelRun(runID, scopedToken string) error
 }
 
@@ -74,21 +83,3 @@ type SSHClient interface {
 }
 
 var _ SSHClient = (*ssh.Client)(nil)
-
-type GitClient interface {
-	GetBranch() string
-	GetHead() string
-	GetHeadCommit() (string, error)
-	GetTopLevel() string
-	GetCommit() (string, error)
-	GetOriginUrl() string
-	GeneratePatchFile(destDir string, pathspec []string) (git.PatchFile, error)
-	GeneratePatch(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error)
-	GenerateDirtyPatches() (git.DirtyPatches, error)
-	HasCommit(sha string) bool
-	PushRef(opts git.PushRefOptions) error
-	ApplyPatch(patch []byte) *exec.Cmd
-	ApplyPatchReject(patch []byte) *exec.Cmd
-	IsInstalled() bool
-	IsInsideWorkTree() bool
-}

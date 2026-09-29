@@ -318,6 +318,54 @@ func TestAPIClient_SetSecretsInVault(t *testing.T) {
 	})
 }
 
+func TestAPIClient_ListVaultData(t *testing.T) {
+	t.Run("lists vaults", func(t *testing.T) {
+		body := `{"vaults":[{"name":"deploys","lock_status":"locked","repository_permissions":[{"repository_slug":"rwx-cloud/cloud","branch_pattern":"main"}]}]}`
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "/mint/api/vaults", req.URL.Path)
+			return &http.Response{Status: "200 OK", StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		}
+
+		result, err := api.NewClientWithRoundTrip(roundTrip).ListVaults()
+		require.NoError(t, err)
+		require.Equal(t, "deploys", result.Vaults[0].Name)
+		require.Equal(t, "locked", result.Vaults[0].LockStatus)
+		require.Equal(t, "rwx-cloud/cloud", result.Vaults[0].RepositoryPermissions[0].RepositorySlug)
+	})
+
+	t.Run("lists secret metadata", func(t *testing.T) {
+		body := `{"secrets":[{"name":"API_KEY","description":"Production API key"},{"name":"ZEBRA","description":null}]}`
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "/mint/api/vaults/secrets", req.URL.Path)
+			require.Equal(t, "deploys & releases", req.URL.Query().Get("vault_name"))
+			return &http.Response{Status: "200 OK", StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		}
+
+		result, err := api.NewClientWithRoundTrip(roundTrip).ListSecrets(api.ListSecretsConfig{VaultName: "deploys & releases"})
+		require.NoError(t, err)
+		require.Equal(t, "API_KEY", result.Secrets[0].Name)
+		require.Equal(t, "Production API key", *result.Secrets[0].Description)
+		require.Nil(t, result.Secrets[1].Description)
+	})
+
+	t.Run("lists vars with values", func(t *testing.T) {
+		body := `{"vars":[{"name":"API_URL","value":"https://example.com"}]}`
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "/mint/api/vaults/vars", req.URL.Path)
+			require.Equal(t, "default", req.URL.Query().Get("vault_name"))
+			return &http.Response{Status: "200 OK", StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		}
+
+		result, err := api.NewClientWithRoundTrip(roundTrip).ListVars(api.ListVarsConfig{VaultName: "default"})
+		require.NoError(t, err)
+		require.Equal(t, "API_URL", result.Vars[0].Name)
+		require.Equal(t, "https://example.com", result.Vars[0].Value)
+	})
+}
+
 func TestAPIClient_InitiateDispatch(t *testing.T) {
 	t.Run("builds the request and parses the response", func(t *testing.T) {
 		body := struct {

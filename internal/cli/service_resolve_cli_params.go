@@ -43,23 +43,17 @@ func resolveCliParams(yamlContent, originURL string) (string, []string, error) {
 		return "", nil, errors.Wrap(err, "failed to parse YAML")
 	}
 
+	if cliGitParams := extractCliGitParamNames(doc); len(cliGitParams) > 0 {
+		return yamlContent, cliGitParams, nil
+	}
+
 	gitParamsMap := make(map[string]any)
 	gitParamsMap, err = extractGitParamsFromTriggers(doc, gitParamsMap)
 	if err != nil {
 		return "", getGitParamNames(gitParamsMap), err
 	}
 
-	gitParamNames := mergeGitParamNames(getGitParamNames(gitParamsMap), extractCliGitParamNames(doc))
-
-	// Skip rewriting if CLI init already has git event references, but still
-	// return the git param names so callers can suppress HEAD-based patches.
-	// The git/clone ref scan below is redundant in this case (the params are
-	// already declared), so we skip it — otherwise it would raise a spurious
-	// conflict error for configs that clone multiple repositories with
-	// different ref init params.
-	if cliInit := doc.TryReadStringAtPath("$.on.cli.init"); strings.Contains(cliInit, "event.git.") {
-		return yamlContent, gitParamNames, nil
-	}
+	gitParamNames := getGitParamNames(gitParamsMap)
 
 	gitParamsMap, err = extractGitParamsFromGitClone(doc, gitParamsMap, originURL)
 	if err != nil {
@@ -133,7 +127,7 @@ func extractCliGitParamNames(doc *YAMLDoc) []string {
 
 	seen := map[string]bool{}
 	for _, field := range mappingNode.Values {
-		if strings.Contains(field.Value.String(), "event.git.sha") {
+		if isGitShaParamValue(field.Value.String()) {
 			seen[field.Key.String()] = true
 		}
 	}
@@ -271,7 +265,7 @@ func extractGitParamsFromInit(node ast.Node, result map[string]any) (map[string]
 		paramName := initParam.Key.String()
 		paramValue := initParam.Value.String()
 
-		if strings.Contains(paramValue, "event.git.sha") {
+		if isGitShaParamValue(paramValue) {
 			targetValue := "${{ event.git.sha }}"
 
 			for existingKey, existingValue := range result {
@@ -284,6 +278,21 @@ func extractGitParamsFromInit(node ast.Node, result map[string]any) (map[string]
 		}
 	}
 	return result, nil
+}
+
+// isGitShaParamValue reports whether an init param value is exactly the
+// event.git.sha interpolation. A value that embeds the sha in a larger string
+// (for example "rwx-${{ event.git.sha }}") derives something else from the sha
+// rather than naming it, so it is not the config's git sha param.
+func isGitShaParamValue(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	trimmed = strings.TrimSpace(strings.Trim(trimmed, `"'`))
+
+	if !strings.HasPrefix(trimmed, "${{") || !strings.HasSuffix(trimmed, "}}") {
+		return false
+	}
+
+	return strings.TrimSpace(trimmed[len("${{"):len(trimmed)-len("}}")]) == "event.git.sha"
 }
 
 type gitCloneRef struct {

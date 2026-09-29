@@ -11,6 +11,16 @@ var vaultsCmd = &cobra.Command{
 	Use:     "vaults",
 }
 
+var vaultsListCmd = &cobra.Command{
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := service.ListVaults(cli.ListVaultsConfig{Json: useJsonOutput()})
+		return err
+	},
+	Short: "List vaults",
+	Use:   "list",
+}
+
 // --- vaults create ---
 
 var (
@@ -19,9 +29,6 @@ var (
 	createVaultRepoPerms []string
 
 	vaultsCreateCmd = &cobra.Command{
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			_, err := service.CreateVault(cli.CreateVaultConfig{
@@ -45,13 +52,27 @@ var vaultsSecretsCmd = &cobra.Command{
 }
 
 var (
+	secretsListVault string
+
+	vaultsSecretsListCmd = &cobra.Command{
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.ListSecrets(cli.ListSecretsConfig{
+				Vault: secretsListVault,
+				Json:  useJsonOutput(),
+			})
+			return err
+		},
+		Short: "List secrets in a vault",
+		Use:   "list",
+	}
+)
+
+var (
 	secretsSetVault string
 	secretsSetFile  string
 
 	vaultsSecretsSetCmd = &cobra.Command{
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var secrets []string
 			if len(args) >= 0 {
@@ -78,9 +99,6 @@ var (
 
 	vaultsSecretsDeleteCmd = &cobra.Command{
 		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			_, err := service.DeleteSecret(cli.DeleteSecretConfig{
@@ -104,13 +122,27 @@ var vaultsVarsCmd = &cobra.Command{
 }
 
 var (
+	varsListVault string
+
+	vaultsVarsListCmd = &cobra.Command{
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.ListVars(cli.ListVarsConfig{
+				Vault: varsListVault,
+				Json:  useJsonOutput(),
+			})
+			return err
+		},
+		Short: "List vars in a vault",
+		Use:   "list",
+	}
+)
+
+var (
 	varsSetVault string
 	varsSetFile  string
 
 	vaultsVarsSetCmd = &cobra.Command{
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var vars []string
 			if len(args) >= 0 {
@@ -136,9 +168,6 @@ var (
 
 	vaultsVarsShowCmd = &cobra.Command{
 		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			_, err := service.ShowVar(cli.ShowVarConfig{
@@ -159,9 +188,6 @@ var (
 
 	vaultsVarsDeleteCmd = &cobra.Command{
 		Args: cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			_, err := service.DeleteVar(cli.DeleteVarConfig{
@@ -191,9 +217,6 @@ var (
 	oidcTokenCreateProvider string
 
 	vaultsOidcTokensCreateCmd = &cobra.Command{
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			_, err := service.CreateVaultOidcToken(cli.CreateVaultOidcTokenConfig{
@@ -217,9 +240,6 @@ var (
 	setSecretsFile  string
 
 	vaultsSetSecretsCmd = &cobra.Command{
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var secrets []string
 			if len(args) >= 0 {
@@ -242,17 +262,22 @@ var (
 )
 
 func init() {
+	vaultsCmd.AddCommand(vaultsListCmd)
+
 	// vaults create
 	vaultsCreateCmd.Flags().StringVar(&createVaultName, "name", "", "the name of the vault to create")
 	_ = vaultsCreateCmd.MarkFlagRequired("name")
 	vaultsCreateCmd.Flags().BoolVar(&createVaultUnlocked, "unlocked", false, "whether the vault should be unlocked")
-	vaultsCreateCmd.Flags().StringSliceVar(&createVaultRepoPerms, "repository-permission", nil, "repository permission in the format REPO_SLUG:BRANCH_PATTERN (repeatable)")
+	vaultsCreateCmd.Flags().StringSliceVar(&createVaultRepoPerms, "repository-permission", nil, "repository permission in the format REPO_SLUG:REF_PATTERN (repeatable)")
 	vaultsCmd.AddCommand(vaultsCreateCmd)
 
 	// vaults secrets set
 	vaultsSecretsSetCmd.Flags().StringVar(&secretsSetVault, "vault", "default", "the name of the vault to set the secrets in")
 	vaultsSecretsSetCmd.Flags().StringVar(&secretsSetFile, "file", "", "the path to a file in dotenv format to read the secrets from")
 	vaultsSecretsCmd.AddCommand(vaultsSecretsSetCmd)
+
+	vaultsSecretsListCmd.Flags().StringVar(&secretsListVault, "vault", "default", "the name of the vault to list secrets from")
+	vaultsSecretsCmd.AddCommand(vaultsSecretsListCmd)
 
 	// vaults secrets delete
 	vaultsSecretsDeleteCmd.Flags().StringVar(&secretsDeleteVault, "vault", "default", "the name of the vault to delete the secret from")
@@ -265,6 +290,9 @@ func init() {
 	vaultsVarsSetCmd.Flags().StringVar(&varsSetVault, "vault", "default", "the name of the vault to set the vars in")
 	vaultsVarsSetCmd.Flags().StringVar(&varsSetFile, "file", "", "the path to a file in dotenv format to read the vars from")
 	vaultsVarsCmd.AddCommand(vaultsVarsSetCmd)
+
+	vaultsVarsListCmd.Flags().StringVar(&varsListVault, "vault", "default", "the name of the vault to list vars from")
+	vaultsVarsCmd.AddCommand(vaultsVarsListCmd)
 
 	// vaults vars show
 	vaultsVarsShowCmd.Flags().StringVar(&varsShowVault, "vault", "default", "the name of the vault to show the var from")

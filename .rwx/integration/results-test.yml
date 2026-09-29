@@ -110,16 +110,10 @@ tasks:
         exit 1
       fi
 
-      prompt=$(echo "$result" | jq -r '.ResultPrompt // empty')
-
-      if ! echo "$prompt" | grep -q "will-fail-fast"; then
-        echo "Expected prompt to include 'will-fail-fast', but it did not."
-        echo "$result"
-        exit 1
-      fi
-
-      if echo "$prompt" | grep -q "will-fail-slow"; then
-        echo "Expected prompt to NOT include 'will-fail-slow', but it did."
+      # --fail-fast must return before the run finishes
+      execution=$(echo "$result" | jq -r '.Status.Execution')
+      if [ "$execution" != "in_progress" ]; then
+        echo "Expected run to still be in progress, got '$execution'"
         echo "$result"
         exit 1
       fi

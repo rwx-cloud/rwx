@@ -1,0 +1,16 @@
+#!/bin/bash
+set -euo pipefail
+
+git init -q -b main origin
+cd origin
+printf 'hello\n' > base.txt
+mkdir nested
+printf 'nested\n' > nested/deep.txt
+git add -A
+git commit -qm "base commit"
+
+# The base commit patches are expected to be based on.
+git rev-parse HEAD
+cd ..
+
+jj git clone $COLOCATE origin repo

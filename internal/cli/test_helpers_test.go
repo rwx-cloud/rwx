@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/mocks"
 	"github.com/rwx-cloud/rwx/internal/telemetry"
@@ -20,7 +21,7 @@ type testSetup struct {
 	mockAPI    *mocks.API
 	mockSSH    *mocks.SSH
 	mockTunnel *mocks.SSHTunnelManager
-	mockGit    *mocks.Git
+	mockVCS    *mocks.VCS
 	mockDocker *mocks.DockerClient
 	mockStdin  *bytes.Buffer
 	mockStdout *strings.Builder
@@ -63,6 +64,9 @@ func setupTest(t *testing.T) *testSetup {
 	require.NoError(t, err)
 	require.NoError(t, os.Mkdir(filepath.Join(setup.tmp, ".rwx"), 0o755))
 	setup.mockAPI = new(mocks.API)
+	setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+		return &api.ListSandboxRunsResult{}, nil
+	}
 	setup.mockSSH = new(mocks.SSH)
 	setup.mockTunnel = new(mocks.SSHTunnelManager)
 	setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
@@ -76,8 +80,7 @@ func setupTest(t *testing.T) *testSetup {
 		exitCode, err := setup.mockSSH.ExecuteCommand(command)
 		return exitCode, "", "", err
 	}
-	setup.mockGit = &mocks.Git{
-		MockIsInstalled:      true,
+	setup.mockVCS = &mocks.VCS{
 		MockIsInsideWorkTree: true,
 		MockGetHead:          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
@@ -91,7 +94,7 @@ func setupTest(t *testing.T) *testSetup {
 		APIClient:          setup.mockAPI,
 		SSHClient:          setup.mockSSH,
 		SSHTunnelManager:   setup.mockTunnel,
-		GitClient:          setup.mockGit,
+		VCSClient:          setup.mockVCS,
 		DockerCLI:          setup.mockDocker,
 		TelemetryCollector: setup.collector,
 		Stdin:              setup.mockStdin,

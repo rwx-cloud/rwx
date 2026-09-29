@@ -13,16 +13,17 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/rwx-cloud/rwx/internal/errors"
-	"github.com/rwx-cloud/rwx/internal/git"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 )
 
 type CliState struct {
 	Branch     string `json:"branch"`
 	ConfigFile string `json:"configFile"`
+	Repository string `json:"repository,omitempty"`
 }
 
-func EncodeCliState(branch, configFile string) string {
-	state := CliState{Branch: branch, ConfigFile: configFile}
+func EncodeCliState(branch, configFile, repository string) string {
+	state := CliState{Branch: branch, ConfigFile: configFile, Repository: repository}
 	data, _ := json.Marshal(state)
 	return base64.StdEncoding.EncodeToString(data)
 }
@@ -95,8 +96,9 @@ func createRwxDirectory() (string, error) {
 		return "", errors.Wrap(err, "unable to determine the working directory")
 	}
 
-	// Prefer the git repository root so the .rwx directory sits alongside .git
-	client := &git.Client{Binary: "git", Dir: cwd}
+	// Prefer the repository root so the .rwx directory sits alongside the
+	// version control metadata rather than wherever the command was run from.
+	client := vcs.New(cwd)
 	if topLevel := client.GetTopLevel(); topLevel != "" {
 		cwd = topLevel
 	}
@@ -357,11 +359,20 @@ func (s *SandboxStorage) AllSessions() map[string]SandboxSession {
 	return s.Sandboxes
 }
 
-func GetCurrentGitBranch(cwd string) string {
-	client := &git.Client{Binary: "git", Dir: cwd}
+// BranchLocator reports the current position in a repository: a branch name
+// when there is one, and otherwise a short stable identifier for the anonymous
+// position (a detached HEAD under git, no bookmark at or below @ under jj).
+type BranchLocator interface {
+	GetBranch() string
+	GetShortHead() string
+}
+
+// GetCurrentBranch returns the session key component identifying where the
+// working copy currently sits.
+func GetCurrentBranch(client BranchLocator) string {
 	branch := client.GetBranch()
 	if branch == "" {
-		// Detached HEAD — use the short SHA so session keys are unique per commit
+		// No branch — key on the short head so sessions stay distinct per position
 		shortSHA := client.GetShortHead()
 		if shortSHA == "" {
 			return "detached"
@@ -371,8 +382,8 @@ func GetCurrentGitBranch(cwd string) string {
 	return branch
 }
 
-// AncestryChecker abstracts the git ancestor check so callers can inject a
-// real git.Client or a test mock.
+// AncestryChecker abstracts the ancestor check so callers can inject a real
+// VCS client or a test mock.
 type AncestryChecker interface {
 	IsAncestor(candidateSHA, headRef string) bool
 }

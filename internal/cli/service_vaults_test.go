@@ -53,18 +53,20 @@ func TestService_CreateVault(t *testing.T) {
 		s.mockAPI.MockCreateVault = func(cfg api.CreateVaultConfig) (*api.CreateVaultResult, error) {
 			require.Equal(t, "my-vault", cfg.Name)
 			require.True(t, cfg.Unlocked)
-			require.Len(t, cfg.RepositoryPermissions, 2)
+			require.Len(t, cfg.RepositoryPermissions, 3)
 			require.Equal(t, "my-repo", cfg.RepositoryPermissions[0].RepositorySlug)
 			require.Equal(t, "main", cfg.RepositoryPermissions[0].BranchPattern)
 			require.Equal(t, "other-repo", cfg.RepositoryPermissions[1].RepositorySlug)
-			require.Equal(t, "release/*", cfg.RepositoryPermissions[1].BranchPattern)
+			require.Equal(t, "refs/heads/release/*", cfg.RepositoryPermissions[1].BranchPattern)
+			require.Equal(t, "tagged-repo", cfg.RepositoryPermissions[2].RepositorySlug)
+			require.Equal(t, "refs/tags/v*", cfg.RepositoryPermissions[2].BranchPattern)
 			return &api.CreateVaultResult{}, nil
 		}
 
 		result, err := s.service.CreateVault(cli.CreateVaultConfig{
 			Name:                  "my-vault",
 			Unlocked:              true,
-			RepositoryPermissions: []string{"my-repo:main", "other-repo:release/*"},
+			RepositoryPermissions: []string{"my-repo:main", "other-repo:refs/heads/release/*", "tagged-repo:refs/tags/v*"},
 		})
 
 		require.NoError(t, err)
@@ -81,7 +83,7 @@ func TestService_CreateVault(t *testing.T) {
 
 		require.Nil(t, result)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "REPO_SLUG:BRANCH_PATTERN")
+		require.Contains(t, err.Error(), "REPO_SLUG:REF_PATTERN")
 	})
 
 	t.Run("validates name is required", func(t *testing.T) {
@@ -109,5 +111,46 @@ func TestService_CreateVault(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.Contains(t, s.mockStdout.String(), `"Vault":"my-vault"`)
+	})
+}
+
+func TestService_ListVaults(t *testing.T) {
+	t.Run("prints vault details", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockAPI.MockListVaults = func() (*api.ListVaultsResult, error) {
+			return &api.ListVaultsResult{Vaults: []api.Vault{
+				{Name: "default", LockStatus: "unlocked"},
+				{
+					Name:       "deploys",
+					LockStatus: "locked",
+					RepositoryPermissions: []api.CreateVaultRepoPermission{
+						{RepositorySlug: "rwx-cloud/cloud", BranchPattern: "main"},
+						{RepositorySlug: "rwx-cloud/zebra", BranchPattern: "release/**"},
+					},
+				},
+			}}, nil
+		}
+
+		result, err := s.service.ListVaults(cli.ListVaultsConfig{})
+		require.NoError(t, err)
+		require.Len(t, result.Vaults, 2)
+		require.Equal(t, "NAME     LOCK STATUS  REPOSITORY PERMISSIONS\ndefault  unlocked     \ndeploys  locked       rwx-cloud/cloud:main, rwx-cloud/zebra:release/**\n", s.mockStdout.String())
+	})
+
+	t.Run("uses PascalCase JSON fields", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockAPI.MockListVaults = func() (*api.ListVaultsResult, error) {
+			return &api.ListVaultsResult{Vaults: []api.Vault{{
+				Name:       "deploys",
+				LockStatus: "locked",
+				RepositoryPermissions: []api.CreateVaultRepoPermission{
+					{RepositorySlug: "rwx-cloud/cloud", BranchPattern: "main"},
+				},
+			}}}, nil
+		}
+
+		_, err := s.service.ListVaults(cli.ListVaultsConfig{Json: true})
+		require.NoError(t, err)
+		require.JSONEq(t, `{"Vaults":[{"Name":"deploys","LockStatus":"locked","RepositoryPermissions":[{"RepositorySlug":"rwx-cloud/cloud","BranchPattern":"main"}]}]}`, s.mockStdout.String())
 	})
 }

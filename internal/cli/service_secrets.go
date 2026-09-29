@@ -161,3 +161,67 @@ func (s Service) SetSecretsInVault(cfg SetSecretsInVaultConfig) (*api.SetSecrets
 
 	return result, nil
 }
+
+type ListSecretsConfig struct {
+	Vault string
+	Json  bool
+}
+
+func (c ListSecretsConfig) Validate() error {
+	if c.Vault == "" {
+		return errors.New("the vault name must be provided")
+	}
+	return nil
+}
+
+type SecretInfo struct {
+	Name        string
+	Description *string
+}
+
+type ListSecretsResult struct {
+	Secrets []SecretInfo
+}
+
+func (s Service) ListSecrets(cfg ListSecretsConfig) (*ListSecretsResult, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, errors.Wrap(err, "validation failed")
+	}
+
+	apiResult, err := s.APIClient.ListSecrets(api.ListSecretsConfig{VaultName: cfg.Vault})
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to list secrets")
+	}
+
+	secrets := make([]SecretInfo, len(apiResult.Secrets))
+	for i, secret := range apiResult.Secrets {
+		secrets[i] = SecretInfo{Name: secret.Name, Description: secret.Description}
+	}
+	result := &ListSecretsResult{Secrets: secrets}
+
+	if cfg.Json {
+		if err := json.NewEncoder(s.Stdout).Encode(result); err != nil {
+			return nil, errors.Wrap(err, "unable to encode JSON output")
+		}
+	} else if len(secrets) == 0 {
+		fmt.Fprintf(s.Stdout, "No secrets found in vault %q.\n", cfg.Vault)
+	} else {
+		nameWidth := len("NAME")
+		for _, secret := range secrets {
+			if len(secret.Name) > nameWidth {
+				nameWidth = len(secret.Name)
+			}
+		}
+		format := fmt.Sprintf("%%-%ds  %%s\n", nameWidth)
+		fmt.Fprintf(s.Stdout, format, "NAME", "DESCRIPTION")
+		for _, secret := range secrets {
+			description := ""
+			if secret.Description != nil {
+				description = *secret.Description
+			}
+			fmt.Fprintf(s.Stdout, format, secret.Name, description)
+		}
+	}
+
+	return result, nil
+}

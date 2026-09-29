@@ -8,9 +8,6 @@ import (
 
 var whoamiCmd = &cobra.Command{
 	GroupID: "setup",
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
 		_, err := service.Whoami(cli.WhoamiConfig{Json: useJson})

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,6 +76,57 @@ func NewClient(cfg Config) (Client, error) {
 
 func NewClientWithRoundTrip(rt func(*http.Request) (*http.Response, error)) Client {
 	return Client{roundTripFunc(rt)}
+}
+
+// RoundTrip retries explicit Cloud unavailability responses, including writes:
+// Cloud must reject the operation before returning 503 with Retry-After.
+func (c Client) RoundTrip(req *http.Request) (*http.Response, error) {
+	for attempt := 0; ; attempt++ {
+		resp, err := c.RoundTripper.RoundTrip(req)
+		if err == nil && resp.StatusCode == http.StatusUnauthorized {
+			defer resp.Body.Close()
+			return nil, decodeResponseJSON(resp, nil)
+		}
+		if err != nil || resp.StatusCode != http.StatusServiceUnavailable || attempt >= 4 {
+			return resp, err
+		}
+		delay, ok := retryAfterDelay(resp.Header.Get("Retry-After"), time.Now())
+		if !ok || (req.Body != nil && req.Body != http.NoBody && req.GetBody == nil) {
+			return resp, nil
+		}
+		resp.Body.Close()
+		timer := time.NewTimer(delay)
+		select {
+		case <-req.Context().Done():
+			timer.Stop()
+			return nil, req.Context().Err()
+		case <-timer.C:
+		}
+		next := req.Clone(req.Context())
+		if req.GetBody != nil {
+			next.Body, err = req.GetBody()
+			if err != nil {
+				return nil, errors.Wrap(err, "unable to replay HTTP request body")
+			}
+		}
+		req = next
+	}
+}
+
+func retryAfterDelay(value string, now time.Time) (time.Duration, bool) {
+	value = strings.TrimSpace(value)
+	if value != "" && strings.Trim(value, "0123456789") == "" {
+		seconds, err := strconv.ParseUint(value, 10, 63)
+		if err != nil || seconds > uint64((1<<63-1)/time.Second) {
+			return 0, false
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+	when, err := http.ParseTime(value)
+	if err != nil {
+		return 0, false
+	}
+	return max(0, when.Sub(now)), true
 }
 
 func (c Client) GetSkillContent() (string, error) {
@@ -742,6 +795,63 @@ func (c Client) CreateVault(cfg CreateVaultConfig) (*CreateVaultResult, error) {
 	return &CreateVaultResult{}, nil
 }
 
+func (c Client) ListVaults() (*ListVaultsResult, error) {
+	req, err := http.NewRequest(http.MethodGet, "/mint/api/vaults", nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
+	}
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
+	}
+
+	result := ListVaultsResult{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, errors.Wrap(err, "unable to parse API response")
+	}
+
+	return &result, nil
+}
+
+func (c Client) ListSecrets(cfg ListSecretsConfig) (*ListSecretsResult, error) {
+	endpoint := fmt.Sprintf("/mint/api/vaults/secrets?vault_name=%s", url.QueryEscape(cfg.VaultName))
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
+	}
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
+	}
+
+	result := ListSecretsResult{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, errors.Wrap(err, "unable to parse API response")
+	}
+
+	return &result, nil
+}
+
 func (c Client) DeleteSecret(cfg DeleteSecretConfig) (*DeleteSecretResult, error) {
 	endpoint := fmt.Sprintf("/mint/api/vaults/secrets/%s?vault_name=%s",
 		url.PathEscape(cfg.SecretName),
@@ -836,6 +946,35 @@ func (c Client) ShowVar(cfg ShowVarConfig) (*ShowVarResult, error) {
 	}
 
 	return &respBody, nil
+}
+
+func (c Client) ListVars(cfg ListVarsConfig) (*ListVarsResult, error) {
+	endpoint := fmt.Sprintf("/mint/api/vaults/vars?vault_name=%s", url.QueryEscape(cfg.VaultName))
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
+	}
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
+	}
+
+	result := ListVarsResult{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, errors.Wrap(err, "unable to parse API response")
+	}
+
+	return &result, nil
 }
 
 func (c Client) DeleteVar(cfg DeleteVarConfig) (*DeleteVarResult, error) {
@@ -962,6 +1101,71 @@ func (c Client) GetPackageVersions() (*PackageVersionsResult, error) {
 	}
 
 	return &respBody, nil
+}
+
+// UploadPackage uploads a zipped package to the RWX package registry and
+// returns the content digest assigned by the server.
+func (c Client) UploadPackage(cfg UploadPackageConfig) (*UploadPackageResult, error) {
+	endpoint := "/mint/api/leaves"
+
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+
+	part, err := form.CreateFormFile("file", cfg.FileName)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to build multipart form")
+	}
+
+	if _, err := io.Copy(part, cfg.Contents); err != nil {
+		return nil, errors.Wrap(err, "unable to write package contents")
+	}
+
+	if err := form.Close(); err != nil {
+		return nil, errors.Wrap(err, "unable to finalize multipart form")
+	}
+
+	req, err := http.NewRequest(http.MethodPost, endpoint, &body)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
+	}
+
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	// Package validation failures (missing rwx-package.yml or README.md, invalid
+	// YAML, a name owned by another organization, ...) come back as
+	// {"error": "..."} and are surfaced verbatim to the user.
+	result := UploadPackageResult{}
+	if err := decodeResponseJSON(resp, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (c Client) PublishPackage(digest string) error {
+	body, err := json.Marshal(map[string]string{"digest": digest})
+	if err != nil {
+		return errors.Wrap(err, "unable to encode package digest")
+	}
+	req, err := http.NewRequest(http.MethodPost, "/mint/api/leaves/publish", bytes.NewReader(body))
+	if err != nil {
+		return errors.Wrap(err, "unable to create new HTTP request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+	return decodeResponseJSON(resp, &struct{}{})
 }
 
 func (c Client) GetPackageDocumentation(packageName string) (*PackageDocumentationResult, error) {
@@ -1665,17 +1869,34 @@ func (c Client) CancelRun(runID, scopedToken string) error {
 }
 
 func (c Client) ListSandboxRuns(retryProgress io.Writer) (*ListSandboxRunsResult, error) {
-	result, err := c.ListRuns(ListRunsConfig{
-		ResultStatuses:    []string{"sandboxed"},
-		ExecutionStatuses: []string{"in_progress"},
-		MyRuns:            true,
-		RetryProgress:     retryProgress,
-	})
-	if err != nil {
-		return nil, err
-	}
+	return c.listSandboxRuns([]string{"in_progress"}, true, retryProgress)
+}
 
-	return &ListSandboxRunsResult{Runs: result.Runs}, nil
+func (c Client) ListHistoricalSandboxRuns(retryProgress io.Writer) (*ListSandboxRunsResult, error) {
+	return c.listSandboxRuns(nil, false, retryProgress)
+}
+
+func (c Client) listSandboxRuns(executionStatuses []string, myRuns bool, retryProgress io.Writer) (*ListSandboxRunsResult, error) {
+	result := &ListSandboxRunsResult{}
+	cursor := ""
+	for {
+		page, err := c.ListRuns(ListRunsConfig{
+			ResultStatuses:    []string{"sandboxed"},
+			ExecutionStatuses: executionStatuses,
+			MyRuns:            myRuns,
+			Cursor:            cursor,
+			RetryProgress:     retryProgress,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		result.Runs = append(result.Runs, page.Runs...)
+		if page.Pagination.NextCursor == nil {
+			return result, nil
+		}
+		cursor = *page.Pagination.NextCursor
+	}
 }
 
 func (c Client) GetSandboxInitTemplate() (SandboxInitTemplateResult, error) {
@@ -1727,7 +1948,13 @@ func decodeResponseJSON(resp *http.Response, result any) error {
 // failures (401/403/404) from server-side issues (5xx).
 func classifyHTTPStatusError(statusCode int, errMsg string) error {
 	switch {
-	case statusCode == http.StatusUnauthorized, statusCode == http.StatusForbidden:
+	case statusCode == http.StatusUnauthorized:
+		return errors.WrapSentinel(errors.New(errMsg+"\n\n"+
+			"This command requires authentication with RWX Cloud. "+
+			"You can authenticate via the `rwx login` command, or supply the "+
+			"`--access-token` option or `RWX_ACCESS_TOKEN` environment variable.\n\n"+
+			"Once you do so, go ahead and run the command again."), errors.ErrUnauthenticated)
+	case statusCode == http.StatusForbidden:
 		return errors.WrapSentinel(errors.New(errMsg), errors.ErrUnauthenticated)
 	case statusCode == http.StatusNotFound:
 		return errors.Wrap(ErrNotFound, errMsg)
@@ -1789,6 +2016,7 @@ func parseAmbiguousDefinitionPathError(body io.Reader) error {
 func extractErrorMessage(reader io.Reader) string {
 	errorStruct := struct {
 		Error         string         `json:"error,omitempty"`
+		Errors        []string       `json:"errors,omitempty"`
 		ErrorMessages []ErrorMessage `json:"error_messages,omitempty"`
 	}{}
 
@@ -1809,6 +2037,10 @@ func extractErrorMessage(reader io.Reader) string {
 	// Fallback to Error field
 	if errorStruct.Error != "" {
 		return errorStruct.Error
+	}
+
+	if len(errorStruct.Errors) > 0 {
+		return strings.Join(errorStruct.Errors, "\n")
 	}
 
 	// Fallback to an empty string

@@ -13,7 +13,7 @@ import (
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
-	"github.com/rwx-cloud/rwx/internal/git"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
@@ -147,10 +147,10 @@ func TestTelemetry_ImageBuild(t *testing.T) {
 	t.Run("records image.build", func(t *testing.T) {
 		setup := setupTest(t)
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "https://github.com/test/repo"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "https://github.com/test/repo"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
 
 		configPath := filepath.Join(setup.tmp, ".rwx", "build.yml")
 		require.NoError(t, os.WriteFile(configPath, []byte("tasks:\n  - key: build-task\n"), 0o644))
@@ -435,10 +435,10 @@ func TestTelemetry_SandboxStart(t *testing.T) {
 	t.Run("records sandbox.start for new sandbox", func(t *testing.T) {
 		setup := setupTest(t)
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "https://github.com/test/repo"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "https://github.com/test/repo"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
 
 		configPath := filepath.Join(setup.tmp, ".rwx", "sandbox.yml")
 		require.NoError(t, os.WriteFile(configPath, []byte("tasks:\n  - key: test\n"), 0o644))
@@ -514,10 +514,10 @@ func TestTelemetry_SessionCreatedAt(t *testing.T) {
 
 		before := time.Now().UTC().Add(-1 * time.Second)
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "https://github.com/test/repo"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "https://github.com/test/repo"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
 
 		configPath := filepath.Join(setup.tmp, ".rwx", "sandbox.yml")
 		require.NoError(t, os.WriteFile(configPath, []byte("tasks:\n  - key: test\n"), 0o644))
@@ -541,8 +541,8 @@ func TestTelemetry_SessionCreatedAt(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		// GetCurrentGitBranch uses real git, so in a temp dir with no repo it returns "detached"
-		branch := cli.GetCurrentGitBranch(setup.tmp)
+		// Sessions are keyed by whatever the service's VCS client reports.
+		branch := cli.GetCurrentBranch(setup.mockVCS)
 		storage, err := cli.LoadSandboxStorage()
 		require.NoError(t, err)
 		session, ok := storage.GetSession(branch, setup.absConfig(".rwx/sandbox.yml"))
@@ -576,7 +576,7 @@ func TestTelemetry_SSHConnect(t *testing.T) {
 		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
 			return 0, "", nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -698,7 +698,7 @@ func TestTelemetry_SandboxExec(t *testing.T) {
 		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
 			return 0, "", nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return []byte("mock patch"), nil, nil
 		}
 
@@ -753,7 +753,7 @@ func TestTelemetry_SandboxExecNonZeroExitCode(t *testing.T) {
 		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
 			return 0, "", nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return []byte("mock patch"), nil, nil
 		}
 
@@ -802,8 +802,8 @@ func TestTelemetry_SandboxSyncPush(t *testing.T) {
 		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
 			return 0, "", nil
 		}
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: patchData}, nil
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: patchData}, nil
 		}
 
 		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
@@ -845,7 +845,7 @@ func TestTelemetry_SandboxSyncPull(t *testing.T) {
 		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
 			return 0, "", nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -871,8 +871,7 @@ func TestTelemetry_SandboxStop(t *testing.T) {
 	t.Run("records sandbox.stop with lifetime and exec count", func(t *testing.T) {
 		setup := setupTest(t)
 
-		cwd := setup.tmp
-		branch := cli.GetCurrentGitBranch(cwd)
+		branch := cli.GetCurrentBranch(setup.mockVCS)
 		createdAt := time.Now().UTC().Add(-10 * time.Minute)
 
 		storage, err := cli.LoadSandboxStorage()
@@ -913,10 +912,10 @@ func TestTelemetry_SandboxReset(t *testing.T) {
 	t.Run("records sandbox.reset", func(t *testing.T) {
 		setup := setupTest(t)
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "https://github.com/test/repo"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "https://github.com/test/repo"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
 
 		configPath := filepath.Join(setup.tmp, ".rwx", "sandbox.yml")
 		require.NoError(t, os.WriteFile(configPath, []byte("tasks:\n  - key: test\n"), 0o644))
@@ -958,8 +957,7 @@ func TestTelemetry_SandboxList(t *testing.T) {
 	t.Run("records sandbox.list with counts", func(t *testing.T) {
 		setup := setupTest(t)
 
-		cwd := setup.tmp
-		branch := cli.GetCurrentGitBranch(cwd)
+		branch := cli.GetCurrentBranch(setup.mockVCS)
 
 		// Seed one active and one expired session
 		storage, err := cli.LoadSandboxStorage()
@@ -1010,10 +1008,10 @@ func TestTelemetry_RunInitiate(t *testing.T) {
 	t.Run("records run.initiate", func(t *testing.T) {
 		setup := setupTest(t)
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "https://github.com/test/repo"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "https://github.com/test/repo"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
 
 		configPath := filepath.Join(setup.tmp, ".rwx", "run.yml")
 		require.NoError(t, os.WriteFile(configPath, []byte("tasks:\n  - key: test\n"), 0o644))

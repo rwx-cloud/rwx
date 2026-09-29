@@ -22,8 +22,9 @@ import (
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/errors"
-	"github.com/rwx-cloud/rwx/internal/git"
 	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
+	"github.com/rwx-cloud/rwx/internal/vcs"
+	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
@@ -126,7 +127,7 @@ func requireCommandWrappedBySyncMarkers(t *testing.T, commands []string, command
 }
 
 func isSandboxPullDiffCommand(cmd string) bool {
-	return strings.Contains(cmd, "git diff") && strings.Contains(cmd, "refs/rwx-sync")
+	return strings.Contains(cmd, " diff ") && strings.Contains(cmd, "refs/rwx-sync")
 }
 
 func requireSandboxWorktreeRootCommand(t *testing.T, cmd string, operation string) {
@@ -275,7 +276,7 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 			},
 		})
 
-		remoteCliState := cli.EncodeCliState("develop", setup.absConfig(".rwx/sandbox.yml"))
+		remoteCliState := cli.EncodeCliState("develop", setup.absConfig(".rwx/sandbox.yml"), "")
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
 				Runs: []api.RunSummary{
@@ -335,7 +336,7 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 		})
 
 		// Remote has a run with cli_state pointing to the same key but different run ID
-		remoteCliState := cli.EncodeCliState("main", setup.absConfig(".rwx/sandbox.yml"))
+		remoteCliState := cli.EncodeCliState("main", setup.absConfig(".rwx/sandbox.yml"), "")
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
 				Runs: []api.RunSummary{
@@ -632,7 +633,7 @@ func TestService_ExecSandbox(t *testing.T) {
 
 		// Pull mocks (no changes on sandbox)
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -688,7 +689,7 @@ func TestService_ExecSandbox(t *testing.T) {
 
 		// Pull mocks (no changes on sandbox)
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -730,7 +731,7 @@ func TestService_ExecSandbox(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -974,7 +975,7 @@ func TestService_ExecSandbox(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -1072,9 +1073,9 @@ func TestService_SyncSandbox(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 		localPatch := []byte("diff --git a/file.txt b/file.txt\n")
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: localPatch, Files: []string{"file.txt"}}, nil
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: localPatch, Files: []string{"file.txt"}}, nil
 		}
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
@@ -1129,7 +1130,7 @@ func TestService_SyncSandbox(t *testing.T) {
 		require.Less(t, cleanIndex, applyIndex)
 
 		for _, cmd := range commands {
-			require.NotContains(t, cmd, "git diff --binary --full-index", "sync should not pull sandbox changes locally")
+			require.NotContains(t, cmd, vcstypes.PatchDiffCommand("/usr/bin/git", "--binary", "--full-index"), "sync should not pull sandbox changes locally")
 		}
 
 		require.Nil(t, findEvent(setup.drainEvents(), "sandbox.exec"))
@@ -1296,6 +1297,43 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		}
 	})
 
+	t.Run("waits for authoritative sandbox-side port readiness", func(t *testing.T) {
+		setup, commands := setupBackground(t)
+		setup.mockTunnel.MockOpen = func(cfg rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: cfg.Scheme}, nil
+		}
+		setup.mockTunnel.MockIsReady = func(int) bool {
+			require.Fail(t, "local tunnel readiness must not be used when the agent supports port checks")
+
+			return false
+		}
+		readyChecks := 0
+		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
+			switch {
+			case strings.HasPrefix(command, "__rwx_sandbox_process_start__ "):
+				return 0, `{"key":"web","status":"running","supportsPortReadyCheck":true,"targetPort":3100}`, "", nil
+			case strings.HasPrefix(command, "__rwx_sandbox_process_status__ "):
+				return 0, `{"key":"web","status":"running","targetPort":3100}`, "", nil
+			case strings.HasPrefix(command, "__rwx_sandbox_port_ready__ "):
+				*commands = append(*commands, command)
+				readyChecks++
+				if readyChecks == 1 {
+					return 1, "", "", nil
+				}
+				return 0, "", "", nil
+			default:
+				return 0, "", "", nil
+			}
+		}
+
+		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			Command: []string{"bin/server"}, Name: "web", TargetPort: 3100, RunID: "run-background", Json: true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 2, readyChecks)
+	})
+
 	t.Run("starts without a tunnel when no port is requested", func(t *testing.T) {
 		setup, commands := setupBackground(t)
 		var closeConfig rwxssh.TunnelCloseConfig
@@ -1331,30 +1369,76 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		require.False(t, hasTargetPort)
 	})
 
-	t.Run("prints preview URL and update commands in text mode", func(t *testing.T) {
-		setup, _ := setupBackground(t)
-		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
-			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: "https"}, nil
-		}
+	for _, tc := range []struct {
+		name       string
+		configFile string
+		runID      string
+		selection  string
+		workingDir string
+	}{
+		{name: "implicit default"},
+		{name: "explicit default", configFile: ".rwx/sandbox.yml", selection: " .rwx/sandbox.yml"},
+		{name: "explicit custom", configFile: ".rwx/custom.yml", selection: " .rwx/custom.yml"},
+		{name: "quoted definition", configFile: ".rwx/custom sandbox.yml", selection: " '.rwx/custom sandbox.yml'"},
+		{name: "inside rwx directory", configFile: ".rwx/custom.yml", selection: " custom.yml", workingDir: ".rwx"},
+		{name: "sibling directory", configFile: ".rwx/custom.yml", selection: " ../.rwx/custom.yml", workingDir: "app"},
+		{name: "explicit ID", runID: "run-preview", selection: " --id run-preview"},
+		{name: "ID overrides definition", configFile: ".rwx/custom.yml", runID: "run-preview", selection: " --id run-preview"},
+	} {
+		for _, restart := range []bool{false, true} {
+			t.Run(fmt.Sprintf("preview hints/%s/restart=%t", tc.name, restart), func(t *testing.T) {
+				setup, _ := setupBackground(t)
+				if tc.workingDir != "" {
+					workingDir := filepath.Join(setup.tmp, tc.workingDir)
+					require.NoError(t, os.MkdirAll(workingDir, 0o755))
+					require.NoError(t, os.Chdir(workingDir))
+				}
+				setup.mockVCS.MockGetBranch = "main"
+				configFile := setup.absConfig(".rwx/sandbox.yml")
+				explicitConfig := ""
+				if tc.configFile != "" {
+					configFile = setup.absConfig(tc.configFile)
+					explicitConfig = configFile
+				}
+				seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+					"main:" + configFile: {RunID: "run-preview", ConfigFile: configFile},
+				})
+				setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+					if strings.HasPrefix(command, "__rwx_sandbox_process_start__ ") || strings.HasPrefix(command, "__rwx_sandbox_process_restart__ ") {
+						return 0, `{"key":"web","status":"running","targetPort":3100}`, nil
+					}
+					return 0, "", nil
+				}
+				setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+					return rwxssh.TunnelResult{LocalPort: 8310, Scheme: "https"}, nil
+				}
 
-		_, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
-			Command:    []string{"bin/server"},
-			Name:       "web",
-			TargetPort: 3100,
-			Scheme:     "https",
-			RunID:      "run-preview",
-		})
+				var result *cli.SandboxBackgroundResult
+				var err error
+				if restart {
+					result, err = setup.service.RestartSandboxBackground(cli.SandboxBackgroundConfig{
+						Name: "web", RunID: tc.runID, ConfigFile: explicitConfig,
+					})
+				} else {
+					result, err = setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+						Command: []string{"bin/server"}, Name: "web", TargetPort: 3100, Scheme: "https",
+						RunID: tc.runID, ConfigFile: explicitConfig,
+					})
+				}
 
-		require.NoError(t, err)
-		require.Equal(t, `Preview "web": https://127.0.0.1:8310
+				require.NoError(t, err)
+				require.Equal(t, "run-preview", result.RunID)
+				require.Equal(t, fmt.Sprintf(`Preview "web": https://127.0.0.1:8310
 
 After local edits:
-  Hot reload:    rwx sandbox push
-  Hard restart:  rwx sandbox background restart --name web
+  Hot reload:    rwx sandbox push%s
+  Hard restart:  rwx sandbox background restart%s --key web
 
-rwx sandbox exec -- <command> syncs local changes before it runs.
-`, setup.mockStdout.String())
-	})
+rwx sandbox exec%s -- <command> syncs local changes before it runs.
+`, tc.selection, tc.selection, tc.selection), setup.mockStdout.String())
+			})
+		}
+	}
 
 	t.Run("rejects a local port without a sandbox port", func(t *testing.T) {
 		setup := setupTest(t)
@@ -1482,7 +1566,7 @@ rwx sandbox exec -- <command> syncs local changes before it runs.
 
 	t.Run("stop closes the matching tunnel without syncing", func(t *testing.T) {
 		setup, commands := setupBackground(t)
-		setup.mockGit.MockGetHeadError = fmt.Errorf("git should not be consulted")
+		setup.mockVCS.MockGetHeadError = fmt.Errorf("git should not be consulted")
 		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
 			*commands = append(*commands, command)
 			return 0, `{"key":"web","status":"stopped"}`, nil
@@ -1571,6 +1655,192 @@ rwx sandbox exec -- <command> syncs local changes before it runs.
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "No active sandbox found")
 		require.Contains(t, err.Error(), "rwx sandbox start")
+	})
+}
+
+func TestService_TunnelSandbox(t *testing.T) {
+	setupTunnel := func(t *testing.T) (*testSetup, *[]string) {
+		t.Helper()
+		setup := setupTest(t)
+		setup.mockVCS.MockGetHeadError = fmt.Errorf("git should not be consulted")
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
+		commands := []string{}
+		setup.mockSSH.MockExecuteCommand = func(command string) (int, error) {
+			commands = append(commands, command)
+			return 0, nil
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+			commands = append(commands, command)
+			if strings.HasPrefix(command, "__rwx_sandbox_process_status__ ") {
+				return 0, `{"key":"web","status":"running","supportsPortReadyCheck":true}`, nil
+			}
+			return 0, "", nil
+		}
+		return setup, &commands
+	}
+
+	t.Run("opens a named tunnel for a running managed process without mutating it", func(t *testing.T) {
+		setup, commands := setupTunnel(t)
+		var tunnelConfig rwxssh.TunnelConfig
+		setup.mockTunnel.MockOpen = func(cfg rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			tunnelConfig = cfg
+			return rwxssh.TunnelResult{LocalPort: 8301, Scheme: cfg.Scheme}, nil
+		}
+
+		result, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{
+			Key:        "web",
+			TargetPort: 3001,
+			LocalPort:  8301,
+			Scheme:     "https",
+			RunID:      "run-sandbox",
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-sandbox", result.RunID)
+		require.Equal(t, "web", result.Key)
+		require.Equal(t, 3001, result.TargetPort)
+		require.Equal(t, 8301, result.LocalPort)
+		require.Equal(t, "https", result.Scheme)
+		require.Equal(t, "https://127.0.0.1:8301", result.URL)
+		require.Equal(t, "web", tunnelConfig.Key)
+		require.Equal(t, "run-sandbox", tunnelConfig.RunID)
+		require.Equal(t, "192.168.1.1:22", tunnelConfig.Address)
+		require.Equal(t, 3001, tunnelConfig.TargetPort)
+		require.Equal(t, 8301, tunnelConfig.LocalPort)
+		require.Equal(t, "https", tunnelConfig.Scheme)
+		require.Contains(t, *commands, "__rwx_sandbox_port_ready__ 3001")
+		require.True(t, slices.ContainsFunc(*commands, func(command string) bool {
+			return strings.HasPrefix(command, "__rwx_sandbox_process_status__ ")
+		}))
+		for _, command := range *commands {
+			require.NotContains(t, command, "checkout -f")
+			require.NotContains(t, command, "__rwx_sandbox_process_start__")
+			require.NotContains(t, command, "__rwx_sandbox_process_restart__")
+			require.NotContains(t, command, "__rwx_sandbox_process_stop__")
+		}
+	})
+
+	t.Run("falls back to local tunnel readiness when the process lacks sandbox-side support", func(t *testing.T) {
+		setup, commands := setupTunnel(t)
+		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+			*commands = append(*commands, command)
+			if strings.HasPrefix(command, "__rwx_sandbox_process_status__ ") {
+				return 0, `{"key":"web","status":"running"}`, nil
+			}
+			return 0, "", nil
+		}
+		setup.mockTunnel.MockOpen = func(cfg rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			return rwxssh.TunnelResult{LocalPort: 8301, Scheme: cfg.Scheme}, nil
+		}
+		localReadyChecks := 0
+		setup.mockTunnel.MockIsReady = func(localPort int) bool {
+			localReadyChecks++
+			return true
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{
+			Key: "web", TargetPort: 3001, RunID: "run-sandbox", Json: true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, 1, localReadyChecks)
+	})
+
+	t.Run("explains how to start a missing managed process", func(t *testing.T) {
+		setup, _ := setupTunnel(t)
+		setup.mockSSH.MockExecuteCommandWithSeparateOutput = func(command string) (int, string, string, error) {
+			if strings.HasPrefix(command, "__rwx_sandbox_process_status__ ") {
+				return 1, "", `sandbox process "missing" was not found`, nil
+			}
+			return 0, "", "", nil
+		}
+		setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+			require.Fail(t, "a missing process must not open a tunnel")
+			return rwxssh.TunnelResult{}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{
+			Key: "missing", TargetPort: 3001, RunID: "run-sandbox", Json: true,
+		})
+
+		require.ErrorContains(t, err, `unable to use background process "missing"`)
+		require.ErrorContains(t, err, `sandbox process "missing" was not found`)
+		require.ErrorContains(t, err, "Start it with:\n  rwx sandbox background --id run-sandbox --key missing -- <command>")
+	})
+
+	for _, tc := range []struct {
+		status     string
+		runID      string
+		configFile string
+		selection  string
+		workingDir string
+	}{
+		{status: "exited"},
+		{status: "stopped", runID: "run-sandbox", selection: " --id run-sandbox"},
+		{status: "exited", configFile: ".rwx/custom.yml", selection: " .rwx/custom.yml"},
+		{status: "stopped", configFile: ".rwx/sandbox.yml", selection: " .rwx/sandbox.yml"},
+		{status: "exited", configFile: ".rwx/custom sandbox.yml", selection: " '.rwx/custom sandbox.yml'"},
+		{status: "stopped", configFile: ".rwx/custom.yml", selection: " custom.yml", workingDir: ".rwx"},
+		{status: "exited", configFile: ".rwx/custom.yml", selection: " ../.rwx/custom.yml", workingDir: "app"},
+		{status: "stopped", configFile: ".rwx/custom.yml", runID: "run-sandbox", selection: " --id run-sandbox"},
+	} {
+		t.Run("shows logs and start commands for managed process with status "+tc.status, func(t *testing.T) {
+			setup, commands := setupTunnel(t)
+			if tc.workingDir != "" {
+				workingDir := filepath.Join(setup.tmp, tc.workingDir)
+				require.NoError(t, os.MkdirAll(workingDir, 0o755))
+				require.NoError(t, os.Chdir(workingDir))
+			}
+			setup.mockVCS.MockGetBranch = "main"
+			configFile := setup.absConfig(".rwx/sandbox.yml")
+			explicitConfig := ""
+			if tc.configFile != "" {
+				configFile = setup.absConfig(tc.configFile)
+				explicitConfig = configFile
+			}
+			seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+				"main:" + configFile: {RunID: "run-sandbox", ConfigFile: configFile},
+			})
+			setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
+				*commands = append(*commands, command)
+				if strings.HasPrefix(command, "__rwx_sandbox_process_status__ ") {
+					return 0, fmt.Sprintf(`{"key":"rails-web","status":%q}`, tc.status), nil
+				}
+				return 0, "", nil
+			}
+			setup.mockTunnel.MockOpen = func(rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
+				require.Fail(t, "a non-running process must not open a tunnel")
+				return rwxssh.TunnelResult{}, nil
+			}
+
+			_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{
+				Key: "rails-web", TargetPort: 3001, RunID: tc.runID, ConfigFile: explicitConfig, Json: true,
+			})
+
+			require.EqualError(t, err, fmt.Sprintf(
+				"background process \"rails-web\" is not running (status: %s)\n\nView logs with:\n  rwx sandbox background logs%s --key rails-web\n\nStart it with:\n  rwx sandbox background%s --key rails-web -- <command>",
+				tc.status, tc.selection, tc.selection,
+			))
+		})
+	}
+
+	t.Run("validates the tunnel key and sandbox port", func(t *testing.T) {
+		setup := setupTest(t)
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "../web", TargetPort: 3000})
+		require.EqualError(t, err, "tunnel key may contain only letters, numbers, underscores, and hyphens")
+
+		_, err = setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web"})
+		require.EqualError(t, err, "sandbox port must be between 1 and 65535")
 	})
 }
 
@@ -1919,7 +2189,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 
 		runID := "run-no-local-head"
 		address := "192.168.1.1:22"
-		setup.mockGit.MockGetHeadError = fmt.Errorf("not a git repository")
+		setup.mockVCS.MockGetHeadError = fmt.Errorf("not a git repository")
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
@@ -1944,7 +2214,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		})
 
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "sandbox push requires a git repository with a valid HEAD")
+		require.Contains(t, err.Error(), "sandbox push requires a repository with a resolvable working copy")
 		require.Contains(t, err.Error(), "not a git repository")
 	})
 
@@ -1969,8 +2239,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: []byte("diff --git a/file.txt b/file.txt\n")}, nil
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: []byte("diff --git a/file.txt b/file.txt\n")}, nil
 		}
 
 		setup.mockSSH.MockExecuteCommandWithOutput = func(command string) (int, string, error) {
@@ -2023,7 +2293,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil // No changes
 		}
 
@@ -2080,7 +2350,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil // No changes
 		}
 
@@ -2145,10 +2415,10 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{
 				Staged:          []byte("diff --git a/non-lfs.txt b/non-lfs.txt\n"),
-				LFSChangedFiles: &git.LFSChangedFilesMetadata{Files: []string{"large.bin"}, Count: 1},
+				LFSChangedFiles: &vcs.LFSChangedFilesMetadata{Files: []string{"large.bin"}, Count: 1},
 			}, nil
 		}
 
@@ -2216,8 +2486,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: []byte("invalid patch")}, nil
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: []byte("invalid patch")}, nil
 		}
 
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
@@ -2266,8 +2536,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: []byte("diff --git a/file.txt b/file.txt\n")}, nil
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: []byte("diff --git a/file.txt b/file.txt\n")}, nil
 		}
 
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
@@ -2287,7 +2557,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			stdinCommandOrder = append(stdinCommandOrder, command)
 			return 0, "", nil
 		}
-		setup.mockGit.MockApplyPatch = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatch = func(patch []byte) *exec.Cmd {
 			require.Equal(t, sandboxPatch, string(patch))
 			pulledPatchApplied = true
 			return exec.Command("true")
@@ -2379,18 +2649,18 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/sync"
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/sync"
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{
 				Staged:   []byte("staged-patch"),
 				Unstaged: []byte("unstaged-patch"),
 			}, nil
 		}
 
 		var commandOrder []string
-		var pushOpts git.PushRefOptions
-		setup.mockGit.MockPushRef = func(opts git.PushRefOptions) error {
+		var pushOpts vcs.PushRefOptions
+		setup.mockVCS.MockPushRef = func(opts vcs.PushRefOptions) error {
 			pushOpts = opts
 			commandOrder = append(commandOrder, "git push "+opts.Remote+" "+opts.Refspec)
 			return nil
@@ -2536,16 +2806,16 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/lfs-push"
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/lfs-push"
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
 			t.Fatal("dirty patches should not be generated after broken LFS objects are detected")
-			return git.DirtyPatches{}, nil
+			return vcs.DirtyPatches{}, nil
 		}
 
 		var commandOrder []string
 		pushed := false
-		setup.mockGit.MockPushRef = func(opts git.PushRefOptions) error {
+		setup.mockVCS.MockPushRef = func(opts vcs.PushRefOptions) error {
 			pushed = true
 			commandOrder = append(commandOrder, "git push "+opts.Remote+" "+opts.Refspec)
 			return nil
@@ -2625,8 +2895,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		oid := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/checkout-fail-lfs"
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/checkout-fail-lfs"
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
@@ -2677,8 +2947,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/checkout-fail-transport"
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/checkout-fail-transport"
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
@@ -2731,13 +3001,13 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		newFilePath := "dir with space/quote'file.txt"
 		newFilePatch := []byte("diff --git a/" + newFilePath + " b/" + newFilePath + "\nnew file mode 100644\nindex 0000000..c42fa8d\n--- /dev/null\n+++ b/" + newFilePath + "\n@@ -0,0 +1 @@\n+local-change-content\n")
 
-		setup.mockGit.MockGetBranch = "feature/new-sandbox"
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetCommit = "base"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{
+		setup.mockVCS.MockGetBranch = "feature/new-sandbox"
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetCommit = "base"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{
 				Staged:   newFilePatch,
 				Files:    []string{newFilePath},
 				NewFiles: []string{newFilePath},
@@ -2817,6 +3087,97 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		require.NotContains(t, order[snapshotIndex], "/usr/bin/git add -A &&")
 	})
 
+	// The jj shape: the working copy is pushed as a commit with no dirty patch,
+	// so the baseline is the checked-out tree and the pushed commit is the one
+	// the working copy holds now.
+	t.Run("new sandbox with no dirty paths syncs the head resolved at sync time and stages nothing", func(t *testing.T) {
+		setup := setupTest(t)
+
+		configFile := setup.absConfig(".rwx/sandbox.yml")
+		require.NoError(t, os.WriteFile(configFile, []byte("base:\n  image: ubuntu:24.04\ntasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+		staleHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		currentHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+		headCalls := 0
+		setup.mockVCS.MockGetHeadCommit = func() (string, error) {
+			headCalls++
+			if headCalls == 1 {
+				return staleHead, nil
+			}
+			return currentHead, nil
+		}
+		setup.mockVCS.MockGetBranch = "feature/new-sandbox"
+		setup.mockVCS.MockGetCommit = "base"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
+
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
+		}
+		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
+			return &api.InitiateRunResult{
+				RunID:  "run-new",
+				RunURL: "https://cloud.rwx.com/runs/run-new",
+			}, nil
+		}
+		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
+			return &api.CreateSandboxTokenResult{Token: "new-token"}, nil
+		}
+		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
+			return &api.PackageVersionsResult{}, nil
+		}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
+
+		var order []string
+		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
+			switch {
+			case strings.Contains(cmd, "rev-parse --verify -q refs/rwx-sync"):
+				return 1, nil
+			case strings.Contains(cmd, "cat-file -e"):
+				return 0, nil
+			}
+			order = append(order, cmd)
+			return 0, nil
+		}
+		setup.mockSSH.MockExecuteCommandWithOutput = func(cmd string) (int, string, error) {
+			return 0, "", nil
+		}
+		setup.mockSSH.MockExecuteCommandWithStdinAndCombinedOutput = func(command string, stdin io.Reader) (int, string, error) {
+			order = append(order, command)
+			return 0, "", nil
+		}
+
+		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+			ConfigFile: configFile,
+			Command:    []string{"true"},
+			Json:       true,
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, "run-new", result.RunID)
+		require.GreaterOrEqual(t, headCalls, 2, "the head must be resolved again once the sandbox is ready")
+
+		checkoutIndex := sandboxCommandIndex(order, "checkout -f")
+		require.NotEqual(t, -1, checkoutIndex)
+		require.Contains(t, order[checkoutIndex], currentHead)
+		require.NotContains(t, order[checkoutIndex], staleHead)
+
+		require.Equal(t, -1, sandboxCommandIndex(order, "/usr/bin/git apply"), "nothing to apply without dirty patches")
+
+		snapshotIndex := sandboxCommandIndex(order, "update-ref refs/rwx-sync HEAD")
+		require.NotEqual(t, -1, snapshotIndex)
+		require.NotContains(t, order[snapshotIndex], "/usr/bin/git add -A", "setup-created files must stay out of the baseline")
+		require.NotContains(t, order[snapshotIndex], "/usr/bin/git update-index")
+	})
+
 	t.Run("first exec after sandbox start removes pre-applied new files before sync", func(t *testing.T) {
 		setup := setupTest(t)
 
@@ -2827,17 +3188,17 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		newFilePatch := []byte("diff --git a/" + newFilePath + " b/" + newFilePath + "\nnew file mode 100644\nindex 0000000..c42fa8d\n--- /dev/null\n+++ b/" + newFilePath + "\n@@ -0,0 +1 @@\n+local-change-content\n")
 
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
-			cli.SessionKey("detached", configFile): {
+			cli.SessionKey("feature/start-first-exec", configFile): {
 				RunID:       "run-started",
 				ConfigFile:  configFile,
 				ScopedToken: "start-token",
 			},
 		})
 
-		setup.mockGit.MockGetBranch = "feature/start-first-exec"
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{
+		setup.mockVCS.MockGetBranch = "feature/start-first-exec"
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{
 				Staged:   newFilePatch,
 				Files:    []string{newFilePath},
 				NewFiles: []string{newFilePath},
@@ -2915,7 +3276,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		newFilePatch := []byte("diff --git a/" + newFilePath + " b/" + newFilePath + "\nnew file mode 100644\nindex 0000000..c42fa8d\n--- /dev/null\n+++ b/" + newFilePath + "\n@@ -0,0 +1 @@\n+local-change-content\n")
 
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
-			cli.SessionKey("detached", configFile): {
+			cli.SessionKey("feature/reused-exec", configFile): {
 				RunID:         "run-reused",
 				ConfigFile:    configFile,
 				ScopedToken:   "reused-token",
@@ -2924,10 +3285,10 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			},
 		})
 
-		setup.mockGit.MockGetBranch = "feature/reused-exec"
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{
+		setup.mockVCS.MockGetBranch = "feature/reused-exec"
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{
 				Staged:   newFilePatch,
 				Files:    []string{newFilePath},
 				NewFiles: []string{newFilePath},
@@ -2998,13 +3359,13 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		stagedDeletePatch := []byte("diff --git a/" + deletedPath + " b/" + deletedPath + "\ndeleted file mode 100644\nindex c42fa8d..0000000\n--- a/" + deletedPath + "\n+++ /dev/null\n@@ -1 +0,0 @@\n-deleted-content\n")
 		unstagedEditPatch := []byte("diff --git a/" + editedPath + " b/" + editedPath + "\nindex c42fa8d..5bd8a42 100644\n--- a/" + editedPath + "\n+++ b/" + editedPath + "\n@@ -1 +1 @@\n-old-content\n+new-content\n")
 
-		setup.mockGit.MockGetBranch = "feature/new-sandbox"
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetCommit = "base"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{
+		setup.mockVCS.MockGetBranch = "feature/new-sandbox"
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetCommit = "base"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{
 				Staged:   stagedDeletePatch,
 				Unstaged: unstagedEditPatch,
 				Files:    []string{deletedPath, editedPath},
@@ -3087,12 +3448,12 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/fetch-only"
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{}, nil
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/fetch-only"
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{}, nil
 		}
-		setup.mockGit.MockPushRef = func(opts git.PushRefOptions) error {
+		setup.mockVCS.MockPushRef = func(opts vcs.PushRefOptions) error {
 			require.Fail(t, "push should not run when remote fetch provides local head")
 			return nil
 		}
@@ -3148,10 +3509,10 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = ""
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{}, nil
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = ""
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{}, nil
 		}
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
@@ -3202,9 +3563,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/push-fail"
-		setup.mockGit.MockPushRef = func(opts git.PushRefOptions) error {
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/push-fail"
+		setup.mockVCS.MockPushRef = func(opts vcs.PushRefOptions) error {
 			return fmt.Errorf("remote rejected push")
 		}
 
@@ -3251,9 +3612,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		localHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-		setup.mockGit.MockGetHead = localHead
-		setup.mockGit.MockGetBranch = "feature/push-missing"
-		setup.mockGit.MockPushRef = func(opts git.PushRefOptions) error {
+		setup.mockVCS.MockGetHead = localHead
+		setup.mockVCS.MockGetBranch = "feature/push-missing"
+		setup.mockVCS.MockPushRef = func(opts vcs.PushRefOptions) error {
 			return nil
 		}
 
@@ -3311,8 +3672,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: []byte("patch")}, nil
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: []byte("patch")}, nil
 		}
 
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
@@ -3359,7 +3720,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return []byte("patch"), nil, nil
 		}
 
@@ -3430,7 +3791,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		}
 
 		// No local changes
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -3482,7 +3843,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -3549,7 +3910,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -3582,7 +3943,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			}
 			if isSandboxPullDiffCommand(cmd) {
 				foundDiffRef = true
-				requireSandboxWorktreeRootCommand(t, cmd, "/usr/bin/git diff --binary --full-index --no-renames refs/rwx-sync")
+				requireSandboxWorktreeRootCommand(t, cmd, vcstypes.PatchDiffCommand("/usr/bin/git", "--binary", "--full-index", "--no-renames", "refs/rwx-sync"))
 			}
 			if strings.Contains(cmd, "git reset HEAD") {
 				foundReset = true
@@ -3643,7 +4004,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -3806,17 +4167,17 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
 		// First apply fails
-		setup.mockGit.MockApplyPatch = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatch = func(patch []byte) *exec.Cmd {
 			return exec.Command("false")
 		}
 
 		// --reject also fails (partial apply), and create a .rej file to simulate
-		setup.mockGit.MockApplyPatchReject = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatchReject = func(patch []byte) *exec.Cmd {
 			// Create a .rej file to simulate partial apply
 			_ = os.WriteFile(filepath.Join(setup.tmp, "file.txt.rej"), []byte("rejected hunk"), 0644)
 			return exec.Command("false")
@@ -3871,17 +4232,17 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
 		// First apply fails
-		setup.mockGit.MockApplyPatch = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatch = func(patch []byte) *exec.Cmd {
 			return exec.Command("false")
 		}
 
 		// --reject succeeds (all hunks applied on retry)
-		setup.mockGit.MockApplyPatchReject = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatchReject = func(patch []byte) *exec.Cmd {
 			return exec.Command("true")
 		}
 
@@ -3937,15 +4298,15 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
 		// Both apply attempts fail
-		setup.mockGit.MockApplyPatch = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatch = func(patch []byte) *exec.Cmd {
 			return exec.Command("false")
 		}
-		setup.mockGit.MockApplyPatchReject = func(patch []byte) *exec.Cmd {
+		setup.mockVCS.MockApplyPatchReject = func(patch []byte) *exec.Cmd {
 			return exec.Command("false")
 		}
 
@@ -3999,7 +4360,7 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 		}
 
 		// No local changes (sync still runs the .rej check)
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -4030,12 +4391,12 @@ func TestService_StartSandbox(t *testing.T) {
 		err = os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte(sandboxConfig), 0o644)
 		require.NoError(t, err)
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{
 			Written:        true,
-			UntrackedFiles: git.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
+			UntrackedFiles: vcs.UntrackedFilesMetadata{Files: []string{"foo.txt"}, Count: 1},
 		}
 
 		// Mock API
@@ -4087,9 +4448,9 @@ func TestService_StartSandbox(t *testing.T) {
 		require.NoError(t, err)
 
 		// Mock git
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		// Mock API
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
@@ -4141,9 +4502,9 @@ func TestService_StartSandbox_StorageLock(t *testing.T) {
 		require.NoError(t, os.MkdirAll(rwxDir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
@@ -4181,8 +4542,8 @@ func TestService_StartSandbox_StorageLock(t *testing.T) {
 		storage, err := cli.LoadSandboxStorage()
 		require.NoError(t, err)
 		require.NotEmpty(t, storage.Sandboxes, "expected at least one session in storage")
-		// The temp dir is not a git repo, so the branch resolves to "detached"
-		session, found := storage.GetSession("detached", setup.absConfig(".rwx/sandbox.yml"))
+		// Sessions are keyed by the branch the service's VCS client reports
+		session, found := storage.GetSession("main", setup.absConfig(".rwx/sandbox.yml"))
 		require.True(t, found)
 		require.Equal(t, "run-lock-test", session.RunID)
 
@@ -4199,9 +4560,9 @@ func TestService_StartSandbox_StorageLock(t *testing.T) {
 		require.NoError(t, os.MkdirAll(rwxDir, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
@@ -4244,9 +4605,9 @@ func TestService_ExecSandbox_ConcurrentAutoCreate(t *testing.T) {
 
 		address := "192.168.1.1:22"
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
@@ -4288,7 +4649,7 @@ func TestService_ExecSandbox_ConcurrentAutoCreate(t *testing.T) {
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			return 0, nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -4300,7 +4661,7 @@ func TestService_ExecSandbox_ConcurrentAutoCreate(t *testing.T) {
 			APIClient:        setup.mockAPI,
 			SSHClient:        setup.mockSSH,
 			SSHTunnelManager: setup.mockTunnel,
-			GitClient:        setup.mockGit,
+			VCSClient:        setup.mockVCS,
 			DockerCLI:        setup.mockDocker,
 			Stdin:            &bytes.Buffer{},
 			Stdout:           stdout2,
@@ -4355,17 +4716,21 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		t.Cleanup(func() { os.Setenv("HOME", originalHome) })
 
 		address := "192.168.1.1:22"
-		// GetCurrentGitBranch uses a real git client, so in a non-repo temp dir it returns "detached"
+		// The mock VCS client reports no branch and no short head, so
+		// GetCurrentBranch falls back to "detached"
 		branch := "detached"
 		configFile := setup.absConfig(".rwx/sandbox.yml")
 
 		// Encode cli_state matching branch+configFile
-		encodedState := cli.EncodeCliState(branch, configFile)
+		encodedState := cli.EncodeCliState(branch, configFile, "")
 
-		// No local session — ListSandboxRuns returns a matching run
-		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{
 				Runs: []api.RunSummary{
+					{
+						ID:       "run-inactive",
+						CliState: &encodedState,
+					},
 					{
 						ID:       "run-recovered",
 						RunURL:   "https://cloud.rwx.com/runs/run-recovered",
@@ -4381,6 +4746,9 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		}
 
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			if id == "run-inactive" {
+				return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
+			}
 			require.Equal(t, "run-recovered", id)
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
@@ -4396,14 +4764,13 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			return 0, nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
 		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
-			ConfigFile: configFile,
-			Command:    []string{"echo", "hello"},
-			Json:       true,
+			Command: []string{"echo", "hello"},
+			Json:    true,
 		})
 
 		require.NoError(t, err)
@@ -4419,7 +4786,7 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		require.Equal(t, "recovered-token", session.ScopedToken)
 	})
 
-	t.Run("falls through to auto-create when no remote match", func(t *testing.T) {
+	t.Run("explicit definition starts a replacement from inactive history", func(t *testing.T) {
 		setup := setupTest(t)
 
 		// Set HOME so sandbox storage is writable in the test temp dir
@@ -4427,22 +4794,22 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		os.Setenv("HOME", setup.tmp)
 		t.Cleanup(func() { os.Setenv("HOME", originalHome) })
 
-		// Create .rwx directory and sandbox config file
 		rwxDir := filepath.Join(setup.tmp, ".rwx")
 		require.NoError(t, os.MkdirAll(rwxDir, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+		configFile := filepath.Join(rwxDir, "other.yml")
+		require.NoError(t, os.WriteFile(configFile, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
 
 		address := "192.168.1.1:22"
+		encodedState := cli.EncodeCliState("main", configFile, "")
 
-		// ListSandboxRuns returns no matching runs
-		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-inactive", CliState: &encodedState}}}, nil
 		}
 
 		// Mock the full auto-create path
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
@@ -4457,6 +4824,10 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		var initiatedRun bool
 		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			initiatedRun = true
+			state, err := cli.DecodeCliState(cfg.CliState)
+			require.NoError(t, err)
+			require.Equal(t, configFile, state.ConfigFile)
+			require.Equal(t, "github.com/example/repo", state.Repository)
 			return &api.InitiateRunResult{
 				RunID:  "run-new",
 				RunURL: "https://cloud.rwx.com/mint/runs/run-new",
@@ -4466,6 +4837,9 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 			return &api.CreateSandboxTokenResult{Token: "new-token"}, nil
 		}
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			if id == "run-inactive" {
+				return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
+			}
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -4480,18 +4854,185 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			return 0, nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
 		result, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
-			Command: []string{"echo", "hello"},
-			Json:    true,
+			ConfigFile: configFile,
+			Command:    []string{"echo", "hello"},
+			Json:       true,
 		})
 
 		require.NoError(t, err)
 		require.Equal(t, "run-new", result.RunID)
 		require.True(t, initiatedRun, "should have initiated a new run")
+	})
+
+	t.Run("selects the active default session despite non-default history", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		firstConfig := setup.absConfig(".rwx/sandbox.yml")
+		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
+			"main:" + firstConfig: {
+				RunID:      "run-first",
+				ConfigFile: firstConfig,
+			},
+		})
+		selectionComplete := errors.New("selection complete")
+		connectionChecks := 0
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			connectionChecks++
+			require.Equal(t, "run-first", id)
+			if connectionChecks == 2 {
+				return api.SandboxConnectionInfo{}, selectionComplete
+			}
+			return api.SandboxConnectionInfo{Sandboxable: true}, nil
+		}
+		first := cli.EncodeCliState("main", firstConfig, "github.com/example/repo")
+		duplicate := cli.EncodeCliState("main", firstConfig, "github.com/example/repo")
+		second := cli.EncodeCliState("main", setup.absConfig(".rwx/second.yml"), "github.com/example/repo")
+		otherBranch := cli.EncodeCliState("other", setup.absConfig(".rwx/third.yml"), "github.com/example/repo")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{
+				{ID: "run-first", CliState: &first},
+				{ID: "run-first-older", CliState: &duplicate},
+				{ID: "run-second", CliState: &second},
+				{ID: "run-other-branch", CliState: &otherBranch},
+			}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.ErrorIs(t, err, selectionComplete)
+		require.Equal(t, 2, connectionChecks)
+		require.Nil(t, findEvent(setup.drainEvents(), "sandbox.ambiguous_selection"))
+	})
+
+	t.Run("ignores history from other repositories", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/current.git"
+		setup.mockVCS.MockGetTopLevel = setup.tmp
+		foreign := cli.EncodeCliState("main", setup.absConfig(".rwx/foreign.yml"), "github.com/example/other")
+		legacy := cli.EncodeCliState("main", "/other/repo/.rwx/legacy.yml", "")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{
+				{ID: "run-foreign", CliState: &foreign},
+				{ID: "run-legacy", CliState: &legacy},
+			}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.EqualError(t, err, "No active sandbox found for branch main.\nStart one with 'rwx sandbox start' or use --id to select an existing run.")
+	})
+
+	t.Run("ignores history from another checkout of the same repository", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetTopLevel = setup.tmp
+		otherCheckout := cli.EncodeCliState("main", "/other/checkout/.rwx/sandbox.yml", "github.com/example/repo")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-other-checkout", CliState: &otherCheckout}}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.EqualError(t, err, "No active sandbox found for branch main.\nStart one with 'rwx sandbox start' or use --id to select an existing run.")
+	})
+
+	t.Run("matches detached history by ancestry", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetShortHead = "bbbbbbb"
+		setup.mockVCS.MockIsAncestor = func(candidateSHA, headRef string) bool {
+			require.Equal(t, "aaaaaaa", candidateSHA)
+			require.Equal(t, "HEAD", headRef)
+			return true
+		}
+		configFile := setup.absConfig(".rwx/only.yml")
+		state := cli.EncodeCliState("detached@aaaaaaa", configFile, "")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-inactive", CliState: &state}}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.ErrorIs(t, err, errors.ErrSandboxDefinitionRequired)
+		require.EqualError(t, err, "No active sandbox is using the default definition for branch detached@bbbbbbb.\nSpecify a config file to select a non-default sandbox, or use --id to specify a run ID.")
+		event := findEvent(setup.drainEvents(), "sandbox.ambiguous_selection")
+		require.NotNil(t, event)
+		require.Equal(t, "definition_required", event.Props["resolution"])
+	})
+
+	t.Run("returns historical lookup errors", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return nil, errors.New("history unavailable")
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.EqualError(t, err, "unable to list historical sandbox runs: history unavailable")
+	})
+
+	t.Run("sole remote non-default history requires explicit selection", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		configFile := setup.absConfig(".rwx/only.yml")
+		state := cli.EncodeCliState("main", configFile, "")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-inactive", CliState: &state}}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.ErrorIs(t, err, errors.ErrSandboxDefinitionRequired)
+		require.EqualError(t, err, "No active sandbox is using the default definition for branch main.\nSpecify a config file to select a non-default sandbox, or use --id to specify a run ID.")
+	})
+
+	t.Run("implicit exec starts the default after non-default history", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		defaultConfig := setup.absConfig(".rwx/sandbox.yml")
+		require.NoError(t, os.WriteFile(defaultConfig, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+		customConfig := setup.absConfig(".rwx/only.yml")
+		state := cli.EncodeCliState("main", customConfig, "")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-custom", CliState: &state}}}, nil
+		}
+		startAttempted := errors.New("start attempted")
+		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
+			return api.DefaultBaseResult{}, startAttempted
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{Command: []string{"true"}, Json: true})
+
+		require.ErrorIs(t, err, startAttempted)
+		require.Equal(t, "Warning: A non-default sandbox definition has been used for branch main. Starting a new sandbox with the default definition at "+defaultConfig+".\n", setup.mockStderr.String())
+		event := findEvent(setup.drainEvents(), "sandbox.ambiguous_selection")
+		require.NotNil(t, event)
+		require.Equal(t, "start_default", event.Props["resolution"])
+	})
+
+	t.Run("explicit historical selection reports when the sandbox is inactive", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		configFile := setup.absConfig(".rwx/only.yml")
+		state := cli.EncodeCliState("main", configFile, "")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-inactive", CliState: &state}}}, nil
+		}
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{ConfigFile: configFile, Key: "web", TargetPort: 3000, Json: true})
+
+		require.EqualError(t, err, "The sandbox selected from "+configFile+" is no longer active.\nStart a replacement with 'rwx sandbox exec', specify another config file, or use --id to select an existing run.")
 	})
 }
 
@@ -4511,7 +5052,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		}
 		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func([]string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func([]string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 	}
@@ -4525,7 +5066,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 
 		configFile := setup.absConfig(".rwx/sandbox.yml")
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
-			"detached:" + configFile: {
+			"main:" + configFile: {
 				RunID:       staleRunID,
 				ConfigFile:  configFile,
 				ScopedToken: "token-stale",
@@ -4550,9 +5091,9 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 			}, nil
 		}
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{Image: "ubuntu:24.04", Config: "rwx/base 1.0.0", Arch: "x86_64"}, nil
 		}
@@ -4570,7 +5111,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		}
 		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func([]string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func([]string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -4643,7 +5184,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		setup := setupTest(t)
 
 		expiredConfig := setup.absConfig(".rwx/expired.yml")
-		activeConfig := setup.absConfig(".rwx/active.yml")
+		activeConfig := setup.absConfig(".rwx/sandbox.yml")
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"detached:" + expiredConfig: {
 				RunID:      "run-expired",
@@ -4667,6 +5208,10 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 				PublicHostKey:  sandboxPublicTestKey,
 			}, nil
 		}
+		activeState := cli.EncodeCliState("detached", activeConfig, "")
+		setup.mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-active", CliState: &activeState}}}, nil
+		}
 		var closedRunIDs []string
 		setup.mockTunnel.MockCloseAll = func(runID, stateDirectory string) error {
 			closedRunIDs = append(closedRunIDs, runID)
@@ -4678,7 +5223,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		}
 		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func([]string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func([]string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -4773,9 +5318,9 @@ func TestService_ExecSandbox_InitParams(t *testing.T) {
 		require.NoError(t, err)
 
 		// Mock git
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		// Mock API
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
@@ -4820,7 +5365,7 @@ func TestService_ExecSandbox_InitParams(t *testing.T) {
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			return 0, nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -5180,10 +5725,10 @@ func TestService_ResetSandbox(t *testing.T) {
 		configPath := filepath.Join(setup.tmp, ".rwx", "sandbox.yml")
 		_ = os.WriteFile(configPath, []byte("tasks:\n  - key: test\n"), 0o644)
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "https://github.com/test/repo"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "https://github.com/test/repo"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
 
 		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			return &api.InitiateRunResult{
@@ -5203,11 +5748,12 @@ func TestService_ResetSandbox(t *testing.T) {
 	}
 
 	// seedResetStorage initializes a git repo on "main" and writes a sandbox session
-	// keyed by branch+configFile so ResetSandbox can find it via GetCurrentGitBranch.
+	// keyed by branch+configFile so ResetSandbox can find it via GetCurrentBranch.
 	seedResetStorage := func(t *testing.T, setup *testSetup, runID, scopedToken string) {
 		t.Helper()
 
-		// GetCurrentGitBranch uses a real git client, so the temp dir must be a repo.
+		// The .rwx directory is placed at the repository root, so the temp dir
+		// has to be one.
 		cmd := exec.Command("git", "init", "-b", "main")
 		cmd.Dir = setup.tmp
 		require.NoError(t, cmd.Run())
@@ -5395,7 +5941,7 @@ func TestService_ExecSandbox_RunURL(t *testing.T) {
 			return 0, nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -5450,9 +5996,9 @@ func TestService_StartSandbox_RunURL(t *testing.T) {
 		err = os.WriteFile(filepath.Join(rwxDir, "sandbox.yml"), []byte(sandboxConfig), 0o644)
 		require.NoError(t, err)
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
 
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{
@@ -5509,7 +6055,7 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -5556,8 +6102,8 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGenerateDirtyPatches = func() (git.DirtyPatches, error) {
-			return git.DirtyPatches{Unstaged: []byte("invalid patch")}, nil
+		setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+			return vcs.DirtyPatches{Unstaged: []byte("invalid patch")}, nil
 		}
 
 		var commandOrder []string
@@ -5648,7 +6194,7 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -5735,7 +6281,7 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 			return nil
 		}
 
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -5877,12 +6423,12 @@ func TestService_ExecSandbox_DefinitionDrift(t *testing.T) {
 
 func TestService_ExecSandbox_Reset(t *testing.T) {
 	// seedExecResetStorage creates the config file and seeds a session under the
-	// "detached" branch key (what GetCurrentGitBranch returns in a non-git temp dir).
+	// branch key the mocked VCS client reports.
 	seedExecResetStorage := func(t *testing.T, setup *testSetup, runID, scopedToken string, execCount int) string {
 		t.Helper()
 		configFile := setup.absConfig(".rwx/sandbox.yml")
 		require.NoError(t, os.WriteFile(configFile, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
-		key := cli.SessionKey("detached", configFile)
+		key := cli.SessionKey("main", configFile)
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			key: {
 				RunID:       runID,
@@ -5897,10 +6443,10 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 	// setupNewSandboxMocks configures the mocks needed for StartSandbox to succeed
 	// and create "run-new".
 	setupNewSandboxMocks := func(setup *testSetup) {
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
 		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			return &api.InitiateRunResult{
 				RunID:  "run-new",
@@ -5958,7 +6504,7 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 			}
 			return 0, nil
 		}
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -6015,7 +6561,7 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -6074,7 +6620,7 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 			return nil
 		}
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -6110,7 +6656,7 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 		}
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 
@@ -6159,7 +6705,7 @@ func TestService_ExecSandbox_ReconnectionHint(t *testing.T) {
 		}
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 	}
@@ -6235,10 +6781,10 @@ func TestService_ExecSandbox_ReconnectionHint(t *testing.T) {
 		configFile := setup.absConfig(".rwx/sandbox.yml")
 		require.NoError(t, os.WriteFile(configFile, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
 
-		setup.mockGit.MockGetBranch = "main"
-		setup.mockGit.MockGetCommit = "abc123"
-		setup.mockGit.MockGetOriginUrl = "git@github.com:example/repo.git"
-		setup.mockGit.MockGeneratePatchFile = git.PatchFile{}
+		setup.mockVCS.MockGetBranch = "main"
+		setup.mockVCS.MockGetCommit = "abc123"
+		setup.mockVCS.MockGetOriginUrl = "git@github.com:example/repo.git"
+		setup.mockVCS.MockGeneratePatchFile = vcs.PatchFile{}
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
@@ -6264,7 +6810,7 @@ func TestService_ExecSandbox_ReconnectionHint(t *testing.T) {
 		}
 		setup.mockSSH.MockConnect = func(addr string, _ ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) { return 0, nil }
-		setup.mockGit.MockGeneratePatch = func(pathspec []string) ([]byte, *git.LFSChangedFilesMetadata, error) {
+		setup.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 			return nil, nil, nil
 		}
 

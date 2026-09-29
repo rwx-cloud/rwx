@@ -1,0 +1,18 @@
+#!/bin/bash
+set -euo pipefail
+
+git init -q -b main origin
+cd origin
+printf 'hello\n' > base.txt
+git add -A
+git commit -qm "base commit"
+
+# The base commit patches are expected to be based on.
+git rev-parse HEAD
+cd ..
+
+git init -q --bare -b main other
+
+jj git clone $COLOCATE origin repo
+cd repo
+jj git remote add upstream ../other

@@ -1,7 +1,6 @@
 package git_test
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/rwx-cloud/rwx/internal/git"
+	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -369,6 +369,159 @@ func TestGeneratePatch(t *testing.T) {
 	})
 }
 
+func hostileDiffFixture(t *testing.T) (string, *git.Client) {
+	t.Helper()
+
+	root := t.TempDir()
+
+	subOrigin := filepath.Join(root, "sub-origin")
+	require.NoError(t, os.MkdirAll(subOrigin, 0o755))
+	mustGit(t, subOrigin, "init")
+	mustGit(t, subOrigin, "config", "user.email", "test@example.com")
+	mustGit(t, subOrigin, "config", "user.name", "Test")
+	require.NoError(t, os.WriteFile(filepath.Join(subOrigin, "a.txt"), []byte("submodule\n"), 0o644))
+	mustGit(t, subOrigin, "add", "a.txt")
+	mustGit(t, subOrigin, "commit", "-m", "submodule base")
+
+	origin := filepath.Join(root, "origin")
+	require.NoError(t, os.MkdirAll(filepath.Join(origin, "sub"), 0o755))
+	mustGit(t, origin, "init")
+	mustGit(t, origin, "config", "user.email", "test@example.com")
+	mustGit(t, origin, "config", "user.name", "Test")
+	// Committed, so enabling a textconv driver is the only difference from the baseline.
+	require.NoError(t, os.WriteFile(filepath.Join(origin, ".gitattributes"), []byte("*.txt diff=upper\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(origin, "sub", "tracked.txt"), []byte("a\n\nb\n"), 0o644))
+	mustGit(t, origin, "add", ".gitattributes", "sub/tracked.txt")
+	mustGit(t, origin, "commit", "-m", "base")
+
+	repo := filepath.Join(root, "repo")
+	mustGit(t, root, "clone", origin, "repo")
+	mustGit(t, repo, "config", "user.email", "test@example.com")
+	mustGit(t, repo, "config", "user.name", "Test")
+
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "sub", "tracked.txt"), []byte("a\n\nb\nc\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "sub", "staged.txt"), []byte("staged\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "sub", "new.dat"), []byte{0x00, 0x01, 0x02, 'b', 'i', 'n', '\n'}, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "sub", "untracked.txt"), []byte("untracked\n"), 0o644))
+	mustGit(t, repo, "add", "sub/staged.txt", "sub/new.dat")
+	// A relative url keeps .gitmodules byte-identical across temp directories.
+	mustGit(t, repo, "-c", "protocol.file.allow=always", "submodule", "add", "../sub-origin", "sm")
+
+	return repo, &git.Client{Binary: "git", Dir: filepath.Join(repo, "sub")}
+}
+
+func requireWellFormedPatch(t *testing.T, patch string) {
+	t.Helper()
+
+	require.Contains(t, patch, "diff --git a/sub/tracked.txt b/sub/tracked.txt", "paths keep their a/ and b/ prefixes and stay relative to the repository root")
+	require.Contains(t, patch, "\n+c\n", "the text change is present verbatim")
+	require.Contains(t, patch, "\n \n", "blank context lines keep their leading space")
+	require.Contains(t, patch, "new file mode 160000", "the submodule gitlink is present as a subproject line")
+	require.Contains(t, patch, "GIT binary patch", "the binary addition is present")
+	require.NotContains(t, patch, "\x1b[", "no terminal escapes")
+}
+
+// Enabling any of these settings must leave the patch byte-identical.
+func TestPatchesIgnoreHostileDiffConfig(t *testing.T) {
+	scripts := t.TempDir()
+
+	externalDiff := filepath.Join(scripts, "external-diff")
+	require.NoError(t, os.WriteFile(externalDiff, []byte("#!/bin/sh\necho external-diff-output\n"), 0o755))
+
+	textconv := filepath.Join(scripts, "textconv")
+	require.NoError(t, os.WriteFile(textconv, []byte("#!/bin/sh\ntr 'a-z' 'A-Z' < \"$1\"\n"), 0o755))
+
+	cases := []struct {
+		name      string
+		configure func(t *testing.T, repo string)
+	}{
+		{"diff.external", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.external", externalDiff)
+		}},
+		{"GIT_EXTERNAL_DIFF", func(t *testing.T, repo string) {
+			t.Setenv("GIT_EXTERNAL_DIFF", externalDiff)
+		}},
+		{"textconv driver", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.upper.textconv", textconv)
+		}},
+		{"color.ui", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "color.ui", "always")
+		}},
+		{"color.diff", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "color.diff", "always")
+		}},
+		{"diff.noprefix", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.noprefix", "true")
+		}},
+		{"diff.mnemonicPrefix", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.mnemonicPrefix", "true")
+		}},
+		{"diff.srcPrefix and diff.dstPrefix", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.srcPrefix", "SRC/")
+			mustGit(t, repo, "config", "diff.dstPrefix", "DST/")
+		}},
+		{"diff.relative", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.relative", "true")
+		}},
+		{"diff.submodule=log", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.submodule", "log")
+		}},
+		{"diff.submodule=diff", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.submodule", "diff")
+		}},
+		{"diff.ignoreSubmodules", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.ignoreSubmodules", "all")
+		}},
+		{"submodule.<name>.ignore", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "submodule.sm.ignore", "all")
+		}},
+		{"diff.suppressBlankEmpty", func(t *testing.T, repo string) {
+			mustGit(t, repo, "config", "diff.suppressBlankEmpty", "true")
+		}},
+	}
+
+	t.Run("GeneratePatch", func(t *testing.T) {
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				repo, client := hostileDiffFixture(t)
+
+				baseline, _, err := client.GeneratePatch(nil)
+				require.NoError(t, err)
+				requireWellFormedPatch(t, string(baseline))
+
+				tc.configure(t, repo)
+
+				patch, _, err := client.GeneratePatch(nil)
+				require.NoError(t, err)
+				require.Equal(t, string(baseline), string(patch))
+			})
+		}
+	})
+
+	t.Run("GenerateDirtyPatches", func(t *testing.T) {
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				repo, client := hostileDiffFixture(t)
+
+				baseline, err := client.GenerateDirtyPatches()
+				require.NoError(t, err)
+				requireWellFormedPatch(t, string(baseline.Staged)+string(baseline.Unstaged))
+				require.Contains(t, baseline.Files, "sub/tracked.txt")
+				require.Contains(t, baseline.NewFiles, "sub/staged.txt")
+
+				tc.configure(t, repo)
+
+				patches, err := client.GenerateDirtyPatches()
+				require.NoError(t, err)
+				require.Equal(t, string(baseline.Staged), string(patches.Staged))
+				require.Equal(t, string(baseline.Unstaged), string(patches.Unstaged))
+				require.Equal(t, baseline.Files, patches.Files)
+				require.Equal(t, baseline.NewFiles, patches.NewFiles)
+			})
+		}
+	})
+}
+
 func TestGenerateDirtyPatches(t *testing.T) {
 	repo := t.TempDir()
 	mustGit(t, repo, "init")
@@ -440,7 +593,7 @@ func TestPushRef(t *testing.T) {
 	mustGit(t, target, "init", "--bare")
 
 	client := &git.Client{Binary: "git", Dir: source}
-	err := client.PushRef(git.PushRefOptions{
+	err := client.PushRef(vcstypes.PushRefOptions{
 		Remote:  target,
 		Refspec: head + ":refs/rwx/push/test",
 		Env:     []string{"RWX_TEST_PUSH_ENV=1"},
@@ -672,7 +825,7 @@ func TestGeneratePatchFile(t *testing.T) {
 			_, err := client.GeneratePatchFile(t.TempDir(), []string{":(top,bogusmagic)x"})
 			require.Error(t, err)
 
-			var pe *git.PatchError
+			var pe *vcstypes.PatchError
 			require.ErrorAs(t, err, &pe)
 			require.Equal(t, "diff_name_only", pe.Command)
 			require.Equal(t, 128, pe.ExitCode)
@@ -681,58 +834,6 @@ func TestGeneratePatchFile(t *testing.T) {
 			require.Contains(t, pe.Error(), "failed to generate patch (git diff --name-only):")
 		})
 	})
-}
-
-func TestPatchErrorReason(t *testing.T) {
-	cases := []struct {
-		stderr string
-		want   string
-	}{
-		{"fatal: bad object 9a3b1c4e", "shallow_clone"},
-		{"fatal: pathspec '.rwx' is beyond a symbolic link", "beyond_symlink"},
-		{"error: external filter 'git-lfs filter-process' failed", "missing_external_filter"},
-		{"signal: killed", "oom_killed"},
-		{"error: patch failed: main.go:12", "patch_conflict"},
-		{"error: foo.txt: patch does not apply", "patch_conflict"},
-		{"error: bar.txt: already exists in working directory", "already_exists"},
-		{"error: corrupt patch at line 3", "corrupt_patch"},
-		{"fatal: something else entirely", "unknown"},
-		{"", "unknown"},
-	}
-
-	for _, tc := range cases {
-		pe := &git.PatchError{Stderr: tc.stderr}
-		require.Equal(t, tc.want, pe.Reason(), "stderr: %q", tc.stderr)
-	}
-}
-
-func TestPatchFailureReason(t *testing.T) {
-	t.Run("nil is empty", func(t *testing.T) {
-		require.Equal(t, "", git.PatchFailureReason(nil))
-	})
-
-	t.Run("prefers a wrapped *PatchError's structured stderr", func(t *testing.T) {
-		err := fmt.Errorf("failed to generate dirty patch: %w", &git.PatchError{Stderr: "fatal: bad object deadbeef"})
-		require.Equal(t, "shallow_clone", git.PatchFailureReason(err))
-	})
-
-	cases := []struct {
-		name string
-		msg  string
-		want string
-	}{
-		{"git apply conflict", "failed to sync changes to sandbox: git apply failed: error: patch failed: a.go:1", "patch_conflict"},
-		{"already exists", "failed to sync changes to sandbox: git apply failed: error: b.go: already exists in working directory", "already_exists"},
-		{"corrupt patch", "failed to sync changes to sandbox: git apply failed: error: corrupt patch at line 9", "corrupt_patch"},
-		{"lfs changed", "3 LFS file(s) changed locally and cannot be synced to the sandbox", "lfs_changed"},
-		{"unclassified", "failed to apply patch on sandbox: connection reset", "unknown"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, git.PatchFailureReason(fmt.Errorf("%s", tc.msg)))
-		})
-	}
 }
 
 func TestIsAncestor(t *testing.T) {
@@ -745,7 +846,8 @@ func TestIsAncestor(t *testing.T) {
 	t.Run("returns false when candidate is descendant of HEAD", func(t *testing.T) {
 		repo, firstSHA := repoFixture(t, "testdata/IsAncestor-linear")
 		client := &git.Client{Binary: "git", Dir: repo}
-		headSHA := client.GetHead()
+		headSHA, err := client.GetHeadCommit()
+		require.NoError(t, err)
 		require.False(t, client.IsAncestor(headSHA, firstSHA))
 	})
 
@@ -802,63 +904,4 @@ func TestApplyPatch(t *testing.T) {
 		require.Equal(t, "new\n", string(content))
 		require.Equal(t, repo, client.ApplyPatchReject(patch).Dir)
 	})
-}
-
-func TestCommitMismatchNote(t *testing.T) {
-	t.Run("returns note with short SHAs when commits differ", func(t *testing.T) {
-		note := git.CommitMismatchNote(
-			"aaaaaaa1111111222222233333334444444",
-			"bbbbbbb5555555666666677777778888888",
-		)
-		require.Equal(t, "Note: you're currently on commit aaaaaaa but the most recent run on this branch was for commit bbbbbbb", note)
-	})
-
-	t.Run("returns empty when commits match exactly", func(t *testing.T) {
-		note := git.CommitMismatchNote(
-			"abc123def456",
-			"abc123def456",
-		)
-		require.Equal(t, "", note)
-	})
-
-	t.Run("returns empty when head is a prefix of run commit", func(t *testing.T) {
-		note := git.CommitMismatchNote(
-			"abc123d",
-			"abc123def456789",
-		)
-		require.Equal(t, "", note)
-	})
-
-	t.Run("returns empty when run commit is a prefix of head", func(t *testing.T) {
-		note := git.CommitMismatchNote(
-			"abc123def456789",
-			"abc123d",
-		)
-		require.Equal(t, "", note)
-	})
-
-	t.Run("preserves short SHAs when already short", func(t *testing.T) {
-		note := git.CommitMismatchNote("abc", "def")
-		require.Equal(t, "Note: you're currently on commit abc but the most recent run on this branch was for commit def", note)
-	})
-}
-
-func TestRepoNameFromOriginUrl(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{"SSH URL", "git@github.com:rwx-cloud/rwx.git", "rwx"},
-		{"HTTPS URL", "https://github.com/rwx-cloud/rwx.git", "rwx"},
-		{"SSH URL without .git suffix", "git@github.com:rwx-cloud/rwx", "rwx"},
-		{"HTTPS URL without .git suffix", "https://github.com/rwx-cloud/rwx", "rwx"},
-		{"empty string", "", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.expected, git.RepoNameFromOriginUrl(tt.input))
-		})
-	}
 }

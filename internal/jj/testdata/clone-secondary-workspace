@@ -1,0 +1,19 @@
+#!/bin/bash
+set -euo pipefail
+
+git init -q -b main origin
+cd origin
+printf 'hello\n' > base.txt
+git add -A
+git commit -qm "base commit"
+
+# The base commit patches are expected to be based on.
+git rev-parse HEAD
+cd ..
+
+jj git clone $COLOCATE origin repo
+cd repo
+
+# A secondary workspace has no .jj/repo directory of its own — only a file
+# pointing back at this one's.
+jj workspace add ../workspace

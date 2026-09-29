@@ -26,9 +26,6 @@ var (
 	dispatchCmd = &cobra.Command{
 		GroupID: "api",
 		Args:    cobra.ExactArgs(1),
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return requireAccessToken()
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dispatchKey := args[0]
 
@@ -49,7 +46,10 @@ var (
 				return err
 			}
 
-			stopDispatchSpinner := cli.Spin("Waiting for dispatch to start...", service.StdoutIsTTY, service.Stdout)
+			var stopDispatchSpinner func()
+			if !useJson {
+				stopDispatchSpinner = cli.Spin("Waiting for dispatch to start...", service.StdoutIsTTY, service.Stdout)
+			}
 
 			ticker := time.NewTicker(time.Second)
 			defer ticker.Stop()
@@ -62,7 +62,9 @@ var (
 					continue
 				}
 
-				stopDispatchSpinner()
+				if stopDispatchSpinner != nil {
+					stopDispatchSpinner()
+				}
 				if err != nil {
 					return err
 				}

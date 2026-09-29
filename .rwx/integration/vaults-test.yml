@@ -1,0 +1,88 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.2.0
+
+tasks:
+  - key: code
+    call: git/clone 2.1.0
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: test-vaults-list
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      output=$(rwx vaults list --json)
+
+      echo "$output" | jq -e '
+        (.Vaults | type == "array") and
+        any(.Vaults[]; .Name == "rwx_cli_development") and
+        all(.Vaults[];
+          (.Name | type == "string") and
+          (.LockStatus == "locked" or .LockStatus == "unlocked") and
+          (.RepositoryPermissions | type == "array") and
+          all(.RepositoryPermissions[];
+            (.RepositorySlug | type == "string") and
+            (.BranchPattern | type == "string")
+          )
+        )
+      ' >/dev/null
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+
+  - key: test-vault-secrets-list
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      output=$(rwx vaults secrets list --vault rwx_cli_development --json)
+
+      echo "$output" | jq -e '
+        (.Secrets | type == "array") and
+        all(.Secrets[];
+          (.Name | type == "string") and
+          (.Description == null or (.Description | type == "string")) and
+          (has("Secret") | not) and
+          (has("Value") | not)
+        )
+      ' >/dev/null
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+
+  - key: test-vault-vars-list
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      output=$(rwx vaults vars list --vault rwx_cli_development --json)
+
+      echo "$output" | jq -e '
+        (.Vars | type == "array") and
+        all(.Vars[];
+          (.Name | type == "string") and
+          (.Value | type == "string")
+        )
+      ' >/dev/null
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}

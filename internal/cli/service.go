@@ -12,8 +12,8 @@ import (
 	semver "github.com/Masterminds/semver/v3"
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
-	"github.com/rwx-cloud/rwx/internal/git"
 	"github.com/rwx-cloud/rwx/internal/skill"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 	"github.com/rwx-cloud/rwx/internal/versions"
 )
 
@@ -550,9 +550,9 @@ func (s Service) ResolveRunIDFromGitContext(overrides ...ResolveRunIDConfig) (st
 
 	branchName := cfg.BranchName
 	if branchName == "" && cfg.CommitSha == "" {
-		branchName = s.GitClient.GetBranch()
+		branchName = s.VCSClient.GetBranch()
 	}
-	repositoryName := git.RepoNameFromOriginUrl(s.GitClient.GetOriginUrl())
+	repositoryName := vcs.RepoNameFromOriginUrl(s.VCSClient.GetOriginUrl())
 	if cfg.RepositoryName != "" {
 		repositoryName = cfg.RepositoryName
 	}

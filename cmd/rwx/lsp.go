@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 
+	"github.com/rwx-cloud/rwx/internal/accesstoken"
 	"github.com/rwx-cloud/rwx/internal/lsp"
 	"github.com/spf13/cobra"
 )
@@ -18,7 +19,11 @@ var (
 		Use:   "serve",
 		Short: "Start an LSP server",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			exitCode, err := lsp.Serve(telemetryCollector)
+			token, err := accesstoken.Get(accessTokenBackend, AccessToken)
+			if err != nil {
+				return err
+			}
+			exitCode, err := lsp.Serve(telemetryCollector, token)
 			if err != nil {
 				return err
 			}

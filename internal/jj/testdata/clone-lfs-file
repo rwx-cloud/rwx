@@ -1,0 +1,19 @@
+#!/bin/bash
+set -euo pipefail
+
+git init -q -b main origin
+cd origin
+printf 'hello\n' > base.txt
+printf '\000\001\002\377\376bin\000\n' > seed.bin
+git add -A
+git commit -qm "base commit"
+
+# The base commit patches are expected to be based on.
+git rev-parse HEAD
+cd ..
+
+jj git clone $COLOCATE origin repo
+cd repo
+
+printf '*.bin filter=lfs diff=lfs merge=lfs -text\n' > .gitattributes
+printf '\000\001\002\377\376bin\000\001\n' > seed.bin

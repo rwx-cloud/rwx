@@ -488,23 +488,25 @@ func TestSandboxStorage_LocksCreateGitignore(t *testing.T) {
 
 func TestEncodeDecodeCliState(t *testing.T) {
 	t.Run("round-trips correctly", func(t *testing.T) {
-		encoded := cli.EncodeCliState("main", "/home/user/project/.rwx/sandbox.yml")
+		encoded := cli.EncodeCliState("main", "/home/user/project/.rwx/sandbox.yml", "github.com/rwx-cloud/rwx")
 		state, err := cli.DecodeCliState(encoded)
 		require.NoError(t, err)
 		require.Equal(t, "main", state.Branch)
 		require.Equal(t, "/home/user/project/.rwx/sandbox.yml", state.ConfigFile)
+		require.Equal(t, "github.com/rwx-cloud/rwx", state.Repository)
 	})
 
 	t.Run("handles empty fields", func(t *testing.T) {
-		encoded := cli.EncodeCliState("", "")
+		encoded := cli.EncodeCliState("", "", "")
 		state, err := cli.DecodeCliState(encoded)
 		require.NoError(t, err)
 		require.Equal(t, "", state.Branch)
 		require.Equal(t, "", state.ConfigFile)
+		require.Equal(t, "", state.Repository)
 	})
 
 	t.Run("handles special characters", func(t *testing.T) {
-		encoded := cli.EncodeCliState("feature/test-branch", "/path/with spaces/config.yml")
+		encoded := cli.EncodeCliState("feature/test-branch", "/path/with spaces/config.yml", "github.com/example/repo")
 		state, err := cli.DecodeCliState(encoded)
 		require.NoError(t, err)
 		require.Equal(t, "feature/test-branch", state.Branch)
@@ -513,7 +515,7 @@ func TestEncodeDecodeCliState(t *testing.T) {
 
 	t.Run("decodes old format with cwd gracefully", func(t *testing.T) {
 		// Old CliState payloads include "cwd" — the field is silently ignored
-		encoded := cli.EncodeCliState("main", "/project/.rwx/sandbox.yml")
+		encoded := cli.EncodeCliState("main", "/project/.rwx/sandbox.yml", "")
 		state, err := cli.DecodeCliState(encoded)
 		require.NoError(t, err)
 		require.Equal(t, "main", state.Branch)

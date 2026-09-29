@@ -33,9 +33,6 @@ FILE PATCHING
   produce an error. Commit and push those changes before starting the sandbox.
 `,
 	Args: cobra.MaximumNArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configFile := cli.FindDefaultSandboxConfigFile()
 		if len(args) > 0 {
@@ -173,9 +170,6 @@ CONFIG FILE
   sandbox entry point, and must be dependent on a task that uses git/clone.
 `,
 	Args: cobra.ArbitraryArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get command args after --
 		dashIndex := cmd.ArgsLenAtDash()
@@ -243,7 +237,7 @@ CONFIG FILE
 }
 
 var sandboxPushCmd = &cobra.Command{
-	Use:   "push",
+	Use:   "push [config-file]",
 	Short: "Push local changes to a sandbox",
 	Long: `Sync local changes to an existing sandbox without running a command.
 
@@ -255,15 +249,17 @@ untracked changes. Changes made only in the sandbox are not preserved.
 
 By default, push targets the sandbox for the current directory and Git branch.
 Use --id to target a specific sandbox.`,
-	Args: cobra.NoArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var configFile string
+		if len(args) > 0 {
+			configFile = cli.AbsConfigFile(args[0])
+		}
 		useJson := useJsonOutput()
 		result, err := service.SyncSandbox(cli.SyncSandboxConfig{
-			RunID: sandboxRunID,
-			Json:  useJson,
+			ConfigFile: configFile,
+			RunID:      sandboxRunID,
+			Json:       useJson,
 		})
 		if err != nil {
 			return err
@@ -282,7 +278,7 @@ Use --id to target a specific sandbox.`,
 }
 
 var sandboxBackgroundCmd = &cobra.Command{
-	Use:   "background -- <command>",
+	Use:   "background [config-file] -- <command>",
 	Short: "Start or replace a sandbox background process",
 	Long: `Start or replace a named process in an existing sandbox.
 
@@ -293,20 +289,22 @@ stops.
 Use --port to forward a sandbox port to localhost. Use --id to target a
 specific sandbox.`,
 	Args: cobra.ArbitraryArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dashIndex := cmd.ArgsLenAtDash()
 		if dashIndex < 0 || dashIndex >= len(args) {
-			return fmt.Errorf("No command specified. Usage: rwx sandbox background -- <command>")
+			return fmt.Errorf("No command specified. Usage: rwx sandbox background [config-file] -- <command>")
 		}
-		if dashIndex != 0 {
-			return fmt.Errorf("Unexpected arguments before '--'. Usage: rwx sandbox background -- <command>")
+		if dashIndex > 1 {
+			return fmt.Errorf("Unexpected arguments before '--'. Usage: rwx sandbox background [config-file] -- <command>")
+		}
+		var configFile string
+		if dashIndex == 1 {
+			configFile = cli.AbsConfigFile(args[0])
 		}
 
 		useJson := useJsonOutput()
 		result, err := service.BackgroundSandbox(cli.BackgroundSandboxConfig{
+			ConfigFile: configFile,
 			Command:    args[dashIndex:],
 			Name:       sandboxBackgroundName,
 			TargetPort: sandboxBackgroundPort,
@@ -331,22 +329,57 @@ specific sandbox.`,
 }
 
 var sandboxBackgroundRestartCmd = &cobra.Command{
-	Use:   "restart",
+	Use:   "restart [config-file]",
 	Short: "Sync changes and restart a sandbox background process",
 	Long: `Sync the local Git state and restart a named process, reusing its saved
 command and sandbox port. Changes made only in the sandbox are not preserved.
 If the process forwards a port, restart reopens the local tunnel and prints its
 URL.`,
-	Args: cobra.NoArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var configFile string
+		if len(args) > 0 {
+			configFile = cli.AbsConfigFile(args[0])
+		}
 		useJson := useJsonOutput()
 		result, err := service.RestartSandboxBackground(cli.SandboxBackgroundConfig{
-			Name:  sandboxBackgroundName,
-			RunID: sandboxRunID,
-			Json:  useJson,
+			ConfigFile: configFile,
+			Name:       sandboxBackgroundName,
+			RunID:      sandboxRunID,
+			Json:       useJson,
+		})
+		if err != nil {
+			return err
+		}
+		if useJson {
+			output, err := json.Marshal(result)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stdout, string(output))
+		}
+		return nil
+	},
+}
+
+var sandboxTunnelCmd = &cobra.Command{
+	Use:   "tunnel [config-file]",
+	Short: "Expose a sandbox background process through a local tunnel",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		var configFile string
+		if len(args) > 0 {
+			configFile = cli.AbsConfigFile(args[0])
+		}
+		useJson := useJsonOutput()
+		result, err := service.TunnelSandbox(cli.TunnelSandboxConfig{
+			ConfigFile: configFile,
+			Key:        sandboxTunnelKey,
+			TargetPort: sandboxTunnelPort,
+			LocalPort:  sandboxTunnelLocalPort,
+			Scheme:     sandboxTunnelScheme,
+			RunID:      sandboxRunID,
+			Json:       useJson,
 		})
 		if err != nil {
 			return err
@@ -363,18 +396,20 @@ URL.`,
 }
 
 var sandboxBackgroundStopCmd = &cobra.Command{
-	Use:   "stop",
+	Use:   "stop [config-file]",
 	Short: "Stop a sandbox background process",
-	Args:  cobra.NoArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var configFile string
+		if len(args) > 0 {
+			configFile = cli.AbsConfigFile(args[0])
+		}
 		useJson := useJsonOutput()
 		result, err := service.StopSandboxBackground(cli.SandboxBackgroundConfig{
-			Name:  sandboxBackgroundName,
-			RunID: sandboxRunID,
-			Json:  useJson,
+			ConfigFile: configFile,
+			Name:       sandboxBackgroundName,
+			RunID:      sandboxRunID,
+			Json:       useJson,
 		})
 		if err != nil {
 			return err
@@ -391,24 +426,26 @@ var sandboxBackgroundStopCmd = &cobra.Command{
 }
 
 var sandboxBackgroundLogsCmd = &cobra.Command{
-	Use:   "logs",
+	Use:   "logs [config-file]",
 	Short: "Show logs for a sandbox background process",
 	Long: `Show logs for an ad hoc background process or one declared in the sandbox
 configuration. Use --follow to stream new output.`,
-	Args: cobra.NoArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var configFile string
+		if len(args) > 0 {
+			configFile = cli.AbsConfigFile(args[0])
+		}
 		useJson := useJsonOutput()
 		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		result, err := service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
-			Context: ctx,
-			Name:    sandboxBackgroundName,
-			RunID:   sandboxRunID,
-			Json:    useJson,
-			Follow:  sandboxBackgroundFollow,
+			ConfigFile: configFile,
+			Context:    ctx,
+			Name:       sandboxBackgroundName,
+			RunID:      sandboxRunID,
+			Json:       useJson,
+			Follow:     sandboxBackgroundFollow,
 		})
 		if err != nil {
 			return err
@@ -428,9 +465,6 @@ var sandboxListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List sandbox sessions with status",
 	Args:  cobra.NoArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
 		result, err := service.ListSandboxes(cli.ListSandboxesConfig{
@@ -456,9 +490,6 @@ var sandboxStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop a sandbox session",
 	Args:  cobra.NoArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		useJson := useJsonOutput()
 		result, err := service.StopSandbox(cli.StopSandboxConfig{
@@ -526,9 +557,6 @@ var sandboxResetCmd = &cobra.Command{
 	Use:   "reset [config-file]",
 	Short: "Stop and restart a sandbox",
 	Args:  cobra.MaximumNArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireAccessToken()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configFile := cli.FindDefaultSandboxConfigFile()
 		if len(args) > 0 {
@@ -584,8 +612,19 @@ var (
 	sandboxBackgroundLocalPort int
 	sandboxBackgroundScheme    string
 	sandboxBackgroundFollow    bool
+	sandboxTunnelKey           string
+	sandboxTunnelPort          int
+	sandboxTunnelLocalPort     int
+	sandboxTunnelScheme        string
 	sandboxInitParams          []string
 )
+
+func requireExperimentalSandboxAccess() error {
+	if os.Getenv("RWX_EXPERIMENTAL") != "true" {
+		return fmt.Errorf("this command is experimental; set RWX_EXPERIMENTAL=true to use it")
+	}
+	return nil
+}
 
 func init() {
 	sandboxCmd.AddCommand(sandboxInitCmd)
@@ -596,6 +635,7 @@ func init() {
 	sandboxBackgroundCmd.AddCommand(sandboxBackgroundStopCmd)
 	sandboxBackgroundCmd.AddCommand(sandboxBackgroundLogsCmd)
 	sandboxCmd.AddCommand(sandboxBackgroundCmd)
+	sandboxCmd.AddCommand(sandboxTunnelCmd)
 	sandboxCmd.AddCommand(sandboxListCmd)
 	sandboxCmd.AddCommand(sandboxStopCmd)
 	sandboxCmd.AddCommand(sandboxResetCmd)
@@ -623,12 +663,35 @@ func init() {
 
 	// background flags
 	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")
+	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxBackgroundName, "key", "", "Key of the sandbox background process")
 	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxBackgroundName, "name", "", "Name of the sandbox background process")
+	if err := sandboxBackgroundCmd.PersistentFlags().MarkDeprecated("name", "use --key instead"); err != nil {
+		panic(err)
+	}
 	sandboxBackgroundCmd.Flags().IntVar(&sandboxBackgroundPort, "port", 0, "Sandbox port to forward locally")
 	sandboxBackgroundCmd.Flags().IntVar(&sandboxBackgroundLocalPort, "local-port", 0, "Local port to use (default: allocate or reuse one)")
 	sandboxBackgroundCmd.Flags().StringVar(&sandboxBackgroundScheme, "scheme", "", "URL scheme for the forwarded port: http or https (default: http)")
 	sandboxBackgroundLogsCmd.Flags().BoolVarP(&sandboxBackgroundFollow, "follow", "f", false, "Follow log output")
-	if err := sandboxBackgroundCmd.MarkPersistentFlagRequired("name"); err != nil {
+	for _, command := range []*cobra.Command{
+		sandboxBackgroundCmd,
+		sandboxBackgroundRestartCmd,
+		sandboxBackgroundStopCmd,
+		sandboxBackgroundLogsCmd,
+	} {
+		command.MarkFlagsOneRequired("name", "key")
+		command.MarkFlagsMutuallyExclusive("name", "key")
+	}
+
+	// tunnel flags
+	sandboxTunnelCmd.Flags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")
+	sandboxTunnelCmd.Flags().StringVar(&sandboxTunnelKey, "key", "", "Key of the managed sandbox process to expose")
+	sandboxTunnelCmd.Flags().IntVar(&sandboxTunnelPort, "port", 0, "Sandbox port to forward locally")
+	sandboxTunnelCmd.Flags().IntVar(&sandboxTunnelLocalPort, "local-port", 0, "Local port to use (default: allocate or reuse one)")
+	sandboxTunnelCmd.Flags().StringVar(&sandboxTunnelScheme, "scheme", "", "URL scheme for the forwarded port: http or https (default: http)")
+	if err := sandboxTunnelCmd.MarkFlagRequired("key"); err != nil {
+		panic(err)
+	}
+	if err := sandboxTunnelCmd.MarkFlagRequired("port"); err != nil {
 		panic(err)
 	}
 

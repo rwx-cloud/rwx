@@ -177,6 +177,66 @@ func (s Service) ShowVar(cfg ShowVarConfig) (*ShowVarResult, error) {
 	return result, nil
 }
 
+type ListVarsConfig struct {
+	Vault string
+	Json  bool
+}
+
+func (c ListVarsConfig) Validate() error {
+	if c.Vault == "" {
+		return errors.New("the vault name must be provided")
+	}
+	return nil
+}
+
+type VarInfo struct {
+	Name  string
+	Value string
+}
+
+type ListVarsResult struct {
+	Vars []VarInfo
+}
+
+func (s Service) ListVars(cfg ListVarsConfig) (*ListVarsResult, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, errors.Wrap(err, "validation failed")
+	}
+
+	apiResult, err := s.APIClient.ListVars(api.ListVarsConfig{VaultName: cfg.Vault})
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to list vars")
+	}
+
+	vars := make([]VarInfo, len(apiResult.Vars))
+	for i, variable := range apiResult.Vars {
+		vars[i] = VarInfo{Name: variable.Name, Value: variable.Value}
+	}
+	result := &ListVarsResult{Vars: vars}
+
+	if cfg.Json {
+		if err := json.NewEncoder(s.Stdout).Encode(result); err != nil {
+			return nil, errors.Wrap(err, "unable to encode JSON output")
+		}
+	} else if len(vars) == 0 {
+		fmt.Fprintf(s.Stdout, "No vars found in vault %q.\n", cfg.Vault)
+	} else {
+		nameWidth := len("NAME")
+		for _, variable := range vars {
+			if len(variable.Name) > nameWidth {
+				nameWidth = len(variable.Name)
+			}
+		}
+		format := fmt.Sprintf("%%-%ds  %%s\n", nameWidth)
+		fmt.Fprintf(s.Stdout, format, "NAME", "VALUE")
+		for _, variable := range vars {
+			fmt.Fprintf(s.Stdout, format, variable.Name, variable.Value)
+		}
+	}
+
+	return result, nil
+}
+
 type DeleteVarConfig struct {
 	VarName string
 	Vault   string

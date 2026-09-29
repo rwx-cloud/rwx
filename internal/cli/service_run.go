@@ -10,10 +10,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
-	"github.com/rwx-cloud/rwx/internal/git"
+	"github.com/rwx-cloud/rwx/internal/vcs"
 )
 
 // runDefinitionOutsideRwxDir reports whether the resolved run definition file
@@ -165,31 +166,42 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		return nil, err
 	}
 
-	gitInstalled := s.GitClient.IsInstalled()
-	gitDirectory := s.GitClient.IsInsideWorkTree()
+	runDefinitionBytes, err := os.ReadFile(runDefinitionPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to read run definition %q", runDefinitionPath)
+	}
+	if !utf8.Valid(runDefinitionBytes) {
+		return nil, fmt.Errorf("run definition %q is not valid UTF-8", runDefinitionPath)
+	}
+
+	missingDependency := s.VCSClient.MissingDependency()
+	vcsInstalled := missingDependency == ""
+	insideRepository := s.VCSClient.IsInsideWorkTree()
 	var errorMessage string
 	var sha, branch, originUrl string
 
-	// Track whether we can generate patches (requires working git)
-	gitAvailable := gitInstalled && gitDirectory
+	// Track whether we can generate patches (requires a working VCS)
+	vcsAvailable := vcsInstalled && insideRepository
 
-	if gitAvailable {
+	if vcsAvailable {
 		var err error
-		sha, err = s.GitClient.GetCommit()
+		sha, err = s.VCSClient.GetCommit()
 		if err != nil {
 			errorMessage = err.Error()
-			gitAvailable = false
+			vcsAvailable = false
 		} else {
-			branch = s.GitClient.GetBranch()
-			originUrl = s.GitClient.GetOriginUrl()
+			branch = s.VCSClient.GetBranch()
+			originUrl = s.VCSClient.GetOriginUrl()
 		}
-	} else if !gitInstalled {
-		errorMessage = "Git is not installed"
-	} else if !gitDirectory {
-		errorMessage = "You are not in a git repository"
+	} else if !vcsInstalled {
+		// Name the executable that's actually missing: the jj backend shells out
+		// to git for the object store, so either one can be the culprit.
+		errorMessage = fmt.Sprintf("%s is not installed", missingDependency)
+	} else if !insideRepository {
+		errorMessage = "You are not in a source code repository"
 	}
 
-	patchFile := git.PatchFile{}
+	patchFile := vcs.PatchFile{}
 
 	// When there's no .rwx directory, create a temporary one for patches and to set run.dir
 	var tempRwxDir string
@@ -215,8 +227,8 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 	stopSignalCleanup := removePathsOnSignal(tempRwxDir, patchDir)
 	defer stopSignalCleanup()
 
-	// Generate patches if enabled and git is available
-	patchable := cfg.Patchable && gitAvailable
+	// Generate patches if enabled and a VCS is available
+	patchable := cfg.Patchable && vcsAvailable
 	if os.Getenv("RWX_DISABLE_GIT_PATCH") != "" {
 		patchable = false
 	}
@@ -236,8 +248,8 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 	for _, gitParam := range resolveResult.GitParams {
 		if _, exists := cfg.InitParameters[gitParam]; exists {
 			if patchable {
-				patch, _, patchErr := s.GitClient.GeneratePatch(
-					runPatchPathspec(s.GitClient.GetTopLevel(), runDefinitionPath, relativeRunDefinitionPath),
+				patch, _, patchErr := s.VCSClient.GeneratePatch(
+					runPatchPathspec(s.VCSClient.GetTopLevel(), runDefinitionPath, relativeRunDefinitionPath),
 				)
 				if patchErr == nil && len(patch) > 0 {
 					fmt.Fprintf(s.Stderr, "Skipping the git patch for uncommitted changes because %q was explicitly specified\n\n", gitParam)
@@ -250,9 +262,9 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 
 	if patchable {
 		var patchErr error
-		patchFile, patchErr = s.GitClient.GeneratePatchFile(
+		patchFile, patchErr = s.VCSClient.GeneratePatchFile(
 			patchDir,
-			runPatchPathspec(s.GitClient.GetTopLevel(), runDefinitionPath, relativeRunDefinitionPath),
+			runPatchPathspec(s.VCSClient.GetTopLevel(), runDefinitionPath, relativeRunDefinitionPath),
 		)
 		if patchErr != nil {
 			errorMessage = patchErr.Error()
@@ -265,7 +277,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 				"exit_code":      -1,
 				"reason":         "unknown",
 			}
-			var pe *git.PatchError
+			var pe *vcs.PatchError
 			if errors.As(patchErr, &pe) {
 				telemetryProps["failed_command"] = pe.Command
 				telemetryProps["exit_code"] = pe.ExitCode
@@ -278,8 +290,19 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		}
 	}
 
-	// Load directory entries
-	entries, err := rwxDirectoryEntries(rwxDirectoryPath)
+	// Filter before size accounting, and warn only once if files are reloaded.
+	warnedPaths := make(map[string]bool)
+	includeUploadEntry := func(entry RwxDirectoryEntry) bool {
+		if utf8.ValidString(entry.FileContents) {
+			return true
+		}
+		if !warnedPaths[entry.Path] {
+			fmt.Fprintf(s.Stderr, "Warning: skipping %q because it is not valid UTF-8\n\n", filepath.Join(rwxDirectoryPath, entry.Path))
+			warnedPaths[entry.Path] = true
+		}
+		return false
+	}
+	entries, err := readRwxDirectoryEntriesMatching([]string{rwxDirectoryPath}, rwxDirectoryPath, includeUploadEntry)
 	if err != nil {
 		if errors.Is(err, errors.ErrFileNotExists) && tempRwxDir == "" {
 			// User explicitly specified a directory that doesn't exist
@@ -306,7 +329,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		if err != nil {
 			return errors.Wrapf(err, "unable to reload %q", relativeRunDefinitionPath)
 		}
-		rwxDirectoryEntries, err := rwxDirectoryEntries(rwxDirectoryPath)
+		rwxDirectoryEntries, err := readRwxDirectoryEntriesMatching([]string{rwxDirectoryPath}, rwxDirectoryPath, includeUploadEntry)
 		if err != nil && !errors.Is(err, errors.ErrFileNotExists) {
 			return errors.Wrapf(err, "unable to reload rwx directory %q", rwxDirectoryPath)
 		}
@@ -393,8 +416,8 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 			LFSFiles:       patchFile.LFSChangedFiles.Files,
 			LFSCount:       patchFile.LFSChangedFiles.Count,
 			ErrorMessage:   errorMessage,
-			GitDirectory:   gitDirectory,
-			GitInstalled:   gitInstalled,
+			GitDirectory:   insideRepository,
+			GitInstalled:   vcsInstalled,
 		},
 	})
 

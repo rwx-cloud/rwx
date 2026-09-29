@@ -6,6 +6,7 @@ import (
 	rwx "github.com/rwx-cloud/rwx/cmd/rwx"
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
+	"github.com/rwx-cloud/rwx/internal/mocks"
 	"github.com/stretchr/testify/require"
 )
 
@@ -147,5 +148,27 @@ func TestMergeEnrichedResults(t *testing.T) {
 		merged := rwx.MergeEnrichedResults(base, map[string]any{})
 
 		require.Equal(t, map[string]any{"RunID": "abc123", "ResultStatus": "failed"}, merged)
+	})
+}
+
+func TestCommitDriftNote(t *testing.T) {
+	const runCommit = "1111111111111111111111111111111111111111"
+	const local = "2222222222222222222222222222222222222222"
+
+	t.Run("is silent when the run was made from the last commit", func(t *testing.T) {
+		client := &mocks.VCS{MockGetLastCommit: runCommit}
+		require.Empty(t, rwx.CommitDriftNote(client, runCommit))
+	})
+
+	t.Run("warns when the last commit differs from the run's", func(t *testing.T) {
+		client := &mocks.VCS{MockGetLastCommit: local}
+		note := rwx.CommitDriftNote(client, runCommit)
+		require.Contains(t, note, "you're currently on commit "+local[:7])
+		require.Contains(t, note, "was for commit "+runCommit[:7])
+	})
+
+	t.Run("is silent when the last commit cannot be resolved", func(t *testing.T) {
+		require.Empty(t, rwx.CommitDriftNote(&mocks.VCS{}, runCommit))
+		require.Empty(t, rwx.CommitDriftNote(&mocks.VCS{MockGetLastCommitError: errors.New("nope")}, runCommit))
 	})
 }

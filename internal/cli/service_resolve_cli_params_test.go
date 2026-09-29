@@ -129,9 +129,36 @@ tasks:
 		result, err := ResolveCliParamsForFile(tmpFile.Name(), "")
 		require.NoError(t, err)
 		require.False(t, result.Rewritten)
-		require.Equal(t, []string{"commit-sha", "sha"}, result.GitParams)
+		// Only the CLI trigger's own params are reported: a name used solely by
+		// another trigger is not an init param of a CLI run.
+		require.Equal(t, []string{"sha"}, result.GitParams)
 
 		fileContent, err := os.ReadFile(tmpFile.Name())
+		require.NoError(t, err)
+		require.Equal(t, content, string(fileContent))
+	})
+
+	t.Run("no changes when CLI already has git params and a trigger derives a value from the sha", func(t *testing.T) {
+		content := `
+on:
+  github:
+    push:
+      init:
+        commit-sha: ${{ event.git.sha }}
+        docker-tag: rwx-${{ event.git.sha }}
+  cli:
+    init:
+      commit-sha: ${{ event.git.sha }}
+`
+		file := t.TempDir() + "/rwx.yml"
+		require.NoError(t, os.WriteFile(file, []byte(content), 0o644))
+
+		result, err := ResolveCliParamsForFile(file, "")
+		require.NoError(t, err)
+		require.False(t, result.Rewritten)
+		require.Equal(t, []string{"commit-sha"}, result.GitParams)
+
+		fileContent, err := os.ReadFile(file)
 		require.NoError(t, err)
 		require.Equal(t, content, string(fileContent))
 	})
@@ -720,5 +747,128 @@ tasks:
 		require.Error(t, err)
 		require.False(t, result.Rewritten)
 		require.Contains(t, err.Error(), "multiple event triggers")
+	})
+
+	t.Run("does not error on conflicting event param names when CLI init already declares the sha", func(t *testing.T) {
+		content := `
+on:
+  github:
+    push:
+      init:
+        sha: ${{ event.git.sha }}
+    pull_request:
+      init:
+        other-sha: ${{ event.git.sha }}
+  cli:
+    init:
+      commit-sha: ${{ event.git.sha }}
+`
+		file := t.TempDir() + "/rwx.yml"
+		require.NoError(t, os.WriteFile(file, []byte(content), 0o644))
+
+		result, err := ResolveCliParamsForFile(file, "")
+		require.NoError(t, err)
+		require.False(t, result.Rewritten)
+		require.Equal(t, []string{"commit-sha"}, result.GitParams)
+
+		fileContent, err := os.ReadFile(file)
+		require.NoError(t, err)
+		require.Equal(t, content, string(fileContent))
+	})
+
+	t.Run("adds CLI trigger with only the sha param when another init param derives a value from the sha", func(t *testing.T) {
+		content := `
+on:
+  github:
+    push:
+      init:
+        commit-sha: ${{ event.git.sha }}
+        docker-tag: rwx-${{ event.git.sha }}
+`
+		file := t.TempDir() + "/rwx.yml"
+		require.NoError(t, os.WriteFile(file, []byte(content), 0o644))
+
+		result, err := ResolveCliParamsForFile(file, "")
+		require.NoError(t, err)
+		require.True(t, result.Rewritten)
+		require.Equal(t, []string{"commit-sha"}, result.GitParams)
+
+		fileContent, err := os.ReadFile(file)
+		require.NoError(t, err)
+		require.Equal(t, content+`  cli:
+    init:
+      commit-sha: ${{ event.git.sha }}
+`, string(fileContent))
+	})
+
+	t.Run("no changes when the only sha reference derives a value", func(t *testing.T) {
+		content := `
+on:
+  github:
+    push:
+      init:
+        docker-tag: rwx-${{ event.git.sha }}
+`
+		file := t.TempDir() + "/rwx.yml"
+		require.NoError(t, os.WriteFile(file, []byte(content), 0o644))
+
+		result, err := ResolveCliParamsForFile(file, "")
+		require.NoError(t, err)
+		require.False(t, result.Rewritten)
+		require.Nil(t, result.GitParams)
+
+		fileContent, err := os.ReadFile(file)
+		require.NoError(t, err)
+		require.Equal(t, content, string(fileContent))
+	})
+
+	t.Run("adds sha param when CLI init only references other git event data", func(t *testing.T) {
+		content := `
+on:
+  github:
+    push:
+      init:
+        commit-sha: ${{ event.git.sha }}
+  cli:
+    init:
+      branch: ${{ event.git.branch }}
+`
+		file := t.TempDir() + "/rwx.yml"
+		require.NoError(t, os.WriteFile(file, []byte(content), 0o644))
+
+		result, err := ResolveCliParamsForFile(file, "")
+		require.NoError(t, err)
+		require.True(t, result.Rewritten)
+		require.Equal(t, []string{"commit-sha"}, result.GitParams)
+
+		fileContent, err := os.ReadFile(file)
+		require.NoError(t, err)
+		require.Equal(t, content+`      commit-sha: ${{ event.git.sha }}
+`, string(fileContent))
+	})
+
+	t.Run("adds sha param when CLI init only derives a value from the sha", func(t *testing.T) {
+		content := `
+on:
+  github:
+    push:
+      init:
+        commit-sha: ${{ event.git.sha }}
+  cli:
+    init:
+      docker-tag: rwx-${{ event.git.sha }}
+`
+		file := t.TempDir() + "/rwx.yml"
+		require.NoError(t, os.WriteFile(file, []byte(content), 0o644))
+
+		result, err := ResolveCliParamsForFile(file, "")
+		require.NoError(t, err)
+		require.True(t, result.Rewritten)
+		require.Equal(t, []string{"commit-sha"}, result.GitParams)
+
+		fileContent, err := os.ReadFile(file)
+		require.NoError(t, err)
+		require.Equal(t, content+`      commit-sha: ${{ event.git.sha }}
+`, string(fileContent))
 	})
 }
