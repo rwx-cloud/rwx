@@ -8,6 +8,8 @@ import (
 )
 
 type API struct {
+	MockDisableApp                              func(string) error
+	MockEnableApp                               func(string) error
 	MockListCrons                               func() (*api.ListCronsResult, error)
 	MockShowCron                                func(string) (*api.CronResult, error)
 	MockPauseCron                               func(string) (*api.CronResult, error)
