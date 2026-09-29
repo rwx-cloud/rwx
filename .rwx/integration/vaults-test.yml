@@ -9,7 +9,7 @@ base:
 
 tasks:
   - key: code
-    call: git/clone 2.1.0
+    call: git/clone 2.2.0
     with:
       repository: https://github.com/rwx-cloud/rwx.git
       ref: ${{ init.ref }}
@@ -84,5 +84,115 @@ tasks:
           (.Value | type == "string")
         )
       ' >/dev/null
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+
+  - key: test-vault-oidc-token-lifecycle
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      vault_name="rwx_cli_development"
+      token_name="rwx-cli-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      updated_name="${token_name}-updated"
+      audience="https://rwx.com/oidc-tests/${token_name}"
+      updated_audience="${audience}/updated"
+      token_created=false
+      token_deleted=false
+      token_id=""
+      vault_id=""
+
+      cleanup() {
+        status=$?
+        trap - EXIT
+        if [ "$token_created" = true ] && [ "$token_deleted" = false ]; then
+          token_ref="${token_id:-$token_name}"
+          if ! rwx vaults oidc-tokens delete "$token_ref" --vault "$vault_name" --yes >/dev/null; then
+            echo "Failed to delete OIDC token $token_ref during cleanup" >&2
+            status=1
+          fi
+        fi
+        exit "$status"
+      }
+      trap cleanup EXIT
+
+      created=$(rwx vaults oidc-tokens create \
+        --vault "$vault_name" \
+        --name "$token_name" \
+        --audience "$audience" \
+        --json)
+      token_created=true
+      token_id=$(echo "$created" | jq -er '.ID | select(type == "string" and length > 0)')
+      vault_id=$(echo "$created" | jq -er '.Vault.ID | select(type == "string" and length > 0)')
+      echo "$created" | jq -e \
+        --arg token_id "$token_id" \
+        --arg vault_id "$vault_id" \
+        --arg vault_name "$vault_name" \
+        --arg token_name "$token_name" \
+        --arg audience "$audience" '
+          .ID == $token_id and
+          .Vault == {ID: $vault_id, Name: $vault_name} and
+          .Name == $token_name and
+          .Audience == $audience and
+          (.Subject | type == "string" and length > 0) and
+          (.Expression | type == "string" and length > 0) and
+          (.DocumentationURL | type == "string" and length > 0)
+        ' >/dev/null
+
+      listed=$(rwx vaults oidc-tokens list --vault "$vault_id" --json)
+      echo "$listed" | jq -e \
+        --arg token_id "$token_id" \
+        --arg vault_id "$vault_id" \
+        --arg token_name "$token_name" \
+        --arg audience "$audience" '
+          any(.OidcTokens[];
+            .ID == $token_id and
+            .Vault.ID == $vault_id and
+            .Name == $token_name and
+            .Audience == $audience
+          )
+        ' >/dev/null
+
+      shown=$(rwx vaults oidc-tokens show "$token_name" --vault "$vault_name" --json)
+      echo "$shown" | jq -e \
+        --arg token_id "$token_id" \
+        --arg vault_id "$vault_id" \
+        --arg token_name "$token_name" \
+        --arg audience "$audience" '
+          .ID == $token_id and
+          .Vault.ID == $vault_id and
+          .Name == $token_name and
+          .Audience == $audience
+        ' >/dev/null
+
+      updated=$(rwx vaults oidc-tokens update "$token_id" \
+        --vault "$vault_id" \
+        --name "$updated_name" \
+        --audience "$updated_audience" \
+        --json)
+      echo "$updated" | jq -e \
+        --arg token_id "$token_id" \
+        --arg vault_id "$vault_id" \
+        --arg updated_name "$updated_name" \
+        --arg updated_audience "$updated_audience" '
+          .ID == $token_id and
+          .Vault.ID == $vault_id and
+          .Name == $updated_name and
+          .Audience == $updated_audience
+        ' >/dev/null
+
+      deleted=$(rwx vaults oidc-tokens delete "$updated_name" --vault "$vault_name" --yes --json)
+      token_deleted=true
+      echo "$deleted" | jq -e \
+        --arg token_id "$token_id" \
+        --arg vault_id "$vault_id" \
+        --arg vault_name "$vault_name" \
+        --arg updated_name "$updated_name" '
+          . == {
+            ID: $token_id,
+            Vault: {ID: $vault_id, Name: $vault_name},
+            Name: $updated_name
+          }
+        ' >/dev/null
     env:
       RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
