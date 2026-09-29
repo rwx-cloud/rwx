@@ -1,0 +1,104 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.2.0
+
+tasks:
+  - key: code
+    call: git/clone 2.2.0
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: test-apps
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      endpoint="cli-app-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      run_id=""
+      fixture_ready=false
+
+      cleanup() {
+        status=$?
+        trap - EXIT
+        if [ -n "$run_id" ] && [ "$fixture_ready" = false ]; then
+          rwx runs cancel "$run_id" || true
+        fi
+        if ! rwx apps disable "$endpoint"; then
+          echo "Failed to disable test endpoint $endpoint during cleanup" >&2
+          status=1
+        fi
+        exit "$status"
+      }
+      trap cleanup EXIT
+
+      kickoff=$(rwx run "$RUN_DEF" --init "endpoint=$endpoint" --json)
+      run_id=$(echo "$kickoff" | jq -er '.RunID | select(. != null and . != "")')
+      echo "$kickoff" | jq -r '.RunURL' > "$RWX_LINKS/App fixture run"
+
+      result=$(rwx results "$run_id" --wait --json)
+      if ! echo "$result" | jq -e '.ResultStatus == "succeeded"' >/dev/null; then
+        echo "App fixture run did not succeed"
+        echo "$result"
+        exit 1
+      fi
+      fixture_ready=true
+
+      for action in disable enable; do
+        if [ "$action" = disable ]; then
+          expected_text="Disabled app endpoint \"$endpoint\"."
+          disabled=true
+        else
+          expected_text="Enabled app endpoint \"$endpoint\"."
+          disabled=false
+        fi
+
+        output=$(rwx apps "$action" "$endpoint")
+        if ! echo "$output" | grep -qF "$expected_text"; then
+          echo "Unexpected $action output: $output"
+          exit 1
+        fi
+
+        # Repeat in both cases: normalization belongs to Cloud, not the CLI.
+        uppercase_endpoint=$(printf '%s' "$endpoint" | tr '[:lower:]' '[:upper:]')
+        for name in "$endpoint" "$uppercase_endpoint"; do
+          output=$(rwx apps "$action" "$name" --json)
+          if ! echo "$output" | jq -e --arg endpoint "$name" --argjson disabled "$disabled" \
+            '. == {Endpoint: $endpoint, Disabled: $disabled}' >/dev/null; then
+            echo "Unexpected $action JSON: $output"
+            exit 1
+          fi
+        done
+
+        missing_endpoint="missing-$endpoint"
+        if output=$(rwx apps "$action" "$missing_endpoint" 2>&1); then
+          echo "Expected $action to fail for an unknown endpoint"
+          exit 1
+        fi
+        if ! echo "$output" | grep -qF "App endpoint \"$missing_endpoint\" not found."; then
+          echo "Unexpected not-found error: $output"
+          exit 1
+        fi
+      done
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RUN_DEF: ${{ run.dir }}/integration/apps-test/app.yml

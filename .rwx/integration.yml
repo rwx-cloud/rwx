@@ -33,6 +33,11 @@ tasks:
     init:
       ref: ${{ init.commit-sha }}
 
+  - key: run-rwx-apps-test
+    call: ${{ run.dir }}/integration/apps-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
   - key: run-rwx-dispatch-test
     call: ${{ run.dir }}/integration/dispatch-test.yml
     init:
