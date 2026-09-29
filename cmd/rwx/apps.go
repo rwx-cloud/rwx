@@ -15,7 +15,7 @@ var appsCmd = &cobra.Command{
 var appsDisableCmd = &cobra.Command{
 	Use:   "disable NAME",
 	Short: "Disable a preview app endpoint",
-	Long:  "Block a preview app endpoint, including all versions, and queue running instances for shutdown.",
+	Long:  "Disable a preview app endpoint, including all versions, and queue running instances for shutdown.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := service.DisableApp(cli.AppConfig{Endpoint: args[0], Json: useJsonOutput()})
@@ -26,7 +26,7 @@ var appsDisableCmd = &cobra.Command{
 var appsEnableCmd = &cobra.Command{
 	Use:   "enable NAME",
 	Short: "Enable a preview app endpoint",
-	Long:  "Restore a preview app endpoint's availability. Stopped apps cold-start on a subsequent visit; permanently expired versions remain expired. Enabling an already-enabled endpoint does not interrupt a running app.",
+	Long:  "Enable a preview app endpoint. Stopped apps cold-start on a subsequent visit; permanently expired versions remain expired. Enabling an already-enabled endpoint does not interrupt a running app.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := service.EnableApp(cli.AppConfig{Endpoint: args[0], Json: useJsonOutput()})
