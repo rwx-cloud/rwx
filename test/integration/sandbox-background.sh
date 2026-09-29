@@ -4,8 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/sandbox-helpers.sh"
 
-export RWX_EXPERIMENTAL=true
-
 preview_name="web"
 preview_port=3000
 preview_file="integration-background-preview.txt"
@@ -69,7 +67,7 @@ if [ "$restart_url" != "$preview_url" ]; then
 fi
 
 if [ "$restart_pid" = "$start_pid" ] && [ "$restart_time" = "$start_time" ]; then
-  echo "background restart did not replace the managed process"
+  echo "background restart did not replace the background process"
   exit 1
 fi
 

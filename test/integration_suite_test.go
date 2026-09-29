@@ -55,16 +55,6 @@ func runMint(t *testing.T, input input) result {
 	}
 }
 
-func TestSandboxExperimentalGate(t *testing.T) {
-	t.Setenv("RWX_EXPERIMENTAL", "")
-	result := runMint(t, input{
-		args: []string{"sandbox", "push", "--access-token", "fake-for-test"},
-	})
-
-	require.Equal(t, 1, result.exitCode)
-	require.Contains(t, result.stderr, "this command is experimental; set RWX_EXPERIMENTAL=true to use it")
-}
-
 func TestImageBuild(t *testing.T) {
 	t.Run("fails when --tag is used with --no-pull", func(t *testing.T) {
 		input := input{

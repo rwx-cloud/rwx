@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSandboxPushCommandIsHidden(t *testing.T) {
-	require.True(t, sandboxPushCmd.Hidden)
+func TestSandboxPushCommandIsVisible(t *testing.T) {
+	require.False(t, sandboxPushCmd.Hidden)
 	require.Equal(t, "push [config-file]", sandboxPushCmd.Use)
 	require.NotNil(t, sandboxPushCmd.Flags().Lookup("id"))
 	require.Nil(t, sandboxPushCmd.Flags().Lookup("dir"))
@@ -28,8 +28,8 @@ func TestSandboxPushCommandIsHidden(t *testing.T) {
 	require.Error(t, sandboxPushCmd.Args(sandboxPushCmd, []string{"one.yml", "two.yml"}))
 }
 
-func TestSandboxBackgroundCommandIsHidden(t *testing.T) {
-	require.True(t, sandboxBackgroundCmd.Hidden)
+func TestSandboxBackgroundCommandsAreVisible(t *testing.T) {
+	require.False(t, sandboxBackgroundCmd.Hidden)
 	require.Equal(t, "background [config-file] -- <command>", sandboxBackgroundCmd.Use)
 	nameFlag := sandboxBackgroundCmd.PersistentFlags().Lookup("name")
 	keyFlag := sandboxBackgroundCmd.PersistentFlags().Lookup("key")
@@ -107,8 +107,8 @@ func TestSandboxBackgroundNameAndKeyFlags(t *testing.T) {
 	}
 }
 
-func TestSandboxTunnelCommandIsHidden(t *testing.T) {
-	require.True(t, sandboxTunnelCmd.Hidden)
+func TestSandboxTunnelCommandIsVisible(t *testing.T) {
+	require.False(t, sandboxTunnelCmd.Hidden)
 	require.Equal(t, "tunnel [config-file]", sandboxTunnelCmd.Use)
 	require.NotNil(t, sandboxTunnelCmd.Flags().Lookup("id"))
 	require.NotNil(t, sandboxTunnelCmd.Flags().Lookup("key"))
@@ -259,32 +259,36 @@ func TestSandboxBackgroundRejectsInvalidArguments(t *testing.T) {
 	}
 }
 
-func TestExperimentalSandboxCommandsRequireOptIn(t *testing.T) {
-	commands := []*cobra.Command{
-		sandboxPushCmd,
-		sandboxBackgroundCmd,
-		sandboxBackgroundRestartCmd,
-		sandboxBackgroundStopCmd,
-		sandboxBackgroundLogsCmd,
-		sandboxTunnelCmd,
-	}
-
+func TestRequireExperimentalSandboxAccess(t *testing.T) {
 	for _, value := range []string{"", "false", "TRUE", "1"} {
 		t.Run("RWX_EXPERIMENTAL="+value, func(t *testing.T) {
 			t.Setenv("RWX_EXPERIMENTAL", value)
-			for _, command := range commands {
-				require.EqualError(t, command.PreRunE(command, nil), "this command is experimental; set RWX_EXPERIMENTAL=true to use it")
-			}
+			require.EqualError(t, requireExperimentalSandboxAccess(), "this command is experimental; set RWX_EXPERIMENTAL=true to use it")
 		})
 	}
 
 	t.Run("RWX_EXPERIMENTAL=true", func(t *testing.T) {
 		t.Setenv("RWX_EXPERIMENTAL", "true")
-		originalAccessToken := AccessToken
-		AccessToken = "test-token"
-		t.Cleanup(func() { AccessToken = originalAccessToken })
-		for _, command := range commands {
-			require.NoError(t, command.PreRunE(command, nil))
-		}
+		require.NoError(t, requireExperimentalSandboxAccess())
 	})
+}
+
+func TestSandboxCommandsDoNotRequireExperimentalOptIn(t *testing.T) {
+	for _, value := range []string{"", "false"} {
+		t.Run("RWX_EXPERIMENTAL="+value, func(t *testing.T) {
+			t.Setenv("RWX_EXPERIMENTAL", value)
+			for _, command := range []*cobra.Command{
+				sandboxPushCmd,
+				sandboxBackgroundCmd,
+				sandboxBackgroundRestartCmd,
+				sandboxBackgroundStopCmd,
+				sandboxBackgroundLogsCmd,
+				sandboxTunnelCmd,
+			} {
+				if command.PreRunE != nil {
+					require.NoError(t, command.PreRunE(command, nil), command.CommandPath())
+				}
+			}
+		})
+	}
 }
