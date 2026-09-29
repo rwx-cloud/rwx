@@ -63,6 +63,9 @@ tasks:
       fi
       fixture_ready=true
 
+      org=$(rwx whoami --json | jq -er '.organization_slug | select(. != null and . != "")')
+      app_url="https://${endpoint}--${org}.rwx.run"
+
       for action in disable enable; do
         if [ "$action" = disable ]; then
           expected_text="Disabled app endpoint \"$endpoint\"."
@@ -78,11 +81,11 @@ tasks:
           exit 1
         fi
 
-        # Repeat in both cases: normalization belongs to Cloud, not the CLI.
+        # Normalization and URL resolution belong to Cloud, not the CLI.
         uppercase_endpoint=$(printf '%s' "$endpoint" | tr '[:lower:]' '[:upper:]')
-        for name in "$endpoint" "$uppercase_endpoint"; do
-          output=$(rwx apps "$action" "$name" --json)
-          if ! echo "$output" | jq -e --arg endpoint "$name" --argjson disabled "$disabled" \
+        for endpoint_or_url in "$endpoint" "$uppercase_endpoint" "$app_url"; do
+          output=$(rwx apps "$action" "$endpoint_or_url" --json)
+          if ! echo "$output" | jq -e --arg endpoint "$endpoint_or_url" --argjson disabled "$disabled" \
             '. == {Endpoint: $endpoint, Disabled: $disabled}' >/dev/null; then
             echo "Unexpected $action JSON: $output"
             exit 1
