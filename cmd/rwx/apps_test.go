@@ -20,7 +20,7 @@ func TestAppsCommands(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			cmd := findSubcommand(appsCmd, action)
 			require.NotNil(t, cmd)
-			require.Equal(t, action+" NAME", cmd.Use)
+			require.Equal(t, action+" ENDPOINT_OR_URL", cmd.Use)
 			require.Error(t, cmd.Args(cmd, nil))
 			require.NoError(t, cmd.Args(cmd, []string{"pr-123"}))
 			require.Error(t, cmd.Args(cmd, []string{"pr-123", "pr-456"}))
