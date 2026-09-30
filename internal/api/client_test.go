@@ -320,7 +320,7 @@ func TestAPIClient_SetSecretsInVault(t *testing.T) {
 
 func TestAPIClient_ListVaultData(t *testing.T) {
 	t.Run("lists vaults", func(t *testing.T) {
-		body := `{"vaults":[{"name":"deploys","lock_status":"locked","repository_permissions":[{"repository_slug":"rwx-cloud/cloud","branch_pattern":"main"}]}]}`
+		body := `{"vaults":[{"id":"vault-1","name":"deploys","lock_status":"locked","repository_permissions":[{"repository_slug":"rwx-cloud/cloud","branch_pattern":"main"}],"oidc_subject":"org:acme:vault:deploys"}]}`
 		roundTrip := func(req *http.Request) (*http.Response, error) {
 			require.Equal(t, http.MethodGet, req.Method)
 			require.Equal(t, "/mint/api/vaults", req.URL.Path)
@@ -329,9 +329,11 @@ func TestAPIClient_ListVaultData(t *testing.T) {
 
 		result, err := api.NewClientWithRoundTrip(roundTrip).ListVaults()
 		require.NoError(t, err)
+		require.Equal(t, "vault-1", result.Vaults[0].ID)
 		require.Equal(t, "deploys", result.Vaults[0].Name)
 		require.Equal(t, "locked", result.Vaults[0].LockStatus)
 		require.Equal(t, "rwx-cloud/cloud", result.Vaults[0].RepositoryPermissions[0].RepositorySlug)
+		require.Equal(t, "org:acme:vault:deploys", result.Vaults[0].OidcSubject)
 	})
 
 	t.Run("lists secret metadata", func(t *testing.T) {
@@ -364,6 +366,98 @@ func TestAPIClient_ListVaultData(t *testing.T) {
 		require.Equal(t, "API_URL", result.Vars[0].Name)
 		require.Equal(t, "https://example.com", result.Vars[0].Value)
 	})
+}
+
+func TestAPIClient_VaultLifecycle(t *testing.T) {
+	vaultJSON := `{"id":"vault-1","name":"deploys","lock_status":"unlocked","repository_permissions":[{"repository_slug":"rwx-cloud/cloud","branch_pattern":"main"}],"oidc_subject":"org:acme:vault:deploys"}`
+
+	t.Run("creates a vault and parses its complete state", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodPost, req.Method)
+			require.Equal(t, "/mint/api/vaults", req.URL.Path)
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"name":"deploys","unlocked":true,"repository_permissions":[{"repository_slug":"rwx-cloud/cloud","branch_pattern":"main"}]}`, string(body))
+			return &http.Response{Status: "201 Created", StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(`{"vault":` + vaultJSON + `}`))}, nil
+		})
+
+		result, err := client.CreateVault(api.CreateVaultConfig{
+			Name:     "deploys",
+			Unlocked: true,
+			RepositoryPermissions: []api.CreateVaultRepoPermission{
+				{RepositorySlug: "rwx-cloud/cloud", BranchPattern: "main"},
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, "vault-1", result.Vault.ID)
+		require.Equal(t, "org:acme:vault:deploys", result.Vault.OidcSubject)
+	})
+
+	t.Run("shows a vault by ID", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1", req.URL.Path)
+			return &http.Response{Status: "200 OK", StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"vault":` + vaultJSON + `}`))}, nil
+		})
+
+		result, err := client.ShowVault(api.ShowVaultConfig{VaultID: "vault-1"})
+		require.NoError(t, err)
+		require.Equal(t, "deploys", result.Vault.Name)
+		require.Equal(t, "unlocked", result.Vault.LockStatus)
+	})
+
+	t.Run("updates only supplied fields", func(t *testing.T) {
+		name := "production"
+		unlocked := false
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodPatch, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1", req.URL.Path)
+			require.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"name":"production","unlocked":false}`, string(body))
+			return &http.Response{Status: "200 OK", StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"vault":` + vaultJSON + `}`))}, nil
+		})
+
+		_, err := client.UpdateVault(api.UpdateVaultConfig{
+			VaultID:  "vault-1",
+			Name:     &name,
+			Unlocked: &unlocked,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("deletes a vault by ID", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodDelete, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1", req.URL.Path)
+			return &http.Response{Status: "204 No Content", StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil
+		})
+
+		_, err := client.DeleteVault(api.DeleteVaultConfig{VaultID: "vault-1"})
+		require.NoError(t, err)
+	})
+
+	for _, tc := range []struct {
+		name       string
+		statusCode int
+		status     string
+		body       string
+		want       string
+	}{
+		{name: "validation", statusCode: http.StatusUnprocessableEntity, status: "422 Unprocessable Content", body: `{"errors":["unlocked must be true or false"]}`, want: "unlocked must be true or false"},
+		{name: "conflict", statusCode: http.StatusConflict, status: "409 Conflict", body: `{"errors":["The default vault cannot be deleted."]}`, want: "default vault cannot be deleted"},
+		{name: "permission", statusCode: http.StatusForbidden, status: "403 Forbidden", body: `{"error_messages":[{"message":"The vault:manage permission is required"}]}`, want: "vault:manage permission is required"},
+		{name: "not found", statusCode: http.StatusNotFound, status: "404 Not Found", body: `{}`, want: "Unable to call RWX API - 404 Not Found"},
+	} {
+		t.Run("surfaces "+tc.name+" errors", func(t *testing.T) {
+			client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{Status: tc.status, StatusCode: tc.statusCode, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+			})
+			_, err := client.DeleteVault(api.DeleteVaultConfig{VaultID: "vault-1"})
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
 }
 
 func TestAPIClient_InitiateDispatch(t *testing.T) {

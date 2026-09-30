@@ -182,7 +182,9 @@ type CreateVaultRepoPermission struct {
 	BranchPattern  string `json:"branch_pattern"`
 }
 
-type CreateVaultResult struct{}
+type CreateVaultResult struct {
+	Vault Vault `json:"vault"`
+}
 
 type ListVaultsResult struct {
 	Vaults []Vault `json:"vaults"`
@@ -193,7 +195,32 @@ type Vault struct {
 	Name                  string                      `json:"name"`
 	LockStatus            string                      `json:"lock_status"`
 	RepositoryPermissions []CreateVaultRepoPermission `json:"repository_permissions"`
+	OidcSubject           string                      `json:"oidc_subject"`
 }
+
+type ShowVaultConfig struct {
+	VaultID string
+}
+
+type ShowVaultResult struct {
+	Vault Vault `json:"vault"`
+}
+
+type UpdateVaultConfig struct {
+	VaultID  string  `json:"-"`
+	Name     *string `json:"name,omitempty"`
+	Unlocked *bool   `json:"unlocked,omitempty"`
+}
+
+type UpdateVaultResult struct {
+	Vault Vault `json:"vault"`
+}
+
+type DeleteVaultConfig struct {
+	VaultID string
+}
+
+type DeleteVaultResult struct{}
 
 type ListSecretsConfig struct {
 	VaultName string

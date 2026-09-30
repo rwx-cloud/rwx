@@ -44,6 +44,59 @@ var (
 	}
 )
 
+var vaultsShowCmd = &cobra.Command{
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := service.ShowVault(cli.ShowVaultConfig{
+			Vault: args[0],
+			Json:  useJsonOutput(),
+		})
+		return err
+	},
+	Short: "Show a vault",
+	Use:   "show NAME_OR_ID",
+}
+
+var (
+	updateVaultName     string
+	updateVaultUnlocked bool
+
+	vaultsUpdateCmd = &cobra.Command{
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.UpdateVault(cli.UpdateVaultConfig{
+				Vault:       args[0],
+				Name:        updateVaultName,
+				NameSet:     cmd.Flags().Changed("name"),
+				Unlocked:    updateVaultUnlocked,
+				UnlockedSet: cmd.Flags().Changed("unlocked"),
+				Json:        useJsonOutput(),
+			})
+			return err
+		},
+		Short: "Update a vault",
+		Use:   "update NAME_OR_ID [flags]",
+	}
+)
+
+var (
+	deleteVaultYes bool
+
+	vaultsDeleteCmd = &cobra.Command{
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.DeleteVault(cli.DeleteVaultConfig{
+				Vault: args[0],
+				Json:  useJsonOutput(),
+				Yes:   deleteVaultYes,
+			})
+			return err
+		},
+		Short: "Delete a vault",
+		Use:   "delete NAME_OR_ID [flags]",
+	}
+)
+
 // --- secrets subcommand group ---
 
 var vaultsSecretsCmd = &cobra.Command{
@@ -347,6 +400,15 @@ func init() {
 	vaultsCreateCmd.Flags().BoolVar(&createVaultUnlocked, "unlocked", false, "whether the vault should be unlocked")
 	vaultsCreateCmd.Flags().StringSliceVar(&createVaultRepoPerms, "repository-permission", nil, "repository permission in the format REPO_SLUG:REF_PATTERN (repeatable)")
 	vaultsCmd.AddCommand(vaultsCreateCmd)
+
+	vaultsCmd.AddCommand(vaultsShowCmd)
+
+	vaultsUpdateCmd.Flags().StringVar(&updateVaultName, "name", "", "the new name of the vault")
+	vaultsUpdateCmd.Flags().BoolVar(&updateVaultUnlocked, "unlocked", false, "whether the vault should be unlocked")
+	vaultsCmd.AddCommand(vaultsUpdateCmd)
+
+	vaultsDeleteCmd.Flags().BoolVarP(&deleteVaultYes, "yes", "y", false, "skip confirmation prompt")
+	vaultsCmd.AddCommand(vaultsDeleteCmd)
 
 	// vaults secrets set
 	vaultsSecretsSetCmd.Flags().StringVar(&secretsSetVault, "vault", "default", "the name of the vault to set the secrets in")

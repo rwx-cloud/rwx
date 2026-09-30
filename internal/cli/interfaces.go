@@ -27,6 +27,9 @@ type APIClient interface {
 	SetSecretsInVault(api.SetSecretsInVaultConfig) (*api.SetSecretsInVaultResult, error)
 	CreateVault(api.CreateVaultConfig) (*api.CreateVaultResult, error)
 	ListVaults() (*api.ListVaultsResult, error)
+	ShowVault(api.ShowVaultConfig) (*api.ShowVaultResult, error)
+	UpdateVault(api.UpdateVaultConfig) (*api.UpdateVaultResult, error)
+	DeleteVault(api.DeleteVaultConfig) (*api.DeleteVaultResult, error)
 	DisableApp(string) error
 	EnableApp(string) error
 	ListCrons() (*api.ListCronsResult, error)

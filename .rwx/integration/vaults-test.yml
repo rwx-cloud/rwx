@@ -87,6 +87,84 @@ tasks:
     env:
       RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
+  - key: test-vault-lifecycle
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      vault_name="rwx-cli-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      updated_name="${vault_name}-updated"
+      vault_created=false
+      vault_deleted=false
+      vault_id=""
+
+      cleanup() {
+        status=$?
+        trap - EXIT
+        if [ "$vault_created" = true ] && [ "$vault_deleted" = false ]; then
+          vault_ref="${vault_id:-$vault_name}"
+          if ! rwx vaults delete "$vault_ref" --yes >/dev/null; then
+            echo "Failed to delete vault $vault_ref during cleanup" >&2
+            status=1
+          fi
+        fi
+        exit "$status"
+      }
+      trap cleanup EXIT
+
+      created=$(rwx vaults create --name "$vault_name" --json)
+      vault_created=true
+      vault_id=$(echo "$created" | jq -er '.ID | select(type == "string" and length > 0)')
+      oidc_subject=$(echo "$created" | jq -er '.OidcSubject | select(type == "string" and length > 0)')
+      echo "$created" | jq -e \
+        --arg vault_id "$vault_id" \
+        --arg vault_name "$vault_name" \
+        --arg oidc_subject "$oidc_subject" '
+          .Vault == $vault_name and
+          .ID == $vault_id and
+          .Name == $vault_name and
+          .LockStatus == "locked" and
+          .RepositoryPermissions == [] and
+          .OidcSubject == $oidc_subject
+        ' >/dev/null
+
+      shown=$(rwx vaults show "$vault_name" --json)
+      echo "$shown" | jq -e \
+        --arg vault_id "$vault_id" \
+        --arg vault_name "$vault_name" \
+        --arg oidc_subject "$oidc_subject" '
+          .ID == $vault_id and
+          .Name == $vault_name and
+          .LockStatus == "locked" and
+          .OidcSubject == $oidc_subject
+        ' >/dev/null
+
+      updated=$(rwx vaults update "$vault_id" \
+        --name "$updated_name" \
+        --unlocked \
+        --json)
+      echo "$updated" | jq -e \
+        --arg vault_id "$vault_id" \
+        --arg updated_name "$updated_name" \
+        --arg oidc_subject "$oidc_subject" '
+          .ID == $vault_id and
+          .Name == $updated_name and
+          .LockStatus == "unlocked" and
+          .RepositoryPermissions == [] and
+          .OidcSubject == $oidc_subject
+        ' >/dev/null
+
+      deleted=$(rwx vaults delete "$updated_name" --yes --json)
+      vault_deleted=true
+      echo "$deleted" | jq -e \
+        --arg vault_id "$vault_id" \
+        --arg updated_name "$updated_name" '
+          .ID == $vault_id and
+          .Name == $updated_name
+        ' >/dev/null
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+
   - key: test-vault-oidc-token-lifecycle
     use: rwx-cli
     run: |
