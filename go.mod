@@ -14,6 +14,7 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/goccy/go-yaml v1.19.2
 	github.com/gofrs/flock v0.13.1
+	github.com/google/uuid v1.6.0
 	github.com/kopoli/go-terminal-size v0.0.0-20170219200355-5c97524c8b54
 	github.com/manifoldco/promptui v0.9.0
 	github.com/moby/moby v28.5.2+incompatible
@@ -53,7 +54,6 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-colorable v0.1.2 // indirect

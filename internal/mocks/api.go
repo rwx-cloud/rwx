@@ -32,6 +32,10 @@ type API struct {
 	MockListVaults                              func() (*api.ListVaultsResult, error)
 	MockListSecrets                             func(api.ListSecretsConfig) (*api.ListSecretsResult, error)
 	MockCreateVaultOidcToken                    func(api.CreateVaultOidcTokenConfig) (*api.CreateVaultOidcTokenResult, error)
+	MockListVaultOidcTokens                     func(api.ListVaultOidcTokensConfig) (*api.ListVaultOidcTokensResult, error)
+	MockShowVaultOidcToken                      func(api.ShowVaultOidcTokenConfig) (*api.ShowVaultOidcTokenResult, error)
+	MockUpdateVaultOidcToken                    func(api.UpdateVaultOidcTokenConfig) (*api.UpdateVaultOidcTokenResult, error)
+	MockDeleteVaultOidcToken                    func(api.DeleteVaultOidcTokenConfig) (*api.DeleteVaultOidcTokenResult, error)
 	MockDeleteSecret                            func(api.DeleteSecretConfig) (*api.DeleteSecretResult, error)
 	MockSetVar                                  func(api.SetVarConfig) (*api.SetVarResult, error)
 	MockShowVar                                 func(api.ShowVarConfig) (*api.ShowVarResult, error)
@@ -208,6 +212,38 @@ func (c *API) CreateVaultOidcToken(cfg api.CreateVaultOidcTokenConfig) (*api.Cre
 	}
 
 	return nil, errors.New("MockCreateVaultOidcToken was not configured")
+}
+
+func (c *API) ListVaultOidcTokens(cfg api.ListVaultOidcTokensConfig) (*api.ListVaultOidcTokensResult, error) {
+	if c.MockListVaultOidcTokens != nil {
+		return c.MockListVaultOidcTokens(cfg)
+	}
+
+	return nil, errors.New("MockListVaultOidcTokens was not configured")
+}
+
+func (c *API) ShowVaultOidcToken(cfg api.ShowVaultOidcTokenConfig) (*api.ShowVaultOidcTokenResult, error) {
+	if c.MockShowVaultOidcToken != nil {
+		return c.MockShowVaultOidcToken(cfg)
+	}
+
+	return nil, errors.New("MockShowVaultOidcToken was not configured")
+}
+
+func (c *API) UpdateVaultOidcToken(cfg api.UpdateVaultOidcTokenConfig) (*api.UpdateVaultOidcTokenResult, error) {
+	if c.MockUpdateVaultOidcToken != nil {
+		return c.MockUpdateVaultOidcToken(cfg)
+	}
+
+	return nil, errors.New("MockUpdateVaultOidcToken was not configured")
+}
+
+func (c *API) DeleteVaultOidcToken(cfg api.DeleteVaultOidcTokenConfig) (*api.DeleteVaultOidcTokenResult, error) {
+	if c.MockDeleteVaultOidcToken != nil {
+		return c.MockDeleteVaultOidcToken(cfg)
+	}
+
+	return nil, errors.New("MockDeleteVaultOidcToken was not configured")
 }
 
 func (c *API) DeleteSecret(cfg api.DeleteSecretConfig) (*api.DeleteSecretResult, error) {

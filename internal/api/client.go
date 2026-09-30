@@ -1028,7 +1028,7 @@ func (c Client) CreateVaultOidcToken(cfg CreateVaultOidcTokenConfig) (*CreateVau
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 201 {
-		msg := extractOidcTokenErrorMessage(resp.Body)
+		msg := extractErrorMessage(resp.Body)
 		if msg == "" {
 			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
 		}
@@ -1044,33 +1044,122 @@ func (c Client) CreateVaultOidcToken(cfg CreateVaultOidcTokenConfig) (*CreateVau
 	return &result, nil
 }
 
-// extractOidcTokenErrorMessage handles the error formats from the OIDC token endpoint,
-// which returns {"errors": [...]} for validation failures in addition to the standard
-// {"error": "..."} format.
-func extractOidcTokenErrorMessage(reader io.Reader) string {
-	body, err := io.ReadAll(reader)
+func (c Client) ListVaultOidcTokens(cfg ListVaultOidcTokensConfig) (*ListVaultOidcTokensResult, error) {
+	endpoint := fmt.Sprintf("/mint/api/vaults/%s/oidc_tokens", url.PathEscape(cfg.VaultID))
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
-		return ""
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
 	}
 
-	errorsStruct := struct {
-		Errors []string `json:"errors,omitempty"`
-		Error  string   `json:"error,omitempty"`
-	}{}
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
 
-	if err := json.Unmarshal(body, &errorsStruct); err != nil {
-		return ""
+	if resp.StatusCode != http.StatusOK {
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
 	}
 
-	if len(errorsStruct.Errors) > 0 {
-		return strings.Join(errorsStruct.Errors, "\n")
+	result := ListVaultOidcTokensResult{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, errors.Wrap(err, "unable to parse API response")
+	}
+	return &result, nil
+}
+
+func (c Client) ShowVaultOidcToken(cfg ShowVaultOidcTokenConfig) (*ShowVaultOidcTokenResult, error) {
+	endpoint := fmt.Sprintf("/mint/api/vaults/%s/oidc_tokens/%s", url.PathEscape(cfg.VaultID), url.PathEscape(cfg.TokenID))
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
 	}
 
-	if errorsStruct.Error != "" {
-		return errorsStruct.Error
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
 	}
 
-	return ""
+	result := ShowVaultOidcTokenResult{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, errors.Wrap(err, "unable to parse API response")
+	}
+	return &result, nil
+}
+
+func (c Client) UpdateVaultOidcToken(cfg UpdateVaultOidcTokenConfig) (*UpdateVaultOidcTokenResult, error) {
+	endpoint := fmt.Sprintf("/mint/api/vaults/%s/oidc_tokens/%s", url.PathEscape(cfg.VaultID), url.PathEscape(cfg.TokenID))
+	body := struct {
+		Name     string `json:"name,omitempty"`
+		Audience string `json:"audience,omitempty"`
+	}{Name: cfg.Name, Audience: cfg.Audience}
+	encodedBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to encode as JSON")
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, endpoint, bytes.NewBuffer(encodedBody))
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
+	}
+
+	result := UpdateVaultOidcTokenResult{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, errors.Wrap(err, "unable to parse API response")
+	}
+	return &result, nil
+}
+
+func (c Client) DeleteVaultOidcToken(cfg DeleteVaultOidcTokenConfig) (*DeleteVaultOidcTokenResult, error) {
+	endpoint := fmt.Sprintf("/mint/api/vaults/%s/oidc_tokens/%s", url.PathEscape(cfg.VaultID), url.PathEscape(cfg.TokenID))
+	req, err := http.NewRequest(http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
+	}
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
+	}
+
+	return &DeleteVaultOidcTokenResult{}, nil
 }
 
 func (c Client) GetPackageVersions() (*PackageVersionsResult, error) {

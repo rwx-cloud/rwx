@@ -189,6 +189,7 @@ type ListVaultsResult struct {
 }
 
 type Vault struct {
+	ID                    string                      `json:"id"`
 	Name                  string                      `json:"name"`
 	LockStatus            string                      `json:"lock_status"`
 	RepositoryPermissions []CreateVaultRepoPermission `json:"repository_permissions"`
@@ -258,12 +259,53 @@ type CreateVaultOidcTokenConfig struct {
 	Provider  string `json:"provider,omitempty"`
 }
 
-type CreateVaultOidcTokenResult struct {
-	Audience         string `json:"audience"`
-	Subject          string `json:"subject"`
-	Expression       string `json:"expression"`
-	DocumentationURL string `json:"documentation_url"`
+type VaultIdentity struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
+
+type VaultOidcToken struct {
+	ID               string        `json:"id"`
+	Vault            VaultIdentity `json:"vault"`
+	Name             string        `json:"name"`
+	Audience         string        `json:"audience"`
+	Subject          string        `json:"subject"`
+	Expression       string        `json:"expression"`
+	DocumentationURL string        `json:"documentation_url"`
+}
+
+type CreateVaultOidcTokenResult = VaultOidcToken
+
+type ListVaultOidcTokensConfig struct {
+	VaultID string
+}
+
+type ListVaultOidcTokensResult struct {
+	OidcTokens []VaultOidcToken `json:"oidc_tokens"`
+}
+
+type ShowVaultOidcTokenConfig struct {
+	VaultID string
+	TokenID string
+}
+
+type ShowVaultOidcTokenResult = VaultOidcToken
+
+type UpdateVaultOidcTokenConfig struct {
+	VaultID  string
+	TokenID  string
+	Name     string
+	Audience string
+}
+
+type UpdateVaultOidcTokenResult = VaultOidcToken
+
+type DeleteVaultOidcTokenConfig struct {
+	VaultID string
+	TokenID string
+}
+
+type DeleteVaultOidcTokenResult struct{}
 
 type ApiPackageInfo struct {
 	Description string `json:"description"`

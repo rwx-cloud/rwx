@@ -2083,3 +2083,97 @@ func TestAPIClient_DownloadArtifact(t *testing.T) {
 		require.Equal(t, 1024*1024, len(result))
 	})
 }
+
+func TestAPIClient_VaultOidcTokens(t *testing.T) {
+	tokenJSON := `{"id":"token-1","vault":{"id":"vault-1","name":"deploys"},"name":"aws","audience":"sts.amazonaws.com","subject":"org:acme:vault:deploys","expression":"${{ vaults.deploys.oidc.aws }}","documentation_url":"https://www.rwx.com/docs/oidc-aws"}`
+
+	t.Run("creates using the compatible name-based route", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodPost, req.Method)
+			require.Equal(t, "/mint/api/vaults/oidc_tokens", req.URL.Path)
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"vault_name":"deploys","provider":"aws"}`, string(body))
+			return &http.Response{Status: "201 Created", StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(tokenJSON))}, nil
+		})
+
+		result, err := client.CreateVaultOidcToken(api.CreateVaultOidcTokenConfig{VaultName: "deploys", Provider: "aws"})
+		require.NoError(t, err)
+		require.Equal(t, "token-1", result.ID)
+		require.Equal(t, "vault-1", result.Vault.ID)
+		require.Equal(t, "aws", result.Name)
+	})
+
+	t.Run("lists complete token state", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/oidc_tokens", req.URL.Path)
+			return &http.Response{Status: "200 OK", StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"oidc_tokens":[` + tokenJSON + `]}`))}, nil
+		})
+
+		result, err := client.ListVaultOidcTokens(api.ListVaultOidcTokensConfig{VaultID: "vault-1"})
+		require.NoError(t, err)
+		require.Len(t, result.OidcTokens, 1)
+		require.Equal(t, "${{ vaults.deploys.oidc.aws }}", result.OidcTokens[0].Expression)
+	})
+
+	t.Run("shows by IDs", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/oidc_tokens/token-1", req.URL.Path)
+			return &http.Response{Status: "200 OK", StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(tokenJSON))}, nil
+		})
+
+		result, err := client.ShowVaultOidcToken(api.ShowVaultOidcTokenConfig{VaultID: "vault-1", TokenID: "token-1"})
+		require.NoError(t, err)
+		require.Equal(t, "sts.amazonaws.com", result.Audience)
+		require.Equal(t, "org:acme:vault:deploys", result.Subject)
+	})
+
+	t.Run("updates only supplied fields", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodPatch, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/oidc_tokens/token-1", req.URL.Path)
+			require.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"name":"production"}`, string(body))
+			return &http.Response{Status: "200 OK", StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(tokenJSON))}, nil
+		})
+
+		_, err := client.UpdateVaultOidcToken(api.UpdateVaultOidcTokenConfig{VaultID: "vault-1", TokenID: "token-1", Name: "production"})
+		require.NoError(t, err)
+	})
+
+	t.Run("deletes by IDs", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodDelete, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/oidc_tokens/token-1", req.URL.Path)
+			return &http.Response{Status: "200 OK", StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+		})
+
+		_, err := client.DeleteVaultOidcToken(api.DeleteVaultOidcTokenConfig{VaultID: "vault-1", TokenID: "token-1"})
+		require.NoError(t, err)
+	})
+
+	for _, tc := range []struct {
+		name       string
+		statusCode int
+		status     string
+		body       string
+		want       string
+	}{
+		{name: "validation", statusCode: http.StatusUnprocessableEntity, status: "422 Unprocessable Content", body: `{"errors":["audience is required"]}`, want: "audience is required"},
+		{name: "conflict", statusCode: http.StatusConflict, status: "409 Conflict", body: `{"errors":["Name must be unique"]}`, want: "Name must be unique"},
+		{name: "permission", statusCode: http.StatusForbidden, status: "403 Forbidden", body: `{"error_messages":[{"message":"The vault:manage permission is required"}]}`, want: "vault:manage permission is required"},
+		{name: "not found", statusCode: http.StatusNotFound, status: "404 Not Found", body: `{}`, want: "Unable to call RWX API - 404 Not Found"},
+	} {
+		t.Run("surfaces "+tc.name+" errors", func(t *testing.T) {
+			client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{Status: tc.status, StatusCode: tc.statusCode, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+			})
+			_, err := client.UpdateVaultOidcToken(api.UpdateVaultOidcTokenConfig{VaultID: "vault-1", TokenID: "token-1", Name: "production"})
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}

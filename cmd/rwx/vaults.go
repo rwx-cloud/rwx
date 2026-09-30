@@ -211,6 +211,23 @@ var vaultsOidcTokensCmd = &cobra.Command{
 }
 
 var (
+	oidcTokenListVault string
+
+	vaultsOidcTokensListCmd = &cobra.Command{
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.ListVaultOidcTokens(cli.ListVaultOidcTokensConfig{
+				Vault: oidcTokenListVault,
+				Json:  useJsonOutput(),
+			})
+			return err
+		},
+		Short: "List OIDC tokens in a vault",
+		Use:   "list [flags]",
+	}
+)
+
+var (
 	oidcTokenCreateVault    string
 	oidcTokenCreateName     string
 	oidcTokenCreateAudience string
@@ -230,6 +247,66 @@ var (
 		},
 		Short: "Create an OIDC token in a vault",
 		Use:   "create [flags]",
+	}
+)
+
+var (
+	oidcTokenShowVault string
+
+	vaultsOidcTokensShowCmd = &cobra.Command{
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.ShowVaultOidcToken(cli.VaultOidcTokenConfig{
+				Vault: oidcTokenShowVault,
+				Token: args[0],
+				Json:  useJsonOutput(),
+			})
+			return err
+		},
+		Short: "Show an OIDC token",
+		Use:   "show NAME_OR_ID [flags]",
+	}
+)
+
+var (
+	oidcTokenUpdateVault    string
+	oidcTokenUpdateName     string
+	oidcTokenUpdateAudience string
+
+	vaultsOidcTokensUpdateCmd = &cobra.Command{
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.UpdateVaultOidcToken(cli.UpdateVaultOidcTokenConfig{
+				Vault:    oidcTokenUpdateVault,
+				Token:    args[0],
+				Name:     oidcTokenUpdateName,
+				Audience: oidcTokenUpdateAudience,
+				Json:     useJsonOutput(),
+			})
+			return err
+		},
+		Short: "Update an OIDC token",
+		Use:   "update NAME_OR_ID [flags]",
+	}
+)
+
+var (
+	oidcTokenDeleteVault string
+	oidcTokenDeleteYes   bool
+
+	vaultsOidcTokensDeleteCmd = &cobra.Command{
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.DeleteVaultOidcToken(cli.DeleteVaultOidcTokenConfig{
+				Vault: oidcTokenDeleteVault,
+				Token: args[0],
+				Json:  useJsonOutput(),
+				Yes:   oidcTokenDeleteYes,
+			})
+			return err
+		},
+		Short: "Delete an OIDC token",
+		Use:   "delete NAME_OR_ID [flags]",
 	}
 )
 
@@ -305,13 +382,31 @@ func init() {
 
 	vaultsCmd.AddCommand(vaultsVarsCmd)
 
-	// vaults oidc-tokens create
+	vaultsOidcTokensListCmd.Flags().StringVar(&oidcTokenListVault, "vault", "", "the name or ID of the vault to list OIDC tokens from")
+	_ = vaultsOidcTokensListCmd.MarkFlagRequired("vault")
+	vaultsOidcTokensCmd.AddCommand(vaultsOidcTokensListCmd)
+
 	vaultsOidcTokensCreateCmd.Flags().StringVar(&oidcTokenCreateVault, "vault", "", "the name of the vault to create the OIDC token in")
 	_ = vaultsOidcTokensCreateCmd.MarkFlagRequired("vault")
 	vaultsOidcTokensCreateCmd.Flags().StringVar(&oidcTokenCreateName, "name", "", "the name of the OIDC token (required unless --provider is given)")
 	vaultsOidcTokensCreateCmd.Flags().StringVar(&oidcTokenCreateAudience, "audience", "", "the audience for the OIDC token (required unless --provider is given; always required for gcp)")
 	vaultsOidcTokensCreateCmd.Flags().StringVar(&oidcTokenCreateProvider, "provider", "", "use defaults for a known provider (e.g. aws, gcp); sets name and audience automatically")
 	vaultsOidcTokensCmd.AddCommand(vaultsOidcTokensCreateCmd)
+
+	vaultsOidcTokensShowCmd.Flags().StringVar(&oidcTokenShowVault, "vault", "", "the name or ID of the vault containing the OIDC token")
+	_ = vaultsOidcTokensShowCmd.MarkFlagRequired("vault")
+	vaultsOidcTokensCmd.AddCommand(vaultsOidcTokensShowCmd)
+
+	vaultsOidcTokensUpdateCmd.Flags().StringVar(&oidcTokenUpdateVault, "vault", "", "the name or ID of the vault containing the OIDC token")
+	_ = vaultsOidcTokensUpdateCmd.MarkFlagRequired("vault")
+	vaultsOidcTokensUpdateCmd.Flags().StringVar(&oidcTokenUpdateName, "name", "", "the new name for the OIDC token")
+	vaultsOidcTokensUpdateCmd.Flags().StringVar(&oidcTokenUpdateAudience, "audience", "", "the new audience for the OIDC token")
+	vaultsOidcTokensCmd.AddCommand(vaultsOidcTokensUpdateCmd)
+
+	vaultsOidcTokensDeleteCmd.Flags().StringVar(&oidcTokenDeleteVault, "vault", "", "the name or ID of the vault containing the OIDC token")
+	_ = vaultsOidcTokensDeleteCmd.MarkFlagRequired("vault")
+	vaultsOidcTokensDeleteCmd.Flags().BoolVarP(&oidcTokenDeleteYes, "yes", "y", false, "skip confirmation prompt")
+	vaultsOidcTokensCmd.AddCommand(vaultsOidcTokensDeleteCmd)
 
 	vaultsCmd.AddCommand(vaultsOidcTokensCmd)
 
