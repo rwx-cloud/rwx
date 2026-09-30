@@ -30,6 +30,9 @@ type API struct {
 	MockSetSecretsInVault                       func(api.SetSecretsInVaultConfig) (*api.SetSecretsInVaultResult, error)
 	MockCreateVault                             func(api.CreateVaultConfig) (*api.CreateVaultResult, error)
 	MockListVaults                              func() (*api.ListVaultsResult, error)
+	MockShowVault                               func(api.ShowVaultConfig) (*api.ShowVaultResult, error)
+	MockUpdateVault                             func(api.UpdateVaultConfig) (*api.UpdateVaultResult, error)
+	MockDeleteVault                             func(api.DeleteVaultConfig) (*api.DeleteVaultResult, error)
 	MockListSecrets                             func(api.ListSecretsConfig) (*api.ListSecretsResult, error)
 	MockCreateVaultOidcToken                    func(api.CreateVaultOidcTokenConfig) (*api.CreateVaultOidcTokenResult, error)
 	MockListVaultOidcTokens                     func(api.ListVaultOidcTokensConfig) (*api.ListVaultOidcTokensResult, error)
@@ -196,6 +199,30 @@ func (c *API) ListVaults() (*api.ListVaultsResult, error) {
 	}
 
 	return nil, errors.New("MockListVaults was not configured")
+}
+
+func (c *API) ShowVault(cfg api.ShowVaultConfig) (*api.ShowVaultResult, error) {
+	if c.MockShowVault != nil {
+		return c.MockShowVault(cfg)
+	}
+
+	return nil, errors.New("MockShowVault was not configured")
+}
+
+func (c *API) UpdateVault(cfg api.UpdateVaultConfig) (*api.UpdateVaultResult, error) {
+	if c.MockUpdateVault != nil {
+		return c.MockUpdateVault(cfg)
+	}
+
+	return nil, errors.New("MockUpdateVault was not configured")
+}
+
+func (c *API) DeleteVault(cfg api.DeleteVaultConfig) (*api.DeleteVaultResult, error) {
+	if c.MockDeleteVault != nil {
+		return c.MockDeleteVault(cfg)
+	}
+
+	return nil, errors.New("MockDeleteVault was not configured")
 }
 
 func (c *API) ListSecrets(cfg api.ListSecretsConfig) (*api.ListSecretsResult, error) {

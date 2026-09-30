@@ -30,7 +30,14 @@ func (c CreateVaultConfig) Validate() error {
 	return nil
 }
 
-type CreateVaultResult struct{}
+type CreateVaultResult struct {
+	Vault                 string
+	ID                    string
+	Name                  string
+	LockStatus            string
+	RepositoryPermissions []RepositoryPermissionInfo
+	OidcSubject           string
+}
 
 func (s Service) CreateVault(cfg CreateVaultConfig) (*CreateVaultResult, error) {
 	err := cfg.Validate()
@@ -47,7 +54,7 @@ func (s Service) CreateVault(cfg CreateVaultConfig) (*CreateVaultResult, error) 
 		})
 	}
 
-	_, err = s.APIClient.CreateVault(api.CreateVaultConfig{
+	apiResult, err := s.APIClient.CreateVault(api.CreateVaultConfig{
 		Name:                  cfg.Name,
 		Unlocked:              cfg.Unlocked,
 		RepositoryPermissions: repoPermissions,
@@ -57,26 +64,48 @@ func (s Service) CreateVault(cfg CreateVaultConfig) (*CreateVaultResult, error) 
 		return nil, errors.Wrap(err, "unable to create vault")
 	}
 
-	if cfg.Json {
-		output := struct {
-			Vault string
-		}{
-			Vault: cfg.Name,
+	vault := vaultInfo(apiResult.Vault)
+	if vault.Name == "" {
+		vault.Name = cfg.Name
+		if cfg.Unlocked {
+			vault.LockStatus = "unlocked"
+		} else {
+			vault.LockStatus = "locked"
 		}
-		if err := json.NewEncoder(s.Stdout).Encode(output); err != nil {
+		vault.RepositoryPermissions = make([]RepositoryPermissionInfo, len(repoPermissions))
+		for i, permission := range repoPermissions {
+			vault.RepositoryPermissions[i] = RepositoryPermissionInfo{
+				RepositorySlug: permission.RepositorySlug,
+				BranchPattern:  permission.BranchPattern,
+			}
+		}
+	}
+	result := &CreateVaultResult{
+		Vault:                 cfg.Name,
+		ID:                    vault.ID,
+		Name:                  vault.Name,
+		LockStatus:            vault.LockStatus,
+		RepositoryPermissions: vault.RepositoryPermissions,
+		OidcSubject:           vault.OidcSubject,
+	}
+
+	if cfg.Json {
+		if err := json.NewEncoder(s.Stdout).Encode(result); err != nil {
 			return nil, errors.Wrap(err, "unable to encode JSON output")
 		}
 	} else {
 		fmt.Fprintf(s.Stdout, "Created vault %q.\n", cfg.Name)
 	}
 
-	return &CreateVaultResult{}, nil
+	return result, nil
 }
 
 type VaultInfo struct {
+	ID                    string
 	Name                  string
 	LockStatus            string
 	RepositoryPermissions []RepositoryPermissionInfo
+	OidcSubject           string
 }
 
 type RepositoryPermissionInfo struct {
@@ -92,6 +121,61 @@ type ListVaultsConfig struct {
 	Json bool
 }
 
+type ShowVaultConfig struct {
+	Vault string
+	Json  bool
+}
+
+type ShowVaultResult = VaultInfo
+
+type UpdateVaultConfig struct {
+	Vault       string
+	Name        string
+	NameSet     bool
+	Unlocked    bool
+	UnlockedSet bool
+	Json        bool
+}
+
+type UpdateVaultResult = VaultInfo
+
+type DeleteVaultConfig struct {
+	Vault string
+	Json  bool
+	Yes   bool
+}
+
+type DeleteVaultResult = VaultInfo
+
+func vaultInfo(vault api.Vault) VaultInfo {
+	permissions := make([]RepositoryPermissionInfo, len(vault.RepositoryPermissions))
+	for i, permission := range vault.RepositoryPermissions {
+		permissions[i] = RepositoryPermissionInfo{
+			RepositorySlug: permission.RepositorySlug,
+			BranchPattern:  permission.BranchPattern,
+		}
+	}
+	return VaultInfo{
+		ID:                    vault.ID,
+		Name:                  vault.Name,
+		LockStatus:            vault.LockStatus,
+		RepositoryPermissions: permissions,
+		OidcSubject:           vault.OidcSubject,
+	}
+}
+
+func writeVault(stdout interface{ Write([]byte) (int, error) }, vault VaultInfo) {
+	permissions := make([]string, len(vault.RepositoryPermissions))
+	for i, permission := range vault.RepositoryPermissions {
+		permissions[i] = permission.RepositorySlug + ":" + permission.BranchPattern
+	}
+	fmt.Fprintf(stdout, "ID: %s\n", vault.ID)
+	fmt.Fprintf(stdout, "Name: %s\n", vault.Name)
+	fmt.Fprintf(stdout, "Lock status: %s\n", vault.LockStatus)
+	fmt.Fprintf(stdout, "Repository permissions: %s\n", strings.Join(permissions, ", "))
+	fmt.Fprintf(stdout, "OIDC subject: %s\n", vault.OidcSubject)
+}
+
 func (s Service) ListVaults(cfg ListVaultsConfig) (*ListVaultsResult, error) {
 	apiResult, err := s.APIClient.ListVaults()
 	if err != nil {
@@ -100,18 +184,7 @@ func (s Service) ListVaults(cfg ListVaultsConfig) (*ListVaultsResult, error) {
 
 	vaults := make([]VaultInfo, len(apiResult.Vaults))
 	for i, vault := range apiResult.Vaults {
-		permissions := make([]RepositoryPermissionInfo, len(vault.RepositoryPermissions))
-		for j, permission := range vault.RepositoryPermissions {
-			permissions[j] = RepositoryPermissionInfo{
-				RepositorySlug: permission.RepositorySlug,
-				BranchPattern:  permission.BranchPattern,
-			}
-		}
-		vaults[i] = VaultInfo{
-			Name:                  vault.Name,
-			LockStatus:            vault.LockStatus,
-			RepositoryPermissions: permissions,
-		}
+		vaults[i] = vaultInfo(vault)
 	}
 
 	result := &ListVaultsResult{Vaults: vaults}
@@ -144,4 +217,93 @@ func (s Service) ListVaults(cfg ListVaultsConfig) (*ListVaultsResult, error) {
 	}
 
 	return result, nil
+}
+
+func (s Service) ShowVault(cfg ShowVaultConfig) (*ShowVaultResult, error) {
+	vaultID, err := s.resolveVaultID(cfg.Vault)
+	if err != nil {
+		return nil, err
+	}
+
+	apiResult, err := s.APIClient.ShowVault(api.ShowVaultConfig{VaultID: vaultID})
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to show vault")
+	}
+	result := vaultInfo(apiResult.Vault)
+	if cfg.Json {
+		if err := json.NewEncoder(s.Stdout).Encode(result); err != nil {
+			return nil, errors.Wrap(err, "unable to encode JSON output")
+		}
+	} else {
+		writeVault(s.Stdout, result)
+	}
+
+	return &result, nil
+}
+
+func (s Service) UpdateVault(cfg UpdateVaultConfig) (*UpdateVaultResult, error) {
+	if !cfg.NameSet && !cfg.UnlockedSet {
+		return nil, errors.New("provide --name, --unlocked, or both")
+	}
+	if cfg.NameSet && cfg.Name == "" {
+		return nil, errors.New("the vault name must not be empty")
+	}
+
+	apiConfig := api.UpdateVaultConfig{}
+	if cfg.NameSet {
+		apiConfig.Name = &cfg.Name
+	}
+	if cfg.UnlockedSet {
+		apiConfig.Unlocked = &cfg.Unlocked
+	}
+
+	vaultID, err := s.resolveVaultID(cfg.Vault)
+	if err != nil {
+		return nil, err
+	}
+	apiConfig.VaultID = vaultID
+	apiResult, err := s.APIClient.UpdateVault(apiConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to update vault")
+	}
+	result := vaultInfo(apiResult.Vault)
+	if cfg.Json {
+		if err := json.NewEncoder(s.Stdout).Encode(result); err != nil {
+			return nil, errors.Wrap(err, "unable to encode JSON output")
+		}
+	} else {
+		fmt.Fprintf(s.Stdout, "Updated vault %q.\n\n", result.Name)
+		writeVault(s.Stdout, result)
+	}
+
+	return &result, nil
+}
+
+func (s Service) DeleteVault(cfg DeleteVaultConfig) (*DeleteVaultResult, error) {
+	vaultID, err := s.resolveVaultID(cfg.Vault)
+	if err != nil {
+		return nil, err
+	}
+	apiResult, err := s.APIClient.ShowVault(api.ShowVaultConfig{VaultID: vaultID})
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to show vault")
+	}
+	vault := vaultInfo(apiResult.Vault)
+
+	if err := s.confirmDestruction(fmt.Sprintf("Delete vault %q?", vault.Name), cfg.Yes); err != nil {
+		return nil, err
+	}
+	if _, err := s.APIClient.DeleteVault(api.DeleteVaultConfig{VaultID: vault.ID}); err != nil {
+		return nil, errors.Wrap(err, "unable to delete vault")
+	}
+
+	if cfg.Json {
+		if err := json.NewEncoder(s.Stdout).Encode(vault); err != nil {
+			return nil, errors.Wrap(err, "unable to encode JSON output")
+		}
+	} else {
+		fmt.Fprintf(s.Stdout, "Deleted vault %q.\n", vault.Name)
+	}
+
+	return &vault, nil
 }

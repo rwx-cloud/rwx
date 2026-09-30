@@ -783,16 +783,12 @@ func (c Client) CreateVault(cfg CreateVaultConfig) (*CreateVaultResult, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != 201 {
-		msg := extractErrorMessage(resp.Body)
-		if msg == "" {
-			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
-		}
-
-		return nil, errors.New(msg)
+	result := CreateVaultResult{}
+	if err := decodeResponseJSON(resp, &result); err != nil {
+		return nil, err
 	}
 
-	return &CreateVaultResult{}, nil
+	return &result, nil
 }
 
 func (c Client) ListVaults() (*ListVaultsResult, error) {
@@ -821,6 +817,74 @@ func (c Client) ListVaults() (*ListVaultsResult, error) {
 	}
 
 	return &result, nil
+}
+
+func (c Client) ShowVault(cfg ShowVaultConfig) (*ShowVaultResult, error) {
+	endpoint := fmt.Sprintf("/mint/api/vaults/%s", url.PathEscape(cfg.VaultID))
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
+	}
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	result := ShowVaultResult{}
+	if err := decodeResponseJSON(resp, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (c Client) UpdateVault(cfg UpdateVaultConfig) (*UpdateVaultResult, error) {
+	endpoint := fmt.Sprintf("/mint/api/vaults/%s", url.PathEscape(cfg.VaultID))
+	encodedBody, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to encode as JSON")
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, endpoint, bytes.NewBuffer(encodedBody))
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	result := UpdateVaultResult{}
+	if err := decodeResponseJSON(resp, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (c Client) DeleteVault(cfg DeleteVaultConfig) (*DeleteVaultResult, error) {
+	endpoint := fmt.Sprintf("/mint/api/vaults/%s", url.PathEscape(cfg.VaultID))
+	req, err := http.NewRequest(http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
+	}
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	if err := decodeResponseJSON(resp, nil); err != nil {
+		return nil, err
+	}
+
+	return &DeleteVaultResult{}, nil
 }
 
 func (c Client) ListSecrets(cfg ListSecretsConfig) (*ListSecretsResult, error) {

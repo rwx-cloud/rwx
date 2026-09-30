@@ -6,6 +6,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestVaultLifecycleCommands(t *testing.T) {
+	for _, name := range []string{"show", "update", "delete"} {
+		command := findSubcommand(vaultsCmd, name)
+		require.NotNil(t, command)
+		require.Error(t, command.Args(command, nil))
+		require.NoError(t, command.Args(command, []string{"deploys"}))
+		require.Error(t, command.Args(command, []string{"deploys", "production"}))
+	}
+
+	require.NotNil(t, vaultsUpdateCmd.Flags().Lookup("name"))
+	require.NotNil(t, vaultsUpdateCmd.Flags().Lookup("unlocked"))
+	require.Equal(t, "y", vaultsDeleteCmd.Flags().ShorthandLookup("y").Shorthand)
+}
+
 func TestVaultOidcTokenCommands(t *testing.T) {
 	require.Same(t, vaultsOidcTokensCmd, findSubcommand(vaultsCmd, "oidc-tokens"))
 	require.Len(t, vaultsOidcTokensCmd.Commands(), 5)
