@@ -74,7 +74,6 @@ type APIClient interface {
 	GetRunPromptByTaskKey(runID, taskKey string) (string, error)
 	GetSandboxInitTemplate() (api.SandboxInitTemplateResult, error)
 	ListSandboxRuns(retryProgress io.Writer) (*api.ListSandboxRunsResult, error)
-	ListHistoricalSandboxRuns(retryProgress io.Writer) (*api.ListSandboxRunsResult, error)
 	CancelRun(runID, scopedToken string) error
 }
 

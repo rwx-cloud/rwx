@@ -11,7 +11,6 @@ import (
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
-	internalerrors "github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
@@ -160,22 +159,14 @@ func TestSandboxCommandsSelectDefinition(t *testing.T) {
 				expectedChecks := 2
 				if scenario == "explicit ID" {
 					sandboxRunID, expectedRunID, expectedChecks = "run-by-id", "run-by-id", 1
-				} else if scenario == "omitted definition" {
-					expectedChecks = 1
-				} else if scenario == "ambiguous" {
-					expectedRunID, expectedChecks = "run-default", 3
 				}
 				stopAfterSelection := errors.New("stop after sandbox selection")
 				checks := 0
 				mockAPI := &mocks.API{}
 				mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
 					checks++
-					if scenario == "omitted definition" || scenario == "ambiguous" {
+					if scenario == "ambiguous" {
 						require.Contains(t, []string{"run-default", "run-custom"}, runID)
-						if scenario == "ambiguous" && checks == expectedChecks {
-							require.Equal(t, expectedRunID, runID)
-							return api.SandboxConnectionInfo{}, stopAfterSelection
-						}
 						return api.SandboxConnectionInfo{Sandboxable: true}, nil
 					}
 					require.Equal(t, expectedRunID, runID)
@@ -184,17 +175,13 @@ func TestSandboxCommandsSelectDefinition(t *testing.T) {
 					}
 					return api.SandboxConnectionInfo{Sandboxable: true}, nil
 				}
-				mockAPI.MockListHistoricalSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-					require.Contains(t, []string{"remote", "missing", "omitted definition", "ambiguous"}, scenario)
-					defaultState := cli.EncodeCliState("main", defaultFile, "")
+				mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+					require.Contains(t, []string{"remote", "missing"}, scenario)
+					defaultState := cli.EncodeCliState("main", defaultFile)
 					runs := []api.RunSummary{{ID: "run-default", CliState: &defaultState}}
-					if scenario == "remote" || scenario == "omitted definition" || scenario == "ambiguous" {
-						customState := cli.EncodeCliState("main", configFile, "")
-						if scenario == "omitted definition" {
-							runs = []api.RunSummary{{ID: "run-custom", CliState: &customState}}
-						} else {
-							runs = append(runs, api.RunSummary{ID: "run-custom", CliState: &customState})
-						}
+					if scenario == "remote" {
+						customState := cli.EncodeCliState("main", configFile)
+						runs = append(runs, api.RunSummary{ID: "run-custom", CliState: &customState})
 					}
 					return &api.ListSandboxRunsResult{Runs: runs}, nil
 				}
@@ -225,11 +212,10 @@ func TestSandboxCommandsSelectDefinition(t *testing.T) {
 					require.Zero(t, checks)
 					return
 				}
-				if scenario == "omitted definition" {
-					require.ErrorIs(t, err, internalerrors.ErrSandboxDefinitionRequired)
-					require.ErrorContains(t, err, "No active sandbox is using the default definition")
-					require.ErrorContains(t, err, "Specify a config file to select a non-default sandbox, or use --id")
-					require.Equal(t, expectedChecks, checks)
+				if scenario == "ambiguous" {
+					require.ErrorContains(t, err, "Multiple active sandboxes found")
+					require.ErrorContains(t, err, "Specify a config file to select one, or use --id")
+					require.Equal(t, 2, checks)
 					return
 				}
 				require.ErrorIs(t, err, stopAfterSelection)
