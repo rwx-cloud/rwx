@@ -268,6 +268,76 @@ var (
 	}
 )
 
+var vaultsAccessCmd = &cobra.Command{
+	Short: "Manage access to a vault",
+	Use:   "access",
+}
+
+var (
+	vaultAccessListVault string
+
+	vaultsAccessListCmd = &cobra.Command{
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.ListVaultAccess(cli.ListVaultAccessConfig{
+				Vault: vaultAccessListVault,
+				Json:  useJsonOutput(),
+			})
+			return err
+		},
+		Short: "List access to a vault",
+		Use:   "list [flags]",
+	}
+)
+
+var (
+	vaultAccessAllowVault                   string
+	vaultAccessAllowRepositorySlug          string
+	vaultAccessAllowRepositoryBranchPattern string
+	vaultAccessAllowFor                     string
+	vaultAccessAllowExpiresAt               string
+
+	vaultsAccessAllowCmd = &cobra.Command{
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.AllowVaultAccess(cli.AllowVaultAccessConfig{
+				Vault:                   vaultAccessAllowVault,
+				RepositorySlug:          vaultAccessAllowRepositorySlug,
+				RepositoryBranchPattern: vaultAccessAllowRepositoryBranchPattern,
+				AllowFor:                vaultAccessAllowFor,
+				ExpiresAt:               vaultAccessAllowExpiresAt,
+				Json:                    useJsonOutput(),
+			})
+			return err
+		},
+		Short: "Allow access to a vault",
+		Use:   "allow [flags]",
+	}
+)
+
+var (
+	vaultAccessRevokeVault                   string
+	vaultAccessRevokeRepositorySlug          string
+	vaultAccessRevokeRepositoryBranchPattern string
+	vaultAccessRevokeYes                     bool
+
+	vaultsAccessRevokeCmd = &cobra.Command{
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.RevokeVaultAccess(cli.RevokeVaultAccessConfig{
+				Vault:                   vaultAccessRevokeVault,
+				RepositorySlug:          vaultAccessRevokeRepositorySlug,
+				RepositoryBranchPattern: vaultAccessRevokeRepositoryBranchPattern,
+				Json:                    useJsonOutput(),
+				Yes:                     vaultAccessRevokeYes,
+			})
+			return err
+		},
+		Short: "Revoke access to a vault",
+		Use:   "revoke [flags]",
+	}
+)
+
 // --- oidc-tokens subcommand group ---
 
 var vaultsOidcTokensCmd = &cobra.Command{
@@ -579,6 +649,31 @@ func init() {
 	vaultsVarsCmd.AddCommand(vaultsVarsDeleteCmd)
 
 	vaultsCmd.AddCommand(vaultsVarsCmd)
+
+	vaultsAccessListCmd.Flags().StringVar(&vaultAccessListVault, "vault", "", "the name or ID of the vault to list access for")
+	_ = vaultsAccessListCmd.MarkFlagRequired("vault")
+	vaultsAccessCmd.AddCommand(vaultsAccessListCmd)
+
+	vaultsAccessAllowCmd.Flags().StringVar(&vaultAccessAllowVault, "vault", "", "the name or ID of the vault to allow access to")
+	_ = vaultsAccessAllowCmd.MarkFlagRequired("vault")
+	vaultsAccessAllowCmd.Flags().StringVar(&vaultAccessAllowRepositorySlug, "repository-slug", "", "the repository whose runs may access the vault")
+	_ = vaultsAccessAllowCmd.MarkFlagRequired("repository-slug")
+	vaultsAccessAllowCmd.Flags().StringVar(&vaultAccessAllowRepositoryBranchPattern, "repository-branch-pattern", "", "the repository branch pattern whose runs may access the vault")
+	_ = vaultsAccessAllowCmd.MarkFlagRequired("repository-branch-pattern")
+	vaultsAccessAllowCmd.Flags().StringVar(&vaultAccessAllowFor, "allow-for", "", "how long to allow access (not supported for repositories)")
+	vaultsAccessAllowCmd.Flags().StringVar(&vaultAccessAllowExpiresAt, "expires-at", "", "when access expires (not supported for repositories)")
+	vaultsAccessCmd.AddCommand(vaultsAccessAllowCmd)
+
+	vaultsAccessRevokeCmd.Flags().StringVar(&vaultAccessRevokeVault, "vault", "", "the name or ID of the vault to revoke access from")
+	_ = vaultsAccessRevokeCmd.MarkFlagRequired("vault")
+	vaultsAccessRevokeCmd.Flags().StringVar(&vaultAccessRevokeRepositorySlug, "repository-slug", "", "the repository whose access should be revoked")
+	_ = vaultsAccessRevokeCmd.MarkFlagRequired("repository-slug")
+	vaultsAccessRevokeCmd.Flags().StringVar(&vaultAccessRevokeRepositoryBranchPattern, "repository-branch-pattern", "", "the repository branch pattern whose access should be revoked")
+	_ = vaultsAccessRevokeCmd.MarkFlagRequired("repository-branch-pattern")
+	vaultsAccessRevokeCmd.Flags().BoolVarP(&vaultAccessRevokeYes, "yes", "y", false, "skip confirmation prompt")
+	vaultsAccessCmd.AddCommand(vaultsAccessRevokeCmd)
+
+	vaultsCmd.AddCommand(vaultsAccessCmd)
 
 	vaultsOidcTokensListCmd.Flags().StringVar(&oidcTokenListVault, "vault", "", "the name or ID of the vault to list OIDC tokens from")
 	_ = vaultsOidcTokensListCmd.MarkFlagRequired("vault")

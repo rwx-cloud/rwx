@@ -40,6 +40,9 @@ type API struct {
 	MockListVaultServiceAccountAttachments      func(api.ListVaultServiceAccountAttachmentsConfig) (*api.ListVaultServiceAccountAttachmentsResult, error)
 	MockAttachVaultServiceAccount               func(api.AttachVaultServiceAccountConfig) (*api.AttachVaultServiceAccountResult, error)
 	MockDetachVaultServiceAccount               func(api.DetachVaultServiceAccountConfig) (*api.DetachVaultServiceAccountResult, error)
+	MockListVaultRepositoryPermissions          func(api.ListVaultRepositoryPermissionsConfig) (*api.ListVaultRepositoryPermissionsResult, error)
+	MockCreateVaultRepositoryPermission         func(api.CreateVaultRepositoryPermissionConfig) (*api.CreateVaultRepositoryPermissionResult, error)
+	MockDeleteVaultRepositoryPermission         func(api.DeleteVaultRepositoryPermissionConfig) (*api.DeleteVaultRepositoryPermissionResult, error)
 	MockListSecrets                             func(api.ListSecretsConfig) (*api.ListSecretsResult, error)
 	MockCreateVaultOidcToken                    func(api.CreateVaultOidcTokenConfig) (*api.CreateVaultOidcTokenResult, error)
 	MockListVaultOidcTokens                     func(api.ListVaultOidcTokensConfig) (*api.ListVaultOidcTokensResult, error)
@@ -285,6 +288,30 @@ func (c *API) DetachVaultServiceAccount(cfg api.DetachVaultServiceAccountConfig)
 	}
 
 	return nil, errors.New("MockDetachVaultServiceAccount was not configured")
+}
+
+func (c *API) ListVaultRepositoryPermissions(cfg api.ListVaultRepositoryPermissionsConfig) (*api.ListVaultRepositoryPermissionsResult, error) {
+	if c.MockListVaultRepositoryPermissions != nil {
+		return c.MockListVaultRepositoryPermissions(cfg)
+	}
+
+	return nil, errors.New("MockListVaultRepositoryPermissions was not configured")
+}
+
+func (c *API) CreateVaultRepositoryPermission(cfg api.CreateVaultRepositoryPermissionConfig) (*api.CreateVaultRepositoryPermissionResult, error) {
+	if c.MockCreateVaultRepositoryPermission != nil {
+		return c.MockCreateVaultRepositoryPermission(cfg)
+	}
+
+	return nil, errors.New("MockCreateVaultRepositoryPermission was not configured")
+}
+
+func (c *API) DeleteVaultRepositoryPermission(cfg api.DeleteVaultRepositoryPermissionConfig) (*api.DeleteVaultRepositoryPermissionResult, error) {
+	if c.MockDeleteVaultRepositoryPermission != nil {
+		return c.MockDeleteVaultRepositoryPermission(cfg)
+	}
+
+	return nil, errors.New("MockDeleteVaultRepositoryPermission was not configured")
 }
 
 func (c *API) ListSecrets(cfg api.ListSecretsConfig) (*api.ListSecretsResult, error) {

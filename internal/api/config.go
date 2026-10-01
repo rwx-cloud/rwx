@@ -299,6 +299,36 @@ type DetachVaultServiceAccountConfig struct {
 
 type DetachVaultServiceAccountResult struct{}
 
+type VaultRepositoryPermission struct {
+	ID             string        `json:"id"`
+	Vault          VaultIdentity `json:"vault"`
+	RepositorySlug string        `json:"repository_slug"`
+	BranchPattern  string        `json:"branch_pattern"`
+}
+
+type ListVaultRepositoryPermissionsConfig struct {
+	VaultID string
+}
+
+type ListVaultRepositoryPermissionsResult struct {
+	RepositoryPermissions []VaultRepositoryPermission `json:"repository_permissions"`
+}
+
+type CreateVaultRepositoryPermissionConfig struct {
+	VaultID        string `json:"-"`
+	RepositorySlug string `json:"repository_slug"`
+	BranchPattern  string `json:"branch_pattern"`
+}
+
+type CreateVaultRepositoryPermissionResult = VaultRepositoryPermission
+
+type DeleteVaultRepositoryPermissionConfig struct {
+	VaultID      string
+	PermissionID string
+}
+
+type DeleteVaultRepositoryPermissionResult struct{}
+
 type ListSecretsConfig struct {
 	VaultName string
 }

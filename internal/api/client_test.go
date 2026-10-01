@@ -2428,3 +2428,74 @@ func TestAPIClient_VaultOidcTokens(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIClient_VaultRepositoryPermissionLifecycle(t *testing.T) {
+	permissionJSON := `{"id":"permission-1","vault":{"id":"vault-1","name":"deploys"},"repository_slug":"rwx-cloud/cloud","branch_pattern":"main"}`
+
+	t.Run("lists permissions by vault ID", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/repository_permissions", req.URL.Path)
+			return &http.Response{Status: "200 OK", StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"repository_permissions":[` + permissionJSON + `]}`))}, nil
+		})
+
+		result, err := client.ListVaultRepositoryPermissions(api.ListVaultRepositoryPermissionsConfig{VaultID: "vault-1"})
+		require.NoError(t, err)
+		require.Equal(t, "permission-1", result.RepositoryPermissions[0].ID)
+		require.Equal(t, "vault-1", result.RepositoryPermissions[0].Vault.ID)
+		require.Equal(t, "rwx-cloud/cloud", result.RepositoryPermissions[0].RepositorySlug)
+		require.Equal(t, "main", result.RepositoryPermissions[0].BranchPattern)
+	})
+
+	t.Run("creates a permission", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodPost, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/repository_permissions", req.URL.Path)
+			require.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"repository_slug":"rwx-cloud/cloud","branch_pattern":"main"}`, string(body))
+			return &http.Response{Status: "201 Created", StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(permissionJSON))}, nil
+		})
+
+		result, err := client.CreateVaultRepositoryPermission(api.CreateVaultRepositoryPermissionConfig{
+			VaultID: "vault-1", RepositorySlug: "rwx-cloud/cloud", BranchPattern: "main",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "permission-1", result.ID)
+	})
+
+	t.Run("deletes a permission by stable ID", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodDelete, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/repository_permissions/permission-1", req.URL.Path)
+			return &http.Response{Status: "204 No Content", StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil
+		})
+
+		_, err := client.DeleteVaultRepositoryPermission(api.DeleteVaultRepositoryPermissionConfig{VaultID: "vault-1", PermissionID: "permission-1"})
+		require.NoError(t, err)
+	})
+
+	for _, tc := range []struct {
+		name       string
+		statusCode int
+		status     string
+		body       string
+		want       string
+	}{
+		{name: "validation", statusCode: http.StatusUnprocessableEntity, status: "422 Unprocessable Content", body: `{"errors":["Branch pattern must be provided"]}`, want: "Branch pattern must be provided"},
+		{name: "conflict", statusCode: http.StatusConflict, status: "409 Conflict", body: `{"errors":["Repository slug and branch pattern must be unique"]}`, want: "must be unique"},
+		{name: "permission", statusCode: http.StatusForbidden, status: "403 Forbidden", body: `{"error_messages":[{"message":"The vault:manage permission is required"}]}`, want: "vault:manage permission is required"},
+		{name: "not found", statusCode: http.StatusNotFound, status: "404 Not Found", body: `{}`, want: "Unable to call RWX API - 404 Not Found"},
+	} {
+		t.Run("surfaces "+tc.name+" errors", func(t *testing.T) {
+			client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{Status: tc.status, StatusCode: tc.statusCode, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+			})
+			_, err := client.CreateVaultRepositoryPermission(api.CreateVaultRepositoryPermissionConfig{
+				VaultID: "vault-1", RepositorySlug: "rwx-cloud/cloud", BranchPattern: "main",
+			})
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
