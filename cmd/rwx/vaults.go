@@ -363,6 +363,66 @@ var (
 	}
 )
 
+var vaultsApproversCmd = &cobra.Command{
+	Short: "Manage approvers for a vault",
+	Use:   "approvers",
+}
+
+var (
+	approversListVault string
+
+	vaultsApproversListCmd = &cobra.Command{
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.ListVaultApprovers(cli.ListVaultApproversConfig{
+				Vault: approversListVault,
+				Json:  useJsonOutput(),
+			})
+			return err
+		},
+		Short: "List approvers for a vault",
+		Use:   "list [flags]",
+	}
+)
+
+var (
+	approversAddVault string
+
+	vaultsApproversAddCmd = &cobra.Command{
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.AddVaultApprover(cli.AddVaultApproverConfig{
+				Vault: approversAddVault,
+				Email: args[0],
+				Json:  useJsonOutput(),
+			})
+			return err
+		},
+		Short: "Add an approver to a vault",
+		Use:   "add EMAIL [flags]",
+	}
+)
+
+var (
+	approversRemoveVault string
+	approversRemoveYes   bool
+
+	vaultsApproversRemoveCmd = &cobra.Command{
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.RemoveVaultApprover(cli.RemoveVaultApproverConfig{
+				Vault:      approversRemoveVault,
+				ApproverID: args[0],
+				Json:       useJsonOutput(),
+				Yes:        approversRemoveYes,
+			})
+			return err
+		},
+		Short: "Remove an approver from a vault",
+		Use:   "remove APPROVER_ID [flags]",
+	}
+)
+
 // --- set-secrets alias (backwards compatibility) ---
 
 var (
@@ -471,6 +531,18 @@ func init() {
 	vaultsOidcTokensCmd.AddCommand(vaultsOidcTokensDeleteCmd)
 
 	vaultsCmd.AddCommand(vaultsOidcTokensCmd)
+
+	vaultsApproversListCmd.Flags().StringVar(&approversListVault, "vault", "", "the name or ID of the vault")
+	_ = vaultsApproversListCmd.MarkFlagRequired("vault")
+	vaultsApproversCmd.AddCommand(vaultsApproversListCmd)
+	vaultsApproversAddCmd.Flags().StringVar(&approversAddVault, "vault", "", "the name or ID of the vault")
+	_ = vaultsApproversAddCmd.MarkFlagRequired("vault")
+	vaultsApproversCmd.AddCommand(vaultsApproversAddCmd)
+	vaultsApproversRemoveCmd.Flags().StringVar(&approversRemoveVault, "vault", "", "the name or ID of the vault")
+	_ = vaultsApproversRemoveCmd.MarkFlagRequired("vault")
+	vaultsApproversRemoveCmd.Flags().BoolVarP(&approversRemoveYes, "yes", "y", false, "skip confirmation prompt")
+	vaultsApproversCmd.AddCommand(vaultsApproversRemoveCmd)
+	vaultsCmd.AddCommand(vaultsApproversCmd)
 
 	// vaults set-secrets (alias for backwards compatibility)
 	vaultsSetSecretsCmd.Flags().StringVar(&setSecretsVault, "vault", "default", "the name of the vault to set the secrets in")

@@ -222,6 +222,41 @@ type DeleteVaultConfig struct {
 
 type DeleteVaultResult struct{}
 
+type UserIdentity struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+}
+
+type VaultApprover struct {
+	ID    string        `json:"id"`
+	Vault VaultIdentity `json:"vault"`
+	User  UserIdentity  `json:"user"`
+}
+
+type ListVaultApproversConfig struct {
+	VaultID string
+}
+
+type ListVaultApproversResult struct {
+	Approvers []VaultApprover `json:"approvers"`
+}
+
+type AddVaultApproverConfig struct {
+	VaultID string `json:"-"`
+	Email   string `json:"email"`
+}
+
+type AddVaultApproverResult struct {
+	Approver VaultApprover `json:"approver"`
+}
+
+type RemoveVaultApproverConfig struct {
+	VaultID    string
+	ApproverID string
+}
+
+type RemoveVaultApproverResult struct{}
+
 type ListSecretsConfig struct {
 	VaultName string
 }

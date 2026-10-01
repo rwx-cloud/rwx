@@ -31,6 +31,9 @@ type APIClient interface {
 	ShowVault(api.ShowVaultConfig) (*api.ShowVaultResult, error)
 	UpdateVault(api.UpdateVaultConfig) (*api.UpdateVaultResult, error)
 	DeleteVault(api.DeleteVaultConfig) (*api.DeleteVaultResult, error)
+	ListVaultApprovers(api.ListVaultApproversConfig) (*api.ListVaultApproversResult, error)
+	AddVaultApprover(api.AddVaultApproverConfig) (*api.AddVaultApproverResult, error)
+	RemoveVaultApprover(api.RemoveVaultApproverConfig) (*api.RemoveVaultApproverResult, error)
 	DisableApp(string) error
 	EnableApp(string) error
 	ListCrons() (*api.ListCronsResult, error)

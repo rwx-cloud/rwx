@@ -496,6 +496,49 @@ func TestAPIClient_VaultLifecycle(t *testing.T) {
 	}
 }
 
+func TestAPIClient_VaultApprovers(t *testing.T) {
+	approverJSON := `{"id":"identity-1","vault":{"id":"vault-1","name":"deploys"},"user":{"id":"user-1","email":"reviewer@example.com"}}`
+
+	t.Run("lists approvers", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/approvers", req.URL.Path)
+			return &http.Response{Status: "200 OK", StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"approvers":[` + approverJSON + `]}`))}, nil
+		})
+
+		result, err := client.ListVaultApprovers(api.ListVaultApproversConfig{VaultID: "vault-1"})
+		require.NoError(t, err)
+		require.Equal(t, "identity-1", result.Approvers[0].ID)
+		require.Equal(t, "user-1", result.Approvers[0].User.ID)
+	})
+
+	t.Run("adds an approver by email", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodPost, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/approvers", req.URL.Path)
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"email":"reviewer@example.com"}`, string(body))
+			return &http.Response{Status: "201 Created", StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(`{"approver":` + approverJSON + `}`))}, nil
+		})
+
+		result, err := client.AddVaultApprover(api.AddVaultApproverConfig{VaultID: "vault-1", Email: "reviewer@example.com"})
+		require.NoError(t, err)
+		require.Equal(t, "identity-1", result.Approver.ID)
+	})
+
+	t.Run("removes an approver by stable ID", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodDelete, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/approvers/identity-1", req.URL.Path)
+			return &http.Response{Status: "204 No Content", StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil
+		})
+
+		_, err := client.RemoveVaultApprover(api.RemoveVaultApproverConfig{VaultID: "vault-1", ApproverID: "identity-1"})
+		require.NoError(t, err)
+	})
+}
+
 func TestAPIClient_InitiateDispatch(t *testing.T) {
 	t.Run("builds the request and parses the response", func(t *testing.T) {
 		body := struct {

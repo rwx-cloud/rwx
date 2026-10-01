@@ -34,6 +34,9 @@ type API struct {
 	MockShowVault                               func(api.ShowVaultConfig) (*api.ShowVaultResult, error)
 	MockUpdateVault                             func(api.UpdateVaultConfig) (*api.UpdateVaultResult, error)
 	MockDeleteVault                             func(api.DeleteVaultConfig) (*api.DeleteVaultResult, error)
+	MockListVaultApprovers                      func(api.ListVaultApproversConfig) (*api.ListVaultApproversResult, error)
+	MockAddVaultApprover                        func(api.AddVaultApproverConfig) (*api.AddVaultApproverResult, error)
+	MockRemoveVaultApprover                     func(api.RemoveVaultApproverConfig) (*api.RemoveVaultApproverResult, error)
 	MockListSecrets                             func(api.ListSecretsConfig) (*api.ListSecretsResult, error)
 	MockCreateVaultOidcToken                    func(api.CreateVaultOidcTokenConfig) (*api.CreateVaultOidcTokenResult, error)
 	MockListVaultOidcTokens                     func(api.ListVaultOidcTokensConfig) (*api.ListVaultOidcTokensResult, error)
@@ -231,6 +234,30 @@ func (c *API) DeleteVault(cfg api.DeleteVaultConfig) (*api.DeleteVaultResult, er
 	}
 
 	return nil, errors.New("MockDeleteVault was not configured")
+}
+
+func (c *API) ListVaultApprovers(cfg api.ListVaultApproversConfig) (*api.ListVaultApproversResult, error) {
+	if c.MockListVaultApprovers != nil {
+		return c.MockListVaultApprovers(cfg)
+	}
+
+	return nil, errors.New("MockListVaultApprovers was not configured")
+}
+
+func (c *API) AddVaultApprover(cfg api.AddVaultApproverConfig) (*api.AddVaultApproverResult, error) {
+	if c.MockAddVaultApprover != nil {
+		return c.MockAddVaultApprover(cfg)
+	}
+
+	return nil, errors.New("MockAddVaultApprover was not configured")
+}
+
+func (c *API) RemoveVaultApprover(cfg api.RemoveVaultApproverConfig) (*api.RemoveVaultApproverResult, error) {
+	if c.MockRemoveVaultApprover != nil {
+		return c.MockRemoveVaultApprover(cfg)
+	}
+
+	return nil, errors.New("MockRemoveVaultApprover was not configured")
 }
 
 func (c *API) ListSecrets(cfg api.ListSecretsConfig) (*api.ListSecretsResult, error) {
