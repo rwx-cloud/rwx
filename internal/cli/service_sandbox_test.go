@@ -4855,6 +4855,48 @@ func TestService_ExecSandbox_RecoverFromAPI(t *testing.T) {
 		require.Equal(t, "run-new", result.RunID)
 		require.True(t, initiatedRun, "should have initiated a new run")
 	})
+
+	t.Run("active remote non-default requires explicit selection", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		customConfig := setup.absConfig(".rwx/custom.yml")
+		state := cli.EncodeCliState("main", customConfig)
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-custom", CliState: &state}}}, nil
+		}
+
+		_, err := setup.service.TunnelSandbox(cli.TunnelSandboxConfig{Key: "web", TargetPort: 3000, Json: true})
+
+		require.ErrorIs(t, err, errors.ErrSandboxDefinitionRequired)
+		require.EqualError(t, err, "No active sandbox is using the default definition for branch main.\nSpecify a config file to select a non-default sandbox, or use --id to specify a run ID.")
+		event := findEvent(setup.drainEvents(), "sandbox.ambiguous_selection")
+		require.NotNil(t, event)
+		require.Equal(t, "definition_required", event.Props["resolution"])
+	})
+
+	t.Run("implicit exec warns before starting the default when a remote non-default is active", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.mockVCS.MockGetBranch = "main"
+		defaultConfig := setup.absConfig(".rwx/sandbox.yml")
+		require.NoError(t, os.WriteFile(defaultConfig, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
+		customConfig := setup.absConfig(".rwx/custom.yml")
+		state := cli.EncodeCliState("main", customConfig)
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{{ID: "run-custom", CliState: &state}}}, nil
+		}
+		startAttempted := errors.New("start attempted")
+		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
+			return api.DefaultBaseResult{}, startAttempted
+		}
+
+		_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{Command: []string{"true"}, Json: true})
+
+		require.ErrorIs(t, err, startAttempted)
+		require.Equal(t, "Warning: A non-default sandbox definition has been used for branch main. Starting a new sandbox with the default definition at "+defaultConfig+".\n", setup.mockStderr.String())
+		event := findEvent(setup.drainEvents(), "sandbox.ambiguous_selection")
+		require.NotNil(t, event)
+		require.Equal(t, "start_default", event.Props["resolution"])
+	})
 }
 
 func TestService_ExecSandbox_SessionReuse(t *testing.T) {
@@ -4984,6 +5026,30 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		})
 
 		mockReadySandbox(setup)
+		storagePath := filepath.Join(setup.tmp, ".rwx", "sandboxes", "sandboxes.json")
+		originalModTime := time.Unix(123, 0)
+		require.NoError(t, os.Chtimes(storagePath, originalModTime, originalModTime))
+		connectionInfoCalls := 0
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			connectionInfoCalls++
+			if connectionInfoCalls == 2 {
+				info, statErr := os.Stat(storagePath)
+				require.NoError(t, statErr)
+				require.True(t, originalModTime.Equal(info.ModTime()))
+			}
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:22",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+				Polling:        api.PollingResult{Completed: true},
+			}, nil
+		}
+		activeRunLookupCalls := 0
+		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
+			activeRunLookupCalls++
+			return &api.ListSandboxRunsResult{}, nil
+		}
 
 		// No ConfigFile — exercises the branch-only session lookup path
 		// that the CI regression landed in.
@@ -4994,6 +5060,14 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, runID, result.RunID)
+		require.Equal(t, 2, connectionInfoCalls)
+		require.Zero(t, activeRunLookupCalls)
+
+		storageEvents := findEvents(setup.drainEvents(), "sandbox.storage")
+		require.Len(t, storageEvents, 2)
+		require.Equal(t, "skipped", storageEvents[0].Props["status"])
+		require.Equal(t, "unchanged", storageEvents[0].Props["reason"])
+		require.Equal(t, "post_exec_update", storageEvents[1].Props["reason"])
 
 		storage, err := cli.LoadSandboxStorage()
 		require.NoError(t, err)
@@ -5005,7 +5079,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		setup := setupTest(t)
 
 		expiredConfig := setup.absConfig(".rwx/expired.yml")
-		activeConfig := setup.absConfig(".rwx/active.yml")
+		activeConfig := setup.absConfig(".rwx/sandbox.yml")
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"detached:" + expiredConfig: {
 				RunID:      "run-expired",

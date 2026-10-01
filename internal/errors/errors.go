@@ -58,23 +58,24 @@ func wrapSentinel(err, sentinel error) error {
 }
 
 var (
-	ErrFileNotExists           = os.ErrNotExist
-	ErrBadRequest              = errors.New("bad request")
-	ErrNotFound                = errors.New("not found")
-	ErrGone                    = errors.New("gone")
-	ErrRetry                   = errors.New("retry")
-	ErrSandboxNoGitDir         = errors.New("no .git directory found in sandbox. Set 'preserve-git-dir: true' on your git/clone task")
-	ErrSandboxSetupFailure     = errors.New("sandbox setup failure")
-	ErrShallowClone            = errors.New("shallow clone error")
-	ErrSSH                     = errors.New("ssh error")
-	ErrPatch                   = errors.New("patch error")
-	ErrTimeout                 = errors.New("timeout")
-	ErrLSP                     = errors.New("lsp error")
-	ErrAmbiguousTaskKey        = errors.New("ambiguous task key")
-	ErrAmbiguousDefinitionPath = errors.New("ambiguous definition path")
-	ErrNetworkTransient        = errors.New("network transient error")
-	ErrUnauthenticated         = errors.New("unauthenticated")
-	ErrInternalServerError     = errors.New("internal server error")
+	ErrFileNotExists             = os.ErrNotExist
+	ErrBadRequest                = errors.New("bad request")
+	ErrNotFound                  = errors.New("not found")
+	ErrGone                      = errors.New("gone")
+	ErrRetry                     = errors.New("retry")
+	ErrSandboxNoGitDir           = errors.New("no .git directory found in sandbox. Set 'preserve-git-dir: true' on your git/clone task")
+	ErrSandboxSetupFailure       = errors.New("sandbox setup failure")
+	ErrShallowClone              = errors.New("shallow clone error")
+	ErrSSH                       = errors.New("ssh error")
+	ErrPatch                     = errors.New("patch error")
+	ErrTimeout                   = errors.New("timeout")
+	ErrLSP                       = errors.New("lsp error")
+	ErrAmbiguousTaskKey          = errors.New("ambiguous task key")
+	ErrAmbiguousDefinitionPath   = errors.New("ambiguous definition path")
+	ErrSandboxDefinitionRequired = errors.New("sandbox definition required")
+	ErrNetworkTransient          = errors.New("network transient error")
+	ErrUnauthenticated           = errors.New("unauthenticated")
+	ErrInternalServerError       = errors.New("internal server error")
 
 	// WrapSentinel wraps an error so that errors.Is returns true for the sentinel.
 	WrapSentinel = wrapSentinel

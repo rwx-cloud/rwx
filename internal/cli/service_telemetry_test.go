@@ -722,6 +722,21 @@ func TestTelemetry_SandboxExec(t *testing.T) {
 		require.Contains(t, execEvent.Props, "sync_pull_ms")
 		require.Contains(t, execEvent.Props, "push_patch_bytes")
 		require.Contains(t, execEvent.Props, "pull_patch_bytes")
+
+		resolveEvent := findEvent(events, "sandbox.resolve")
+		require.NotNil(t, resolveEvent)
+		require.Equal(t, "succeeded", resolveEvent.Props["status"])
+		require.Contains(t, resolveEvent.Props, "duration_ms")
+		require.Contains(t, resolveEvent.Props, "selection_duration_ms")
+		require.Contains(t, resolveEvent.Props, "resolution_to_ssh_ms")
+		require.Contains(t, resolveEvent.Props, "storage_lock_wait_ms")
+		require.Contains(t, resolveEvent.Props, "storage_load_ms")
+		require.Contains(t, resolveEvent.Props, "storage_save_count")
+		require.Contains(t, resolveEvent.Props, "storage_save_skipped")
+		require.Contains(t, resolveEvent.Props, "active_run_lookup_ms")
+		require.Equal(t, 1, resolveEvent.Props["connection_info_count"])
+		require.Contains(t, resolveEvent.Props, "connection_info_duration_ms")
+		require.Len(t, resolveEvent.Props["connection_info_durations_ms"], 1)
 	})
 }
 

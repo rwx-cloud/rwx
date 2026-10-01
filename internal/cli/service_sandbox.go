@@ -54,6 +54,7 @@ type StartSandboxConfig struct {
 	// (e.g. ExecSandbox) to keep the "check-then-create" atomic.
 	// StartSandbox will release it after persisting the initial session.
 	storageLock *SandboxStorageLock
+	resolution  *sandboxResolutionMetrics
 }
 
 // StartSandboxConfigWithLock returns a copy of cfg with the storage lock set.
@@ -206,6 +207,35 @@ type syncedSandbox struct {
 	syncPushPatchBytes int
 	connectionInfo     api.SandboxConnectionInfo
 	release            func()
+}
+
+type sandboxResolutionMetrics struct {
+	start                     time.Time
+	selectionCompletedAt      time.Time
+	durationMs                int64
+	selectionDurationMs       int64
+	resolutionToSSHMs         int64
+	storageLockWaitMs         int64
+	storageLoadMs             int64
+	storageSaveCount          int
+	storageSaveSkipped        bool
+	activeRunLookupMs         int64
+	connectionInfoDurationsMs []int64
+}
+
+func (m *sandboxResolutionMetrics) getConnectionInfo(client APIClient, runID, scopedToken string) (api.SandboxConnectionInfo, error) {
+	start := time.Now()
+	result, err := client.GetSandboxConnectionInfo(runID, scopedToken)
+	m.connectionInfoDurationsMs = append(m.connectionInfoDurationsMs, time.Since(start).Milliseconds())
+	return result, err
+}
+
+func (m *sandboxResolutionMetrics) connectionInfoDurationMs() int64 {
+	var total int64
+	for _, duration := range m.connectionInfoDurationsMs {
+		total += duration
+	}
+	return total
 }
 
 func (sandbox *syncedSandbox) close() {
@@ -362,7 +392,7 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 
 		// Only wait for sandbox to be ready if --wait flag is set
 		if cfg.Wait && !connInfo.Sandboxable {
-			if _, err := s.waitForSandboxReadyWithToken(cfg.RunID, existingScopedToken, cfg.Json); err != nil {
+			if _, err := s.waitForSandboxReadyWithToken(cfg.RunID, existingScopedToken, cfg.Json, nil); err != nil {
 				return nil, err
 			}
 		}
@@ -381,12 +411,16 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 					scopedToken = tokenResult.Token
 				}
 
+				storageLockStart := time.Now()
 				lockFile, lockErr := s.lockSandboxStorageWithInfo(cfg.Json)
+				storageLockWaitMs := time.Since(storageLockStart).Milliseconds()
 				if lockErr != nil {
 					fmt.Fprintf(s.Stderr, "Warning: Unable to lock sandbox storage: %v\n", lockErr)
 				} else {
 					// Reload under lock to avoid overwriting concurrent writes
+					storageLoadStart := time.Now()
 					storage, err = LoadSandboxStorage()
+					storageLoadMs := time.Since(storageLoadStart).Milliseconds()
 					if err != nil {
 						fmt.Fprintf(s.Stderr, "Warning: Unable to load sandbox sessions: %v\n", err)
 					} else {
@@ -396,7 +430,7 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 							ScopedToken: scopedToken,
 							ConfigHash:  HashConfigFile(cfg.ConfigFile),
 						})
-						if err := storage.Save(); err != nil {
+						if err := s.saveSandboxStorageWithTelemetry(storage, "reattach", storageLockWaitMs, storageLoadMs, nil, false); err != nil {
 							fmt.Fprintf(s.Stderr, "Warning: Unable to save sandbox session: %v\n", err)
 						}
 					}
@@ -471,7 +505,12 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 	}
 
 	now := time.Now().UTC()
+	storageLoadStart := time.Now()
 	storage, err := LoadSandboxStorage()
+	storageLoadMs := time.Since(storageLoadStart).Milliseconds()
+	if cfg.resolution != nil {
+		cfg.resolution.storageLoadMs += storageLoadMs
+	}
 	if err != nil {
 		fmt.Fprintf(s.Stderr, "Warning: Unable to load sandbox sessions: %v\n", err)
 	} else {
@@ -482,7 +521,11 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 			ConfigHash: HashConfigFile(cfg.ConfigFile),
 			CreatedAt:  &now,
 		})
-		if err := storage.Save(); err != nil {
+		lockWaitMs := int64(0)
+		if cfg.resolution != nil {
+			lockWaitMs = cfg.resolution.storageLockWaitMs
+		}
+		if err := s.saveSandboxStorageWithTelemetry(storage, "start_session", lockWaitMs, storageLoadMs, cfg.resolution, false); err != nil {
 			fmt.Fprintf(s.Stderr, "Warning: Unable to save sandbox session: %v\n", err)
 		}
 	}
@@ -503,13 +546,23 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 	// Update session with scoped token now that we have it
 	if storage != nil {
 		var lockErr error
+		storageLockStart := time.Now()
 		lockFile, lockErr = s.lockSandboxStorageWithInfo(cfg.Json)
+		storageLockWaitMs := time.Since(storageLockStart).Milliseconds()
+		if cfg.resolution != nil {
+			cfg.resolution.storageLockWaitMs += storageLockWaitMs
+		}
 		if lockErr != nil {
 			fmt.Fprintf(s.Stderr, "Warning: Unable to lock sandbox storage: %v\n", lockErr)
 		}
 
 		// Reload under lock to avoid overwriting concurrent writes
+		storageLoadStart := time.Now()
 		storage, err = LoadSandboxStorage()
+		storageLoadMs := time.Since(storageLoadStart).Milliseconds()
+		if cfg.resolution != nil {
+			cfg.resolution.storageLoadMs += storageLoadMs
+		}
 		if err != nil {
 			fmt.Fprintf(s.Stderr, "Warning: Unable to load sandbox sessions: %v\n", err)
 		} else {
@@ -521,7 +574,7 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 				ConfigHash:  HashConfigFile(cfg.ConfigFile),
 				CreatedAt:   &now,
 			})
-			if err := storage.Save(); err != nil {
+			if err := s.saveSandboxStorageWithTelemetry(storage, "scoped_token", storageLockWaitMs, storageLoadMs, cfg.resolution, false); err != nil {
 				fmt.Fprintf(s.Stderr, "Warning: Unable to save sandbox session: %v\n", err)
 			}
 		}
@@ -542,7 +595,7 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 
 	// Only wait for sandbox to be ready if --wait flag is set
 	if cfg.Wait {
-		_, err = s.waitForSandboxReadyWithToken(runResult.RunID, scopedToken, cfg.Json)
+		_, err = s.waitForSandboxReadyWithToken(runResult.RunID, scopedToken, cfg.Json, nil)
 		if err != nil {
 			// Return result WITH error so caller can still use the URL
 			return result, err
@@ -1107,7 +1160,32 @@ func sandboxTunnelStateDirectory() (string, error) {
 	return filepath.Join(filepath.Dir(storagePath), "previews"), nil
 }
 
-func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSandbox, error) {
+func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *syncedSandbox, resultErr error) {
+	resolution := &sandboxResolutionMetrics{start: time.Now()}
+	defer func() {
+		if resolution.durationMs == 0 {
+			resolution.durationMs = time.Since(resolution.start).Milliseconds()
+		}
+		status := "succeeded"
+		if resultErr != nil {
+			status = "failed"
+		}
+		s.recordTelemetry("sandbox.resolve", map[string]any{
+			"status":                       status,
+			"duration_ms":                  resolution.durationMs,
+			"selection_duration_ms":        resolution.selectionDurationMs,
+			"resolution_to_ssh_ms":         resolution.resolutionToSSHMs,
+			"storage_lock_wait_ms":         resolution.storageLockWaitMs,
+			"storage_load_ms":              resolution.storageLoadMs,
+			"storage_save_count":           resolution.storageSaveCount,
+			"storage_save_skipped":         resolution.storageSaveSkipped,
+			"active_run_lookup_ms":         resolution.activeRunLookupMs,
+			"connection_info_count":        len(resolution.connectionInfoDurationsMs),
+			"connection_info_duration_ms":  resolution.connectionInfoDurationMs(),
+			"connection_info_durations_ms": resolution.connectionInfoDurationsMs,
+		})
+	}()
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get current directory")
@@ -1142,7 +1220,9 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 		configFile = cfg.ConfigFile
 
 		// Look up scoped token from storage if session exists
+		loadStart := time.Now()
 		storage, err := LoadSandboxStorage()
+		resolution.storageLoadMs += time.Since(loadStart).Milliseconds()
 		if err == nil {
 			if existingSession, _, found := storage.FindByRunID(cfg.RunID); found {
 				scopedToken = existingSession.ScopedToken
@@ -1157,19 +1237,24 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 		// The lock is released as soon as a run ID is determined so that
 		// the actual SSH operation can proceed concurrently (serialized by the
 		// agent-side lock instead).
+		lockStart := time.Now()
 		lockFile, lockErr := s.lockSandboxStorageWithInfo(cfg.Json)
+		resolution.storageLockWaitMs += time.Since(lockStart).Milliseconds()
 		if lockErr != nil {
 			return nil, errors.Wrap(lockErr, "unable to lock sandbox storage")
 		}
 
 		// Try to find existing session
+		loadStart := time.Now()
 		storage, err := LoadSandboxStorage()
+		resolution.storageLoadMs += time.Since(loadStart).Milliseconds()
 		if err != nil {
 			fmt.Fprintf(s.Stderr, "Warning: Unable to load sandbox sessions: %v\n", err)
 			storage = &SandboxStorage{Sandboxes: make(map[string]SandboxSession)}
 		}
 
 		var session *SandboxSession
+		var activeSessions []SandboxSession
 		found := false
 
 		if cfg.ConfigFile != "" {
@@ -1178,18 +1263,18 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 			if !found && IsDetachedBranch(branch) {
 				session, found = storage.GetSessionByAncestry(branch, cfg.ConfigFile, s.VCSClient)
 				if found {
-					_ = storage.Save()
+					_ = s.saveSandboxStorageWithTelemetry(storage, "ancestry_recovery", resolution.storageLockWaitMs, resolution.storageLoadMs, resolution, false)
 				}
 			}
 			if found {
 				// Check if session is still valid (use scoped token if available).
 				// Polling.Completed=true with Sandboxable=true is a ready sandbox,
 				// not an expired one; only prune when the run finished without becoming sandboxable.
-				connInfo, err := s.APIClient.GetSandboxConnectionInfo(session.RunID, session.ScopedToken)
+				connInfo, err := resolution.getConnectionInfo(s.APIClient, session.RunID, session.ScopedToken)
 				if err != nil || (connInfo.Polling.Completed && !connInfo.Sandboxable) {
 					s.closeSandboxTunnels(session.RunID)
 					storage.DeleteSession(branch, cfg.ConfigFile)
-					_ = storage.Save()
+					_ = s.saveSandboxStorageWithTelemetry(storage, "expired_session_cleanup", resolution.storageLockWaitMs, resolution.storageLoadMs, resolution, false)
 					found = false
 				} else {
 					runID = session.RunID
@@ -1201,56 +1286,77 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 					resetNagShown = session.ResetNagShown
 				}
 			}
+			if storage.HasChanges() {
+				_ = s.saveSandboxStorageWithTelemetry(storage, "migration", resolution.storageLockWaitMs, resolution.storageLoadMs, resolution, false)
+			}
 		} else {
 			// No config file - find any session for this branch
 			sessions := storage.GetSessionsForBranch(branch)
 			if len(sessions) == 0 && IsDetachedBranch(branch) {
 				sessions = storage.GetSessionsForBranchByAncestry(branch, s.VCSClient)
 				if len(sessions) > 0 {
-					_ = storage.Save()
+					_ = s.saveSandboxStorageWithTelemetry(storage, "ancestry_recovery", resolution.storageLockWaitMs, resolution.storageLoadMs, resolution, false)
 				}
 			}
 
 			// Filter to only active sessions. A ready sandbox reports
 			// Polling.Completed=true with Sandboxable=true; only prune when
 			// the run finished without becoming sandboxable.
-			var activeSessions []SandboxSession
+			expiredSessionDeleted := false
 			for _, sess := range sessions {
-				connInfo, err := s.APIClient.GetSandboxConnectionInfo(sess.RunID, sess.ScopedToken)
+				connInfo, err := resolution.getConnectionInfo(s.APIClient, sess.RunID, sess.ScopedToken)
 				if err == nil && (connInfo.Sandboxable || !connInfo.Polling.Completed) {
 					activeSessions = append(activeSessions, sess)
 				} else {
 					// Clean up expired session
 					s.closeSandboxTunnels(sess.RunID)
 					storage.DeleteSession(branch, sess.ConfigFile)
+					expiredSessionDeleted = true
 				}
 			}
-			_ = storage.Save()
-
-			if len(activeSessions) == 1 {
-				runID = activeSessions[0].RunID
-				configFile = activeSessions[0].ConfigFile
-				scopedToken = activeSessions[0].ScopedToken
-				sessionRunURL = activeSessions[0].RunURL
-				storedConfigHash = activeSessions[0].ConfigHash
-				execCount = activeSessions[0].ExecCount
-				resetNagShown = activeSessions[0].ResetNagShown
-				found = true
-			} else if len(activeSessions) > 1 {
-				UnlockSandboxStorage(lockFile)
-				return nil, fmt.Errorf("Multiple active sandboxes found for branch %s.\nSpecify a config file to select one, or use --id to specify a run ID.", branch)
+			saveReason := "unchanged"
+			if storage.HasMigration() {
+				saveReason = "migration"
 			}
+			if expiredSessionDeleted {
+				saveReason = "expired_session_cleanup"
+			}
+			_ = s.saveSandboxStorageWithTelemetry(storage, saveReason, resolution.storageLockWaitMs, resolution.storageLoadMs, resolution, true)
 		}
 
-		// Resolve config file once for both remote recovery and auto-create
 		cfgFile := cfg.ConfigFile
 		if cfgFile == "" {
 			cfgFile = FindDefaultSandboxConfigFile()
 		}
+		if !found {
+			for _, activeSession := range activeSessions {
+				if activeSession.ConfigFile == cfgFile {
+					runID = activeSession.RunID
+					configFile = activeSession.ConfigFile
+					scopedToken = activeSession.ScopedToken
+					sessionRunURL = activeSession.RunURL
+					storedConfigHash = activeSession.ConfigHash
+					execCount = activeSession.ExecCount
+					resetNagShown = activeSession.ResetNagShown
+					found = true
+					break
+				}
+			}
+		}
+
+		nonDefaultDefinitionUsed := false
+		if cfg.ConfigFile == "" {
+			for _, activeSession := range activeSessions {
+				if activeSession.ConfigFile != cfgFile {
+					nonDefaultDefinitionUsed = true
+				}
+			}
+		}
 
 		if !found {
-			// Check if a matching sandbox already exists remotely
+			activeRunLookupStart := time.Now()
 			listResult, listErr := s.APIClient.ListSandboxRuns(s.Stderr)
+			resolution.activeRunLookupMs += time.Since(activeRunLookupStart).Milliseconds()
 			if listErr == nil {
 				for _, run := range listResult.Runs {
 					if run.CliState == nil || *run.CliState == "" {
@@ -1267,55 +1373,58 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 							branchMatch = s.VCSClient.IsAncestor(storedSHA, "HEAD")
 						}
 					}
-					if branchMatch && state.ConfigFile == cfgFile {
-						// Verify the remote sandbox is still alive before reusing.
-						// A ready sandbox reports Polling.Completed=true with Sandboxable=true;
-						// only skip when the run finished without becoming sandboxable.
-						connInfo, connErr := s.APIClient.GetSandboxConnectionInfo(run.ID, "")
-						if connErr != nil || (connInfo.Polling.Completed && !connInfo.Sandboxable) {
-							continue
-						}
-
-						runID = run.ID
-						configFile = cfgFile
-						sessionRunURL = run.RunURL
-
-						// Create a scoped token for this recovered session
-						tokenResult, tokenErr := s.APIClient.CreateSandboxToken(api.CreateSandboxTokenConfig{
-							RunID: run.ID,
-						})
-						if tokenErr != nil {
-							fmt.Fprintf(s.Stderr, "Warning: Unable to create scoped token: %v\n", tokenErr)
-						} else {
-							scopedToken = tokenResult.Token
-						}
-
-						// Store locally so future execs find it without an API call
-						storage.SetSession(branch, cfgFile, SandboxSession{
-							RunID:       run.ID,
-							ConfigFile:  cfgFile,
-							ScopedToken: scopedToken,
-							RunURL:      run.RunURL,
-							ConfigHash:  HashConfigFile(cfgFile),
-						})
-						if saveErr := storage.Save(); saveErr != nil {
-							fmt.Fprintf(s.Stderr, "Warning: Unable to save sandbox session: %v\n", saveErr)
-						}
-
-						found = true
-						break
+					if !branchMatch {
+						continue
 					}
+					if cfg.ConfigFile == "" && state.ConfigFile != cfgFile {
+						nonDefaultDefinitionUsed = true
+					}
+					if state.ConfigFile != cfgFile {
+						continue
+					}
+
+					connInfo, connErr := resolution.getConnectionInfo(s.APIClient, run.ID, "")
+					if connErr != nil || (connInfo.Polling.Completed && !connInfo.Sandboxable) {
+						continue
+					}
+					runID = run.ID
+					configFile = cfgFile
+					sessionRunURL = run.RunURL
+					tokenResult, tokenErr := s.APIClient.CreateSandboxToken(api.CreateSandboxTokenConfig{RunID: run.ID})
+					if tokenErr != nil {
+						fmt.Fprintf(s.Stderr, "Warning: Unable to create scoped token: %v\n", tokenErr)
+					} else {
+						scopedToken = tokenResult.Token
+					}
+					storage.SetSession(branch, cfgFile, SandboxSession{
+						RunID:       run.ID,
+						ConfigFile:  cfgFile,
+						ScopedToken: scopedToken,
+						RunURL:      run.RunURL,
+						ConfigHash:  HashConfigFile(cfgFile),
+					})
+					if saveErr := s.saveSandboxStorageWithTelemetry(storage, "active_remote_recovery", resolution.storageLockWaitMs, resolution.storageLoadMs, resolution, false); saveErr != nil {
+						fmt.Fprintf(s.Stderr, "Warning: Unable to save sandbox session: %v\n", saveErr)
+					}
+					found = true
+					break
 				}
 			}
 		}
 
 		if !found && cfg.RequireExisting {
 			UnlockSandboxStorage(lockFile)
+			if nonDefaultDefinitionUsed {
+				s.recordTelemetry("sandbox.ambiguous_selection", map[string]any{
+					"resolution": "definition_required",
+				})
+				return nil, errors.WrapSentinel(fmt.Errorf("No active sandbox is using the default definition for branch %s.\nSpecify a config file to select a non-default sandbox, or use --id to specify a run ID.", branch), errors.ErrSandboxDefinitionRequired)
+			}
 			return nil, fmt.Errorf("No active sandbox found for branch %s.\nStart one with 'rwx sandbox start' or use --id to select an existing run.", branch)
 		}
 
 		if found && cfg.Reset {
-			connInfo, connErr := s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
+			connInfo, connErr := resolution.getConnectionInfo(s.APIClient, runID, scopedToken)
 			if connErr == nil && connInfo.Sandboxable {
 				if sshErr := s.connectSSH(&connInfo); sshErr == nil {
 					_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_end__")
@@ -1333,7 +1442,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 			s.waitForSandboxCompletion(runID, scopedToken)
 			s.closeSandboxTunnels(runID)
 			storage.DeleteSession(branch, configFile)
-			if saveErr := storage.Save(); saveErr != nil {
+			if saveErr := s.saveSandboxStorageWithTelemetry(storage, "reset", resolution.storageLockWaitMs, resolution.storageLoadMs, resolution, false); saveErr != nil {
 				fmt.Fprintf(s.Stderr, "Warning: unable to save sandbox sessions: %v\n", saveErr)
 			}
 			found = false
@@ -1345,6 +1454,12 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 		}
 
 		if !found {
+			if nonDefaultDefinitionUsed {
+				fmt.Fprintf(s.Stderr, "Warning: A non-default sandbox definition has been used for branch %s. Starting a new sandbox with the default definition at %s.\n", branch, cfgFile)
+				s.recordTelemetry("sandbox.ambiguous_selection", map[string]any{
+					"resolution": "start_default",
+				})
+			}
 			// Pass the lock to StartSandbox so the "no session found → create
 			// new sandbox → persist session" sequence is atomic. StartSandbox
 			// will release it after the initial session is saved.
@@ -1355,6 +1470,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 				Json:           cfg.Json,
 				InitParameters: cfg.InitParameters,
 				storageLock:    lockFile,
+				resolution:     resolution,
 			})
 			if err != nil {
 				return nil, err
@@ -1378,12 +1494,18 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 
 	if cfg.ShowReconnectionHint && !isNewSandbox && execCount >= 1 && !resetNagShown {
 		fmt.Fprintf(s.Stderr, "Reconnecting to existing sandbox. To re-run setup tasks, use: rwx sandbox exec --reset -- <command>\n")
+		nagLockStart := time.Now()
 		if nagLock, nagLockErr := s.lockSandboxStorageWithInfo(cfg.Json); nagLockErr == nil {
+			nagLockWaitMs := time.Since(nagLockStart).Milliseconds()
+			resolution.storageLockWaitMs += nagLockWaitMs
+			nagLoadStart := time.Now()
 			if nagStorage, nagLoadErr := LoadSandboxStorage(); nagLoadErr == nil {
+				nagLoadMs := time.Since(nagLoadStart).Milliseconds()
+				resolution.storageLoadMs += nagLoadMs
 				if nagSession, ok := nagStorage.GetSession(branch, configFile); ok {
 					nagSession.ResetNagShown = true
 					nagStorage.SetSession(branch, configFile, *nagSession)
-					_ = nagStorage.Save()
+					_ = s.saveSandboxStorageWithTelemetry(nagStorage, "reconnection_hint", nagLockWaitMs, nagLoadMs, resolution, false)
 				}
 			}
 			UnlockSandboxStorage(nagLock)
@@ -1399,12 +1521,16 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 	}
 
 	// Get connection info (use scoped token if available)
-	connInfo, err := s.waitForSandboxReadyWithToken(runID, scopedToken, cfg.Json)
+	resolution.selectionCompletedAt = time.Now()
+	resolution.selectionDurationMs = time.Since(resolution.start).Milliseconds()
+	connInfo, err := s.waitForSandboxReadyWithToken(runID, scopedToken, cfg.Json, resolution)
 	if err != nil {
 		return nil, err
 	}
 
 	// Connect via SSH
+	resolution.resolutionToSSHMs = time.Since(resolution.selectionCompletedAt).Milliseconds()
+	resolution.durationMs = time.Since(resolution.start).Milliseconds()
 	err = s.connectSSH(connInfo)
 	if err != nil {
 		var netErr net.Error
@@ -1443,7 +1569,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 		return nil, errors.Wrap(lockErr, "failed to acquire sandbox lock")
 	}
 
-	result := &syncedSandbox{
+	result = &syncedSandbox{
 		cwd:            cwd,
 		branch:         branch,
 		runID:          runID,
@@ -1471,10 +1597,16 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (*syncedSan
 			if _, endErr := s.SSHClient.ExecuteCommand("__rwx_sandbox_end__"); endErr != nil {
 				fmt.Fprintf(s.Stderr, "Warning: failed to stop sandbox: %v\n", endErr)
 			}
+			storageLockStart := time.Now()
 			if lockFile, lockErr := s.lockSandboxStorageWithInfo(cfg.Json); lockErr == nil {
+				storageLockWaitMs := time.Since(storageLockStart).Milliseconds()
+				resolution.storageLockWaitMs += storageLockWaitMs
+				storageLoadStart := time.Now()
 				if storage, loadErr := LoadSandboxStorage(); loadErr == nil {
+					storageLoadMs := time.Since(storageLoadStart).Milliseconds()
+					resolution.storageLoadMs += storageLoadMs
 					storage.DeleteSessionByRunID(runID)
-					if saveErr := storage.Save(); saveErr != nil {
+					if saveErr := s.saveSandboxStorageWithTelemetry(storage, "invalid_sandbox_cleanup", storageLockWaitMs, storageLoadMs, resolution, false); saveErr != nil {
 						fmt.Fprintf(s.Stderr, "Warning: failed to remove sandbox session: %v\n", saveErr)
 					}
 				} else {
@@ -1559,13 +1691,17 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 
 	// Update session exec count and last exec time
 	execNow := time.Now().UTC()
+	storageLockStart := time.Now()
 	if lockFile, lockErr := s.lockSandboxStorageWithInfo(cfg.Json); lockErr == nil {
+		storageLockWaitMs := time.Since(storageLockStart).Milliseconds()
+		storageLoadStart := time.Now()
 		if storage, loadErr := LoadSandboxStorage(); loadErr == nil {
+			storageLoadMs := time.Since(storageLoadStart).Milliseconds()
 			if session, ok := storage.GetSession(sandbox.branch, sandbox.configFile); ok {
 				session.LastExecAt = &execNow
 				session.ExecCount++
 				storage.SetSession(sandbox.branch, sandbox.configFile, *session)
-				_ = storage.Save()
+				_ = s.saveSandboxStorageWithTelemetry(storage, "post_exec_update", storageLockWaitMs, storageLoadMs, nil, false)
 			}
 		}
 		UnlockSandboxStorage(lockFile)
@@ -2721,11 +2857,59 @@ func (s Service) lockSandboxStorageWithInfo(jsonMode bool) (*SandboxStorageLock,
 	return lock, nil
 }
 
+func (s Service) saveSandboxStorageWithTelemetry(storage *SandboxStorage, reason string, lockWaitMs, loadMs int64, resolution *sandboxResolutionMetrics, skipUnchanged bool) error {
+	if skipUnchanged && !storage.HasChanges() {
+		if resolution != nil {
+			resolution.storageSaveSkipped = true
+		}
+		s.recordTelemetry("sandbox.storage", map[string]any{
+			"status":       "skipped",
+			"reason":       "unchanged",
+			"saved":        false,
+			"lock_wait_ms": lockWaitMs,
+			"load_ms":      loadMs,
+		})
+		return nil
+	}
+
+	if storage.HasMigration() && reason == "unchanged" {
+		reason = "migration"
+	}
+	if resolution != nil {
+		resolution.storageSaveCount++
+	}
+	metrics, err := storage.SaveWithMetrics()
+	status := "succeeded"
+	if err != nil {
+		status = "failed"
+	}
+	s.recordTelemetry("sandbox.storage", map[string]any{
+		"status":          status,
+		"reason":          reason,
+		"saved":           true,
+		"lock_wait_ms":    lockWaitMs,
+		"load_ms":         loadMs,
+		"duration_ms":     metrics.DurationMs,
+		"setup_ms":        metrics.SetupMs,
+		"encode_write_ms": metrics.EncodeWriteMs,
+		"sync_ms":         metrics.SyncMs,
+		"close_ms":        metrics.CloseMs,
+		"rename_ms":       metrics.RenameMs,
+	})
+	return err
+}
+
 // Helper methods
 
-func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMode bool) (*api.SandboxConnectionInfo, error) {
+func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMode bool, resolution *sandboxResolutionMetrics) (*api.SandboxConnectionInfo, error) {
 	// Check once before showing spinner - sandbox may already be ready
-	connInfo, err := s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
+	var connInfo api.SandboxConnectionInfo
+	var err error
+	if resolution == nil {
+		connInfo, err = s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
+	} else {
+		connInfo, err = resolution.getConnectionInfo(s.APIClient, runID, scopedToken)
+	}
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get sandbox connection info")
 	}
@@ -2753,7 +2937,11 @@ func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMod
 		}
 		time.Sleep(time.Duration(backoffMs) * time.Millisecond)
 
-		connInfo, err = s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
+		if resolution == nil {
+			connInfo, err = s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
+		} else {
+			connInfo, err = resolution.getConnectionInfo(s.APIClient, runID, scopedToken)
+		}
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to get sandbox connection info")
 		}
