@@ -566,7 +566,7 @@ func TestAPIClient_VaultApprovers(t *testing.T) {
 }
 
 func TestAPIClient_VaultServiceAccountAttachments(t *testing.T) {
-	attachmentJSON := `{"id":"attachment-1","vault":{"id":"vault-1","name":"deploys"},"service_account":{"id":"account-1","name":"deploy-bot"},"created_at":"2026-10-01T12:34:56.123456Z"}`
+	attachmentJSON := `{"id":"attachment-1","vault":{"id":"vault-1","name":"deploys"},"service_account":{"id":"account-1","name":"deploy-bot"},"expression":"${{ vaults.api-vault.service-accounts.api-account.token }}","created_at":"2026-10-01T12:34:56.123456Z"}`
 
 	t.Run("lists attachments", func(t *testing.T) {
 		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
@@ -579,6 +579,7 @@ func TestAPIClient_VaultServiceAccountAttachments(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "attachment-1", result.ServiceAccountAttachments[0].ID)
 		require.Equal(t, "deploy-bot", result.ServiceAccountAttachments[0].ServiceAccount.Name)
+		require.Equal(t, "${{ vaults.api-vault.service-accounts.api-account.token }}", result.ServiceAccountAttachments[0].Expression)
 	})
 
 	t.Run("attaches by service account name", func(t *testing.T) {
@@ -594,6 +595,7 @@ func TestAPIClient_VaultServiceAccountAttachments(t *testing.T) {
 		result, err := client.AttachVaultServiceAccount(api.AttachVaultServiceAccountConfig{VaultID: "vault-1", ServiceAccount: "deploy-bot"})
 		require.NoError(t, err)
 		require.Equal(t, "attachment-1", result.ServiceAccountAttachment.ID)
+		require.Equal(t, "${{ vaults.api-vault.service-accounts.api-account.token }}", result.ServiceAccountAttachment.Expression)
 	})
 
 	t.Run("detaches by stable attachment ID", func(t *testing.T) {

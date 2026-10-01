@@ -18,6 +18,7 @@ type VaultServiceAccountAttachmentInfo struct {
 	ID             string
 	Vault          VaultIdentity
 	ServiceAccount ServiceAccountIdentity
+	Expression     string
 	CreatedAt      string
 }
 
@@ -52,6 +53,7 @@ func vaultServiceAccountAttachmentInfo(attachment api.VaultServiceAccountAttachm
 		ID:             attachment.ID,
 		Vault:          VaultIdentity{ID: attachment.Vault.ID, Name: attachment.Vault.Name},
 		ServiceAccount: ServiceAccountIdentity{ID: attachment.ServiceAccount.ID, Name: attachment.ServiceAccount.Name},
+		Expression:     attachment.Expression,
 		CreatedAt:      attachment.CreatedAt,
 	}
 }
@@ -79,9 +81,9 @@ func (s Service) ListVaultServiceAccounts(cfg ListVaultServiceAccountsConfig) (*
 		fmt.Fprintf(s.Stdout, "No service accounts attached to vault %q.\n", cfg.Vault)
 	} else {
 		w := tabwriter.NewWriter(s.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tSERVICE ACCOUNT ID\tNAME\tCREATED AT")
+		fmt.Fprintln(w, "ID\tSERVICE ACCOUNT ID\tNAME\tEXPRESSION\tCREATED AT")
 		for _, attachment := range attachments {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", attachment.ID, attachment.ServiceAccount.ID, attachment.ServiceAccount.Name, attachment.CreatedAt)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", attachment.ID, attachment.ServiceAccount.ID, attachment.ServiceAccount.Name, attachment.Expression, attachment.CreatedAt)
 		}
 		if err := w.Flush(); err != nil {
 			return nil, errors.Wrap(err, "unable to write attached service account list")
@@ -108,6 +110,7 @@ func (s Service) AttachVaultServiceAccount(cfg AttachVaultServiceAccountConfig) 
 		}
 	} else {
 		fmt.Fprintf(s.Stdout, "Attached service account %q to vault %q.\n", result.ServiceAccount.Name, result.Vault.Name)
+		fmt.Fprintf(s.Stdout, "Expression: %s\n", result.Expression)
 	}
 	return &result, nil
 }
