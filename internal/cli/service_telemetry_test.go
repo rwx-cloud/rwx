@@ -733,7 +733,6 @@ func TestTelemetry_SandboxExec(t *testing.T) {
 		require.Contains(t, resolveEvent.Props, "storage_load_ms")
 		require.Contains(t, resolveEvent.Props, "storage_save_count")
 		require.Contains(t, resolveEvent.Props, "storage_save_skipped")
-		require.Contains(t, resolveEvent.Props, "active_run_lookup_ms")
 		require.Equal(t, 1, resolveEvent.Props["connection_info_count"])
 		require.Contains(t, resolveEvent.Props, "connection_info_duration_ms")
 		require.Len(t, resolveEvent.Props["connection_info_durations_ms"], 1)

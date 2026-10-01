@@ -219,7 +219,6 @@ type sandboxResolutionMetrics struct {
 	storageLoadMs             int64
 	storageSaveCount          int
 	storageSaveSkipped        bool
-	activeRunLookupMs         int64
 	connectionInfoDurationsMs []int64
 }
 
@@ -1179,7 +1178,6 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 			"storage_load_ms":              resolution.storageLoadMs,
 			"storage_save_count":           resolution.storageSaveCount,
 			"storage_save_skipped":         resolution.storageSaveSkipped,
-			"active_run_lookup_ms":         resolution.activeRunLookupMs,
 			"connection_info_count":        len(resolution.connectionInfoDurationsMs),
 			"connection_info_duration_ms":  resolution.connectionInfoDurationMs(),
 			"connection_info_durations_ms": resolution.connectionInfoDurationsMs,
@@ -1353,65 +1351,6 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 			}
 		}
 
-		if !found {
-			activeRunLookupStart := time.Now()
-			listResult, listErr := s.APIClient.ListSandboxRuns(s.Stderr)
-			resolution.activeRunLookupMs += time.Since(activeRunLookupStart).Milliseconds()
-			if listErr == nil {
-				for _, run := range listResult.Runs {
-					if run.CliState == nil || *run.CliState == "" {
-						continue
-					}
-					state, decErr := DecodeCliState(*run.CliState)
-					if decErr != nil {
-						continue
-					}
-					branchMatch := state.Branch == branch
-					if !branchMatch && IsDetachedBranch(branch) && IsDetachedBranch(state.Branch) {
-						storedSHA := DetachedShortSHA(state.Branch)
-						if storedSHA != "" {
-							branchMatch = s.VCSClient.IsAncestor(storedSHA, "HEAD")
-						}
-					}
-					if !branchMatch {
-						continue
-					}
-					if cfg.ConfigFile == "" && state.ConfigFile != cfgFile {
-						nonDefaultDefinitionUsed = true
-					}
-					if state.ConfigFile != cfgFile {
-						continue
-					}
-
-					connInfo, connErr := resolution.getConnectionInfo(s.APIClient, run.ID, "")
-					if connErr != nil || (connInfo.Polling.Completed && !connInfo.Sandboxable) {
-						continue
-					}
-					runID = run.ID
-					configFile = cfgFile
-					sessionRunURL = run.RunURL
-					tokenResult, tokenErr := s.APIClient.CreateSandboxToken(api.CreateSandboxTokenConfig{RunID: run.ID})
-					if tokenErr != nil {
-						fmt.Fprintf(s.Stderr, "Warning: Unable to create scoped token: %v\n", tokenErr)
-					} else {
-						scopedToken = tokenResult.Token
-					}
-					storage.SetSession(branch, cfgFile, SandboxSession{
-						RunID:       run.ID,
-						ConfigFile:  cfgFile,
-						ScopedToken: scopedToken,
-						RunURL:      run.RunURL,
-						ConfigHash:  HashConfigFile(cfgFile),
-					})
-					if saveErr := s.saveSandboxStorageWithTelemetry(storage, "active_remote_recovery", resolution.storageLockWaitMs, resolution.storageLoadMs, resolution, false); saveErr != nil {
-						fmt.Fprintf(s.Stderr, "Warning: Unable to save sandbox session: %v\n", saveErr)
-					}
-					found = true
-					break
-				}
-			}
-		}
-
 		if !found && cfg.RequireExisting {
 			UnlockSandboxStorage(lockFile)
 			if nonDefaultDefinitionUsed {
@@ -1420,7 +1359,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 				})
 				return nil, errors.WrapSentinel(fmt.Errorf("No active sandbox is using the default definition for branch %s.\nSpecify a config file to select a non-default sandbox, or use --id to specify a run ID.", branch), errors.ErrSandboxDefinitionRequired)
 			}
-			return nil, fmt.Errorf("No active sandbox found for branch %s.\nStart one with 'rwx sandbox start' or use --id to select an existing run.", branch)
+			return nil, fmt.Errorf("No active sandbox found for branch %s.\nRun 'rwx sandbox list' to recover an active sandbox, start one with 'rwx sandbox start', or use --id to select a run.", branch)
 		}
 
 		if found && cfg.Reset {

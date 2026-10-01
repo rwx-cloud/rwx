@@ -137,7 +137,7 @@ func TestSandboxCommandsSelectDefinition(t *testing.T) {
 		sandboxPushCmd, sandboxBackgroundCmd, sandboxBackgroundRestartCmd,
 		sandboxBackgroundStopCmd, sandboxBackgroundLogsCmd, sandboxTunnelCmd,
 	} {
-		for _, scenario := range []string{"local", "remote", "explicit ID", "missing", "omitted definition", "ambiguous"} {
+		for _, scenario := range []string{"local", "explicit ID", "missing", "omitted definition", "ambiguous"} {
 			t.Run(command.CommandPath()+"/"+scenario, func(t *testing.T) {
 				t.Chdir(t.TempDir())
 				require.NoError(t, os.Mkdir(".rwx", 0o755))
@@ -184,24 +184,6 @@ func TestSandboxCommandsSelectDefinition(t *testing.T) {
 					}
 					return api.SandboxConnectionInfo{Sandboxable: true}, nil
 				}
-				mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
-					require.Contains(t, []string{"remote", "missing", "omitted definition"}, scenario)
-					defaultState := cli.EncodeCliState("main", defaultFile)
-					runs := []api.RunSummary{{ID: "run-default", CliState: &defaultState}}
-					if scenario == "remote" || scenario == "omitted definition" || scenario == "ambiguous" {
-						customState := cli.EncodeCliState("main", configFile)
-						if scenario == "omitted definition" {
-							runs = []api.RunSummary{{ID: "run-custom", CliState: &customState}}
-						} else {
-							runs = append(runs, api.RunSummary{ID: "run-custom", CliState: &customState})
-						}
-					}
-					return &api.ListSandboxRunsResult{Runs: runs}, nil
-				}
-				mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-					require.Equal(t, "run-custom", cfg.RunID)
-					return &api.CreateSandboxTokenResult{Token: "recovered-token"}, nil
-				}
 				service = cli.Service{Config: cli.Config{
 					APIClient: mockAPI,
 					VCSClient: &mocks.VCS{MockGetBranch: "main", MockGetHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
@@ -222,6 +204,7 @@ func TestSandboxCommandsSelectDefinition(t *testing.T) {
 				err = cmd.RunE(cmd, cmd.Flags().Args())
 				if scenario == "missing" {
 					require.ErrorContains(t, err, "No active sandbox found")
+					require.ErrorContains(t, err, "rwx sandbox list")
 					require.Zero(t, checks)
 					return
 				}
@@ -234,14 +217,6 @@ func TestSandboxCommandsSelectDefinition(t *testing.T) {
 				}
 				require.ErrorIs(t, err, stopAfterSelection)
 				require.Equal(t, expectedChecks, checks)
-				if scenario == "remote" {
-					storage, err := cli.LoadSandboxStorage()
-					require.NoError(t, err)
-					session, found := storage.GetSession("main", configFile)
-					require.True(t, found)
-					require.Equal(t, "run-custom", session.RunID)
-					require.Equal(t, "recovered-token", session.ScopedToken)
-				}
 			})
 		}
 	}
