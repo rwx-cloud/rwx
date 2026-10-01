@@ -43,6 +43,9 @@ type API struct {
 	MockListVaultRepositoryPermissions          func(api.ListVaultRepositoryPermissionsConfig) (*api.ListVaultRepositoryPermissionsResult, error)
 	MockCreateVaultRepositoryPermission         func(api.CreateVaultRepositoryPermissionConfig) (*api.CreateVaultRepositoryPermissionResult, error)
 	MockDeleteVaultRepositoryPermission         func(api.DeleteVaultRepositoryPermissionConfig) (*api.DeleteVaultRepositoryPermissionResult, error)
+	MockListVaultAccessGrants                   func(api.ListVaultAccessGrantsConfig) (*api.ListVaultAccessGrantsResult, error)
+	MockCreateVaultAccessGrant                  func(api.CreateVaultAccessGrantConfig) (*api.CreateVaultAccessGrantResult, error)
+	MockDeleteVaultAccessGrant                  func(api.DeleteVaultAccessGrantConfig) (*api.DeleteVaultAccessGrantResult, error)
 	MockListSecrets                             func(api.ListSecretsConfig) (*api.ListSecretsResult, error)
 	MockCreateVaultOidcToken                    func(api.CreateVaultOidcTokenConfig) (*api.CreateVaultOidcTokenResult, error)
 	MockListVaultOidcTokens                     func(api.ListVaultOidcTokensConfig) (*api.ListVaultOidcTokensResult, error)
@@ -312,6 +315,30 @@ func (c *API) DeleteVaultRepositoryPermission(cfg api.DeleteVaultRepositoryPermi
 	}
 
 	return nil, errors.New("MockDeleteVaultRepositoryPermission was not configured")
+}
+
+func (c *API) ListVaultAccessGrants(cfg api.ListVaultAccessGrantsConfig) (*api.ListVaultAccessGrantsResult, error) {
+	if c.MockListVaultAccessGrants != nil {
+		return c.MockListVaultAccessGrants(cfg)
+	}
+
+	return nil, errors.New("MockListVaultAccessGrants was not configured")
+}
+
+func (c *API) CreateVaultAccessGrant(cfg api.CreateVaultAccessGrantConfig) (*api.CreateVaultAccessGrantResult, error) {
+	if c.MockCreateVaultAccessGrant != nil {
+		return c.MockCreateVaultAccessGrant(cfg)
+	}
+
+	return nil, errors.New("MockCreateVaultAccessGrant was not configured")
+}
+
+func (c *API) DeleteVaultAccessGrant(cfg api.DeleteVaultAccessGrantConfig) (*api.DeleteVaultAccessGrantResult, error) {
+	if c.MockDeleteVaultAccessGrant != nil {
+		return c.MockDeleteVaultAccessGrant(cfg)
+	}
+
+	return nil, errors.New("MockDeleteVaultAccessGrant was not configured")
 }
 
 func (c *API) ListSecrets(cfg api.ListSecretsConfig) (*api.ListSecretsResult, error) {

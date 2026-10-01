@@ -40,6 +40,9 @@ type APIClient interface {
 	ListVaultRepositoryPermissions(api.ListVaultRepositoryPermissionsConfig) (*api.ListVaultRepositoryPermissionsResult, error)
 	CreateVaultRepositoryPermission(api.CreateVaultRepositoryPermissionConfig) (*api.CreateVaultRepositoryPermissionResult, error)
 	DeleteVaultRepositoryPermission(api.DeleteVaultRepositoryPermissionConfig) (*api.DeleteVaultRepositoryPermissionResult, error)
+	ListVaultAccessGrants(api.ListVaultAccessGrantsConfig) (*api.ListVaultAccessGrantsResult, error)
+	CreateVaultAccessGrant(api.CreateVaultAccessGrantConfig) (*api.CreateVaultAccessGrantResult, error)
+	DeleteVaultAccessGrant(api.DeleteVaultAccessGrantConfig) (*api.DeleteVaultAccessGrantResult, error)
 	DisableApp(string) error
 	EnableApp(string) error
 	ListCrons() (*api.ListCronsResult, error)

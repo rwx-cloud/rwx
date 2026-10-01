@@ -294,6 +294,8 @@ var (
 	vaultAccessAllowVault                   string
 	vaultAccessAllowRepositorySlug          string
 	vaultAccessAllowRepositoryBranchPattern string
+	vaultAccessAllowEmail                   string
+	vaultAccessAllowServiceAccount          string
 	vaultAccessAllowFor                     string
 	vaultAccessAllowExpiresAt               string
 
@@ -304,6 +306,8 @@ var (
 				Vault:                   vaultAccessAllowVault,
 				RepositorySlug:          vaultAccessAllowRepositorySlug,
 				RepositoryBranchPattern: vaultAccessAllowRepositoryBranchPattern,
+				Email:                   vaultAccessAllowEmail,
+				ServiceAccount:          vaultAccessAllowServiceAccount,
 				AllowFor:                vaultAccessAllowFor,
 				ExpiresAt:               vaultAccessAllowExpiresAt,
 				Json:                    useJsonOutput(),
@@ -319,6 +323,8 @@ var (
 	vaultAccessRevokeVault                   string
 	vaultAccessRevokeRepositorySlug          string
 	vaultAccessRevokeRepositoryBranchPattern string
+	vaultAccessRevokeEmail                   string
+	vaultAccessRevokeServiceAccount          string
 	vaultAccessRevokeYes                     bool
 
 	vaultsAccessRevokeCmd = &cobra.Command{
@@ -328,6 +334,8 @@ var (
 				Vault:                   vaultAccessRevokeVault,
 				RepositorySlug:          vaultAccessRevokeRepositorySlug,
 				RepositoryBranchPattern: vaultAccessRevokeRepositoryBranchPattern,
+				Email:                   vaultAccessRevokeEmail,
+				ServiceAccount:          vaultAccessRevokeServiceAccount,
 				Json:                    useJsonOutput(),
 				Yes:                     vaultAccessRevokeYes,
 			})
@@ -657,20 +665,27 @@ func init() {
 	vaultsAccessAllowCmd.Flags().StringVar(&vaultAccessAllowVault, "vault", "", "the name or ID of the vault to allow access to")
 	_ = vaultsAccessAllowCmd.MarkFlagRequired("vault")
 	vaultsAccessAllowCmd.Flags().StringVar(&vaultAccessAllowRepositorySlug, "repository-slug", "", "the repository whose runs may access the vault")
-	_ = vaultsAccessAllowCmd.MarkFlagRequired("repository-slug")
 	vaultsAccessAllowCmd.Flags().StringVar(&vaultAccessAllowRepositoryBranchPattern, "repository-branch-pattern", "", "the repository branch pattern whose runs may access the vault")
-	_ = vaultsAccessAllowCmd.MarkFlagRequired("repository-branch-pattern")
+	vaultsAccessAllowCmd.Flags().StringVar(&vaultAccessAllowEmail, "email", "", "the user who may access the vault")
+	vaultsAccessAllowCmd.Flags().StringVar(&vaultAccessAllowServiceAccount, "service-account", "", "the service account that may access the vault")
 	vaultsAccessAllowCmd.Flags().StringVar(&vaultAccessAllowFor, "allow-for", "", "how long to allow access (not supported for repositories)")
 	vaultsAccessAllowCmd.Flags().StringVar(&vaultAccessAllowExpiresAt, "expires-at", "", "when access expires (not supported for repositories)")
+	vaultsAccessAllowCmd.MarkFlagsOneRequired("repository-slug", "email", "service-account")
+	vaultsAccessAllowCmd.MarkFlagsMutuallyExclusive("repository-slug", "email", "service-account")
+	vaultsAccessAllowCmd.MarkFlagsRequiredTogether("repository-slug", "repository-branch-pattern")
+	vaultsAccessAllowCmd.MarkFlagsMutuallyExclusive("allow-for", "expires-at")
 	vaultsAccessCmd.AddCommand(vaultsAccessAllowCmd)
 
 	vaultsAccessRevokeCmd.Flags().StringVar(&vaultAccessRevokeVault, "vault", "", "the name or ID of the vault to revoke access from")
 	_ = vaultsAccessRevokeCmd.MarkFlagRequired("vault")
 	vaultsAccessRevokeCmd.Flags().StringVar(&vaultAccessRevokeRepositorySlug, "repository-slug", "", "the repository whose access should be revoked")
-	_ = vaultsAccessRevokeCmd.MarkFlagRequired("repository-slug")
 	vaultsAccessRevokeCmd.Flags().StringVar(&vaultAccessRevokeRepositoryBranchPattern, "repository-branch-pattern", "", "the repository branch pattern whose access should be revoked")
-	_ = vaultsAccessRevokeCmd.MarkFlagRequired("repository-branch-pattern")
+	vaultsAccessRevokeCmd.Flags().StringVar(&vaultAccessRevokeEmail, "email", "", "the user whose access should be revoked")
+	vaultsAccessRevokeCmd.Flags().StringVar(&vaultAccessRevokeServiceAccount, "service-account", "", "the service account whose access should be revoked")
 	vaultsAccessRevokeCmd.Flags().BoolVarP(&vaultAccessRevokeYes, "yes", "y", false, "skip confirmation prompt")
+	vaultsAccessRevokeCmd.MarkFlagsOneRequired("repository-slug", "email", "service-account")
+	vaultsAccessRevokeCmd.MarkFlagsMutuallyExclusive("repository-slug", "email", "service-account")
+	vaultsAccessRevokeCmd.MarkFlagsRequiredTogether("repository-slug", "repository-branch-pattern")
 	vaultsAccessCmd.AddCommand(vaultsAccessRevokeCmd)
 
 	vaultsCmd.AddCommand(vaultsAccessCmd)

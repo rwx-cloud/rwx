@@ -2501,3 +2501,68 @@ func TestAPIClient_VaultRepositoryPermissionLifecycle(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIClient_VaultAccessGrantLifecycle(t *testing.T) {
+	grantJSON := `{"id":"identity-1","vault":{"id":"vault-1","name":"deploys"},"principal":{"type":"user","id":"user-1","email":"person@example.com"},"expires_at":"2026-10-31T17:00:00.123456Z"}`
+
+	t.Run("lists mixed principal grants by vault ID", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/access_grants", req.URL.Path)
+			body := `{"access_grants":[` + grantJSON + `,{"id":"identity-2","vault":{"id":"vault-1","name":"deploys"},"principal":{"type":"service_account","id":"account-1","name":"deploy-bot"},"expires_at":null}]}`
+			return &http.Response{Status: "200 OK", StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+		})
+
+		result, err := client.ListVaultAccessGrants(api.ListVaultAccessGrantsConfig{VaultID: "vault-1"})
+		require.NoError(t, err)
+		require.Len(t, result.AccessGrants, 2)
+		require.Equal(t, "person@example.com", result.AccessGrants[0].Principal.Email)
+		require.Equal(t, "deploy-bot", result.AccessGrants[1].Principal.Name)
+		require.Nil(t, result.AccessGrants[1].ExpiresAt)
+	})
+
+	t.Run("upserts a user grant with expiration", func(t *testing.T) {
+		expiresAt := "2026-10-31T17:00:00.123456Z"
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodPost, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/access_grants", req.URL.Path)
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"principal_type":"user","email":"person@example.com","expires_at":"2026-10-31T17:00:00.123456Z"}`, string(body))
+			return &http.Response{Status: "201 Created", StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(`{"access_grant":` + grantJSON + `}`))}, nil
+		})
+
+		result, err := client.CreateVaultAccessGrant(api.CreateVaultAccessGrantConfig{
+			VaultID: "vault-1", PrincipalType: "user", Email: "person@example.com", ExpiresAt: &expiresAt,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "identity-1", result.AccessGrant.ID)
+	})
+
+	t.Run("upserts a permanent service account grant", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"principal_type":"service_account","service_account":"deploy-bot","expires_at":null}`, string(body))
+			response := `{"access_grant":{"id":"identity-2","vault":{"id":"vault-1","name":"deploys"},"principal":{"type":"service_account","id":"account-1","name":"deploy-bot"},"expires_at":null}}`
+			return &http.Response{Status: "201 Created", StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(response))}, nil
+		})
+
+		result, err := client.CreateVaultAccessGrant(api.CreateVaultAccessGrantConfig{
+			VaultID: "vault-1", PrincipalType: "service_account", ServiceAccount: "deploy-bot",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "identity-2", result.AccessGrant.ID)
+	})
+
+	t.Run("deletes a grant by stable ID", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodDelete, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/access_grants/identity-1", req.URL.Path)
+			return &http.Response{Status: "204 No Content", StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil
+		})
+
+		_, err := client.DeleteVaultAccessGrant(api.DeleteVaultAccessGrantConfig{VaultID: "vault-1", GrantID: "identity-1"})
+		require.NoError(t, err)
+	})
+}
