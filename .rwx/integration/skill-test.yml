@@ -239,7 +239,10 @@ tasks:
       Stale content
       EOF
 
-      output=$(rwx skill update 2>&1)
+      if ! output=$(rwx skill update --force 2>&1); then
+        echo "$output"
+        exit 1
+      fi
 
       if echo "$output" | grep -q "All skills are up to date"; then
         echo "Update reported no changes, but v0.0.1 should be outdated"
@@ -259,6 +262,33 @@ tasks:
         exit 1
       fi
 
+  - key: test-skill-update-skips-modified
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      tmpdir=$(mktemp -d)
+      cd "$tmpdir"
+
+      mkdir -p "$tmpdir/.agents/skills/rwx"
+      cat > "$tmpdir/.agents/skills/rwx/SKILL.md" << 'EOF'
+      ---
+      metadata:
+        version: "0.2.0"
+      ---
+      locally modified content
+      EOF
+      cp "$tmpdir/.agents/skills/rwx/SKILL.md" "$tmpdir/original-skill.md"
+
+      if ! output=$(rwx skill update 2>&1); then
+        echo "$output"
+        exit 1
+      fi
+
+      echo "$output" | grep -q "locally modified"
+      echo "$output" | grep -q -- '--force'
+      cmp "$tmpdir/original-skill.md" "$tmpdir/.agents/skills/rwx/SKILL.md"
+
   - key: test-skill-update-symlink-claude
     use: rwx-cli
     run: |
@@ -276,7 +306,7 @@ tasks:
       Stale content
       EOF
 
-      rwx skill update --symlink claude
+      rwx skill update --force --symlink claude
 
       # .claude/skills should be a symlink to .agents/skills
       if [ ! -L "$tmpdir/.claude/skills" ]; then

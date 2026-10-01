@@ -16,6 +16,7 @@ type API struct {
 	MockResumeCron                              func(string) (*api.CronResult, error)
 	MockSnoozeCron                              func(string, string) (*api.CronResult, error)
 	MockGetSkillContent                         func() (string, error)
+	MockGetSkillSnapshot                        func() (*api.SkillSnapshot, error)
 	MockGetSkillLatestVersion                   func() (string, error)
 	MockInitiateRun                             func(api.InitiateRunConfig) (*api.InitiateRunResult, error)
 	MockDeferredRunStatus                       func(pollingURL string) (api.DeferredRunStatusResult, error)
@@ -86,6 +87,14 @@ func (c *API) GetSkillContent() (string, error) {
 	}
 
 	return "", errors.New("MockGetSkillContent was not configured")
+}
+
+func (c *API) GetSkillSnapshot() (*api.SkillSnapshot, error) {
+	if c.MockGetSkillSnapshot != nil {
+		return c.MockGetSkillSnapshot()
+	}
+
+	return nil, errors.New("MockGetSkillSnapshot was not configured")
 }
 
 func (c *API) GetSkillLatestVersion() (string, error) {

@@ -17,6 +17,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAPIClient_GetSkillSnapshot(t *testing.T) {
+	t.Run("parses the atomic skill snapshot", func(t *testing.T) {
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, "/api/skill", req.URL.Path)
+			return &http.Response{
+				Status:     "200 OK",
+				StatusCode: http.StatusOK,
+				Body: io.NopCloser(strings.NewReader(`{
+					"latest_version":"2.0.0",
+					"latest_content":"latest content",
+					"sha256_digests":{"1.0.0":"abc","2.0.0":"def"}
+				}`)),
+			}, nil
+		}
+
+		result, err := api.NewClientWithRoundTrip(roundTrip).GetSkillSnapshot()
+		require.NoError(t, err)
+		require.Equal(t, "2.0.0", result.LatestVersion)
+		require.Equal(t, "latest content", result.LatestContent)
+		require.Equal(t, map[string]string{"1.0.0": "abc", "2.0.0": "def"}, result.SHA256Digests)
+	})
+
+	t.Run("returns API errors", func(t *testing.T) {
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				Status:     "503 Service Unavailable",
+				StatusCode: http.StatusServiceUnavailable,
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		}
+
+		_, err := api.NewClientWithRoundTrip(roundTrip).GetSkillSnapshot()
+		require.EqualError(t, err, "Unable to call RWX API - 503 Service Unavailable")
+	})
+}
+
 func TestAPIClient_InitiateRun(t *testing.T) {
 	t.Run("prefixes the endpoint with the base path and parses camelcase responses", func(t *testing.T) {
 		body := struct {

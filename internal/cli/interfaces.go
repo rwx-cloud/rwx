@@ -11,6 +11,7 @@ import (
 
 type APIClient interface {
 	GetSkillContent() (string, error)
+	GetSkillSnapshot() (*api.SkillSnapshot, error)
 	GetSkillLatestVersion() (string, error)
 	AttachDebugSession(api.AttachDebugSessionConfig) (api.DebugSessionSummary, error)
 	GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error)

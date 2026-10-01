@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -203,16 +204,14 @@ type SkillUpdateEntry struct {
 	Installation skill.Installation
 	OldVersion   string
 	NewVersion   string
-	Action       string // "updated" or "skipped"
+	Action       string
 }
 
 type SkillUpdateResult struct {
 	Entries []SkillUpdateEntry
 }
 
-// SkillUpdate updates outdated agents skill installations by fetching
-// the latest SKILL.md from GitHub. Marketplace installations are skipped.
-func (s Service) SkillUpdate(symlink string) (*SkillUpdateResult, error) {
+func (s Service) SkillUpdate(symlink string, force bool) (*SkillUpdateResult, error) {
 	result, err := skill.Detect()
 	if err != nil {
 		return nil, err
@@ -222,38 +221,37 @@ func (s Service) SkillUpdate(symlink string) (*SkillUpdateResult, error) {
 		return &SkillUpdateResult{}, nil
 	}
 
-	latestVersionStr := s.fetchLatestSkillVersion()
-	if latestVersionStr == "" {
-		return nil, errors.New("unable to determine the latest skill version")
+	snapshot, err := s.APIClient.GetSkillSnapshot()
+	if err != nil {
+		return nil, err
 	}
-	latestVersion, err := semver.NewVersion(latestVersionStr)
+	latestVersion, err := semver.NewVersion(snapshot.LatestVersion)
 	if err != nil {
 		return &SkillUpdateResult{}, nil
 	}
 
+	knownDigests := make(map[string]bool, len(snapshot.SHA256Digests))
+	for _, digest := range snapshot.SHA256Digests {
+		knownDigests[digest] = true
+	}
+	latestSum := sha256.Sum256([]byte(snapshot.LatestContent))
+	latestDigest := fmt.Sprintf("%x", latestSum)
+	knownDigests[latestDigest] = true
+
 	var entries []SkillUpdateEntry
-	var needsFetch bool
+	var needsWrite bool
+	var scanner *bufio.Scanner
 
 	for _, inst := range result.Installations {
 		if !skill.IsDetected(inst) {
 			continue
 		}
 
-		outdated := false
-		if inst.Version == "" {
-			outdated = true
-		} else {
-			v, err := semver.NewVersion(inst.Version)
-			if err == nil && latestVersion.GreaterThan(v) {
-				outdated = true
-			}
-		}
-
-		if !outdated {
-			continue
-		}
-
 		if inst.Source == "marketplace" {
+			v, err := semver.NewVersion(inst.Version)
+			if inst.Version != "" && (err != nil || !latestVersion.GreaterThan(v)) {
+				continue
+			}
 			entries = append(entries, SkillUpdateEntry{
 				Installation: inst,
 				OldVersion:   inst.Version,
@@ -262,32 +260,63 @@ func (s Service) SkillUpdate(symlink string) (*SkillUpdateResult, error) {
 			continue
 		}
 
-		needsFetch = true
+		content, err := os.ReadFile(inst.Path)
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to read skill file")
+		}
+		sum := sha256.Sum256(content)
+		digest := fmt.Sprintf("%x", sum)
+		if digest == latestDigest {
+			continue
+		}
+
+		if !knownDigests[digest] && !force {
+			overwrite := false
+			if s.StderrIsTTY {
+				fmt.Fprintf(s.Stderr, "The RWX skill at %s has local modifications.\nOverwrite it? [y/N]: ", inst.Path)
+				if scanner == nil {
+					scanner = bufio.NewScanner(s.Stdin)
+				}
+				if scanner.Scan() {
+					answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+					overwrite = answer == "y" || answer == "yes"
+				}
+			} else {
+				fmt.Fprintf(s.Stderr, "Skipped locally modified RWX skill at %s. Use --force to overwrite it.\n", inst.Path)
+			}
+
+			if !overwrite {
+				entries = append(entries, SkillUpdateEntry{
+					Installation: inst,
+					OldVersion:   inst.Version,
+					NewVersion:   snapshot.LatestVersion,
+					Action:       "modified",
+				})
+				continue
+			}
+		}
+
+		needsWrite = true
 		entries = append(entries, SkillUpdateEntry{
 			Installation: inst,
 			OldVersion:   inst.Version,
-			NewVersion:   latestVersionStr,
+			NewVersion:   snapshot.LatestVersion,
 			Action:       "updated",
 		})
 	}
 
-	if needsFetch {
-		content, err := s.APIClient.GetSkillContent()
-		if err != nil {
-			return nil, err
-		}
-
+	if needsWrite {
 		for _, entry := range entries {
 			if entry.Action != "updated" {
 				continue
 			}
-			if err := os.WriteFile(entry.Installation.Path, []byte(content), 0o644); err != nil {
+			if err := os.WriteFile(entry.Installation.Path, []byte(snapshot.LatestContent), 0o644); err != nil {
 				return nil, errors.Wrap(err, "unable to write skill file")
 			}
 		}
 	}
 
-	if needsFetch && symlink == "claude" {
+	if needsWrite && symlink == "claude" {
 		cwd, err := os.Getwd()
 		if err == nil {
 			s.ensureClaudeSkillsSymlink(cwd)
