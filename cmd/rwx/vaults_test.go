@@ -87,3 +87,28 @@ func TestVaultServiceAccountCommands(t *testing.T) {
 	}
 	require.Equal(t, "y", vaultsServiceAccountsDetachCmd.Flags().ShorthandLookup("y").Shorthand)
 }
+
+func TestVaultAccessCommands(t *testing.T) {
+	require.Same(t, vaultsAccessCmd, findSubcommand(vaultsCmd, "access"))
+	require.Len(t, vaultsAccessCmd.Commands(), 3)
+
+	list := findSubcommand(vaultsAccessCmd, "list")
+	require.NotNil(t, list)
+	require.NoError(t, list.Args(list, nil))
+	require.Error(t, list.Args(list, []string{"rwx-cloud/cloud"}))
+	require.ErrorContains(t, list.ValidateRequiredFlags(), "vault")
+
+	for _, name := range []string{"allow", "revoke"} {
+		command := findSubcommand(vaultsAccessCmd, name)
+		require.NotNil(t, command)
+		require.NoError(t, command.Args(command, nil))
+		require.Error(t, command.Args(command, []string{"rwx-cloud/cloud"}))
+		require.ErrorContains(t, command.ValidateRequiredFlags(), "vault")
+		require.ErrorContains(t, command.ValidateRequiredFlags(), "repository-slug")
+		require.ErrorContains(t, command.ValidateRequiredFlags(), "repository-branch-pattern")
+	}
+
+	require.NotNil(t, vaultsAccessAllowCmd.Flags().Lookup("allow-for"))
+	require.NotNil(t, vaultsAccessAllowCmd.Flags().Lookup("expires-at"))
+	require.Equal(t, "y", vaultsAccessRevokeCmd.Flags().ShorthandLookup("y").Shorthand)
+}

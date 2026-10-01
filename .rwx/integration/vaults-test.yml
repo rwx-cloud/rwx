@@ -165,6 +165,132 @@ tasks:
     env:
       RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
+  - key: test-vault-repository-access-lifecycle
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      vault_name="rwx_cli_development"
+      repository_slug="rwx-cloud/rwx"
+      prefix="rwx-cli-tests/${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      first_pattern="${prefix}/first"
+      second_pattern="${prefix}/second"
+      first_allowed=false
+      second_allowed=false
+      warning_file=$(mktemp)
+
+      cleanup() {
+        status=$?
+        trap - EXIT
+        rm -f "$warning_file"
+        if [ "$first_allowed" = true ]; then
+          if ! rwx vaults access revoke --vault "$vault_name" --repository-slug "$repository_slug" --repository-branch-pattern "$first_pattern" --yes >/dev/null; then
+            echo "Failed to revoke repository access for $first_pattern during cleanup" >&2
+            status=1
+          fi
+        fi
+        if [ "$second_allowed" = true ]; then
+          if ! rwx vaults access revoke --vault "$vault_name" --repository-slug "$repository_slug" --repository-branch-pattern "$second_pattern" --yes >/dev/null; then
+            echo "Failed to revoke repository access for $second_pattern during cleanup" >&2
+            status=1
+          fi
+        fi
+        exit "$status"
+      }
+      trap cleanup EXIT
+
+      first=$(rwx vaults access allow \
+        --vault "$vault_name" \
+        --repository-slug "$repository_slug" \
+        --repository-branch-pattern "$first_pattern" \
+        --allow-for 8h \
+        --json 2>"$warning_file")
+      first_allowed=true
+      first_id=$(echo "$first" | jq -er '.ID | select(type == "string" and length > 0)')
+      vault_id=$(echo "$first" | jq -er '.Vault.ID | select(type == "string" and length > 0)')
+      echo "$first" | jq -e \
+        --arg first_id "$first_id" \
+        --arg vault_id "$vault_id" \
+        --arg repository_slug "$repository_slug" \
+        --arg first_pattern "$first_pattern" '
+          .ID == $first_id and
+          .Vault.ID == $vault_id and
+          .AccessType == "repository" and
+          .RepositorySlug == $repository_slug and
+          .RepositoryBranchPattern == $first_pattern
+        ' >/dev/null
+      grep -Fx 'Warning: repository access does not support expiration; --allow-for and --expires-at will be ignored.' "$warning_file"
+
+      second=$(rwx vaults access allow \
+        --vault "$vault_id" \
+        --repository-slug "$repository_slug" \
+        --repository-branch-pattern "$second_pattern" \
+        --json)
+      second_allowed=true
+      second_id=$(echo "$second" | jq -er '.ID | select(type == "string" and length > 0)')
+
+      listed=$(rwx vaults access list --vault "$vault_name" --json)
+      echo "$listed" | jq -e \
+        --arg first_id "$first_id" \
+        --arg second_id "$second_id" \
+        --arg repository_slug "$repository_slug" \
+        --arg first_pattern "$first_pattern" \
+        --arg second_pattern "$second_pattern" '
+          any(.AccessGrants[];
+            .ID == $first_id and
+            .AccessType == "repository" and
+            .RepositorySlug == $repository_slug and
+            .RepositoryBranchPattern == $first_pattern
+          ) and
+          any(.AccessGrants[];
+            .ID == $second_id and
+            .AccessType == "repository" and
+            .RepositorySlug == $repository_slug and
+            .RepositoryBranchPattern == $second_pattern
+          )
+        ' >/dev/null
+
+      revoked=$(rwx vaults access revoke \
+        --vault "$vault_id" \
+        --repository-slug "$repository_slug" \
+        --repository-branch-pattern "$first_pattern" \
+        --yes \
+        --json)
+      first_allowed=false
+      echo "$revoked" | jq -e \
+        --arg first_id "$first_id" \
+        --arg repository_slug "$repository_slug" \
+        --arg first_pattern "$first_pattern" '
+          .ID == $first_id and
+          .AccessType == "repository" and
+          .RepositorySlug == $repository_slug and
+          .RepositoryBranchPattern == $first_pattern
+        ' >/dev/null
+
+      listed=$(rwx vaults access list --vault "$vault_id" --json)
+      echo "$listed" | jq -e \
+        --arg first_id "$first_id" \
+        --arg second_id "$second_id" \
+        --arg repository_slug "$repository_slug" \
+        --arg second_pattern "$second_pattern" '
+          all(.AccessGrants[]; .ID != $first_id) and
+          any(.AccessGrants[];
+            .ID == $second_id and
+            .AccessType == "repository" and
+            .RepositorySlug == $repository_slug and
+            .RepositoryBranchPattern == $second_pattern
+          )
+        ' >/dev/null
+
+      rwx vaults access revoke \
+        --vault "$vault_name" \
+        --repository-slug "$repository_slug" \
+        --repository-branch-pattern "$second_pattern" \
+        --yes >/dev/null
+      second_allowed=false
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+
   - key: test-vault-oidc-token-lifecycle
     use: rwx-cli
     run: |

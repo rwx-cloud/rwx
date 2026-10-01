@@ -37,6 +37,9 @@ type APIClient interface {
 	ListVaultServiceAccountAttachments(api.ListVaultServiceAccountAttachmentsConfig) (*api.ListVaultServiceAccountAttachmentsResult, error)
 	AttachVaultServiceAccount(api.AttachVaultServiceAccountConfig) (*api.AttachVaultServiceAccountResult, error)
 	DetachVaultServiceAccount(api.DetachVaultServiceAccountConfig) (*api.DetachVaultServiceAccountResult, error)
+	ListVaultRepositoryPermissions(api.ListVaultRepositoryPermissionsConfig) (*api.ListVaultRepositoryPermissionsResult, error)
+	CreateVaultRepositoryPermission(api.CreateVaultRepositoryPermissionConfig) (*api.CreateVaultRepositoryPermissionResult, error)
+	DeleteVaultRepositoryPermission(api.DeleteVaultRepositoryPermissionConfig) (*api.DeleteVaultRepositoryPermissionResult, error)
 	DisableApp(string) error
 	EnableApp(string) error
 	ListCrons() (*api.ListCronsResult, error)
