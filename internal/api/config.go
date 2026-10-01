@@ -272,6 +272,7 @@ type VaultServiceAccountAttachment struct {
 	ID             string                 `json:"id"`
 	Vault          VaultIdentity          `json:"vault"`
 	ServiceAccount ServiceAccountIdentity `json:"service_account"`
+	Expression     string                 `json:"expression"`
 	CreatedAt      string                 `json:"created_at"`
 }
 

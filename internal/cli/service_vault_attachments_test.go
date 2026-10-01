@@ -22,6 +22,7 @@ func testVaultServiceAccountAttachment() api.VaultServiceAccountAttachment {
 		ID:             "attachment-1",
 		Vault:          api.VaultIdentity{ID: "vault-1", Name: "deploys"},
 		ServiceAccount: api.ServiceAccountIdentity{ID: "account-1", Name: "deploy-bot"},
+		Expression:     "${{ vaults.api-vault.service-accounts.api-account.token }}",
 		CreatedAt:      "2026-10-01T12:34:56.123456Z",
 	}
 }
@@ -123,7 +124,7 @@ func TestService_VaultServiceAccounts(t *testing.T) {
 
 		_, err := s.service.ListVaultServiceAccounts(cli.ListVaultServiceAccountsConfig{Vault: "deploys"})
 		require.NoError(t, err)
-		require.Equal(t, "ID            SERVICE ACCOUNT ID  NAME        CREATED AT\nattachment-1  account-1           deploy-bot  2026-10-01T12:34:56.123456Z\n", s.mockStdout.String())
+		require.Equal(t, "ID            SERVICE ACCOUNT ID  NAME        EXPRESSION                                                  CREATED AT\nattachment-1  account-1           deploy-bot  ${{ vaults.api-vault.service-accounts.api-account.token }}  2026-10-01T12:34:56.123456Z\n", s.mockStdout.String())
 	})
 
 	t.Run("lists attachment metadata as JSON", func(t *testing.T) {
@@ -137,7 +138,7 @@ func TestService_VaultServiceAccounts(t *testing.T) {
 		result, err := s.service.ListVaultServiceAccounts(cli.ListVaultServiceAccountsConfig{Vault: "deploys", Json: true})
 		require.NoError(t, err)
 		require.Equal(t, "attachment-1", result.ServiceAccountAttachments[0].ID)
-		require.JSONEq(t, `{"ServiceAccountAttachments":[{"ID":"attachment-1","Vault":{"ID":"vault-1","Name":"deploys"},"ServiceAccount":{"ID":"account-1","Name":"deploy-bot"},"CreatedAt":"2026-10-01T12:34:56.123456Z"}]}`, s.mockStdout.String())
+		require.JSONEq(t, `{"ServiceAccountAttachments":[{"ID":"attachment-1","Vault":{"ID":"vault-1","Name":"deploys"},"ServiceAccount":{"ID":"account-1","Name":"deploy-bot"},"Expression":"${{ vaults.api-vault.service-accounts.api-account.token }}","CreatedAt":"2026-10-01T12:34:56.123456Z"}]}`, s.mockStdout.String())
 		require.NotContains(t, s.mockStdout.String(), "Token")
 		require.NotContains(t, s.mockStdout.String(), "Credential")
 	})
@@ -171,6 +172,7 @@ func TestService_VaultServiceAccounts(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 2, calls)
 		require.Equal(t, first.ID, second.ID)
+		require.Equal(t, "Attached service account \"deploy-bot\" to vault \"deploys\".\nExpression: ${{ vaults.api-vault.service-accounts.api-account.token }}\nAttached service account \"deploy-bot\" to vault \"deploys\".\nExpression: ${{ vaults.api-vault.service-accounts.api-account.token }}\n", s.mockStdout.String())
 	})
 
 	t.Run("requires confirmation before detaching", func(t *testing.T) {
