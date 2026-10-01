@@ -329,6 +329,47 @@ type DeleteVaultRepositoryPermissionConfig struct {
 
 type DeleteVaultRepositoryPermissionResult struct{}
 
+type VaultAccessPrincipal struct {
+	Type  string `json:"type"`
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+type VaultAccessGrant struct {
+	ID        string               `json:"id"`
+	Vault     VaultIdentity        `json:"vault"`
+	Principal VaultAccessPrincipal `json:"principal"`
+	ExpiresAt *string              `json:"expires_at"`
+}
+
+type ListVaultAccessGrantsConfig struct {
+	VaultID string
+}
+
+type ListVaultAccessGrantsResult struct {
+	AccessGrants []VaultAccessGrant `json:"access_grants"`
+}
+
+type CreateVaultAccessGrantConfig struct {
+	VaultID        string  `json:"-"`
+	PrincipalType  string  `json:"principal_type"`
+	Email          string  `json:"email,omitempty"`
+	ServiceAccount string  `json:"service_account,omitempty"`
+	ExpiresAt      *string `json:"expires_at"`
+}
+
+type CreateVaultAccessGrantResult struct {
+	AccessGrant VaultAccessGrant `json:"access_grant"`
+}
+
+type DeleteVaultAccessGrantConfig struct {
+	VaultID string
+	GrantID string
+}
+
+type DeleteVaultAccessGrantResult struct{}
+
 type ListSecretsConfig struct {
 	VaultName string
 }

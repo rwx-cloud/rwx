@@ -291,6 +291,101 @@ tasks:
     env:
       RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
+  - key: test-vault-user-access-lifecycle
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      vault_name="rwx-cli-access-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      user_email="dan+demo@rwx.com"
+      repository_slug="rwx-cloud/rwx"
+      branch_pattern="rwx-cli-access/${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      vault_created=false
+      vault_deleted=false
+      error_file=$(mktemp)
+
+      cleanup() {
+        status=$?
+        trap - EXIT
+        rm -f "$error_file"
+        if [ "$vault_created" = true ] && [ "$vault_deleted" = false ]; then
+          if ! rwx vaults delete "$vault_name" --yes >/dev/null; then
+            echo "Failed to delete vault $vault_name during cleanup" >&2
+            status=1
+          fi
+        fi
+        exit "$status"
+      }
+      trap cleanup EXIT
+
+      created=$(rwx vaults create --name "$vault_name" --json)
+      vault_created=true
+      vault_id=$(echo "$created" | jq -er '.ID | select(type == "string" and length > 0)')
+
+      user_expires_at=$(date -u -d '+2 days' '+%Y-%m-%dT%H:%M:%SZ')
+      user_grant=$(rwx vaults access allow \
+        --vault "$vault_name" \
+        --email "$user_email" \
+        --expires-at "$user_expires_at" \
+        --json)
+      user_grant_id=$(echo "$user_grant" | jq -er '.ID | select(type == "string" and length > 0)')
+      echo "$user_grant" | jq -e \
+        --arg vault_id "$vault_id" \
+        --arg user_email "$user_email" '
+          .Vault.ID == $vault_id and
+          .AccessType == "user" and
+          (.UserID | type == "string" and length > 0) and
+          .Email == $user_email and
+          (.ExpiresAt | type == "string")
+        ' >/dev/null
+      test "$(date -u -d "$(echo "$user_grant" | jq -er '.ExpiresAt')" '+%s')" -eq "$(date -u -d "$user_expires_at" '+%s')"
+
+      repository_grant=$(rwx vaults access allow \
+        --vault "$vault_id" \
+        --repository-slug "$repository_slug" \
+        --repository-branch-pattern "$branch_pattern" \
+        --json)
+      repository_grant_id=$(echo "$repository_grant" | jq -er '.ID | select(type == "string" and length > 0)')
+
+      listed=$(rwx vaults access list --vault "$vault_name" --json)
+      echo "$listed" | jq -e \
+        --arg user_grant_id "$user_grant_id" \
+        --arg repository_grant_id "$repository_grant_id" '
+          any(.AccessGrants[]; .ID == $user_grant_id and .AccessType == "user") and
+          any(.AccessGrants[]; .ID == $repository_grant_id and .AccessType == "repository")
+        ' >/dev/null
+
+      text_list=$(rwx vaults access list --vault "$vault_id")
+      echo "$text_list" | grep -F "$user_email" >/dev/null
+      echo "$text_list" | grep -F "$repository_slug" >/dev/null
+
+      user_updated=$(rwx vaults access allow --vault "$vault_id" --email "$user_email" --json)
+      echo "$user_updated" | jq -e \
+        --arg user_grant_id "$user_grant_id" '
+          .ID == $user_grant_id and
+          .ExpiresAt == null
+        ' >/dev/null
+
+      if rwx vaults access revoke --vault "$vault_id" --email "$user_email" >"$error_file" 2>&1; then
+        echo "Expected user revoke without --yes to fail" >&2
+        exit 1
+      fi
+      grep -F 'use --yes to confirm' "$error_file" >/dev/null
+
+      revoked_user=$(rwx vaults access revoke --vault "$vault_id" --email "$user_email" --yes --json)
+      echo "$revoked_user" | jq -e --arg user_grant_id "$user_grant_id" '.ID == $user_grant_id' >/dev/null
+
+      listed=$(rwx vaults access list --vault "$vault_id" --json)
+      echo "$listed" | jq -e \
+        --arg user_grant_id "$user_grant_id" '
+          all(.AccessGrants[]; .ID != $user_grant_id)
+        ' >/dev/null
+
+      rwx vaults delete "$vault_id" --yes >/dev/null
+      vault_deleted=true
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+
   - key: test-vault-oidc-token-lifecycle
     use: rwx-cli
     run: |

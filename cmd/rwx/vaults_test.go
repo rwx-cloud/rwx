@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
@@ -104,11 +105,51 @@ func TestVaultAccessCommands(t *testing.T) {
 		require.NoError(t, command.Args(command, nil))
 		require.Error(t, command.Args(command, []string{"rwx-cloud/cloud"}))
 		require.ErrorContains(t, command.ValidateRequiredFlags(), "vault")
-		require.ErrorContains(t, command.ValidateRequiredFlags(), "repository-slug")
-		require.ErrorContains(t, command.ValidateRequiredFlags(), "repository-branch-pattern")
+		require.NotNil(t, command.Flags().Lookup("email"))
+		require.NotNil(t, command.Flags().Lookup("service-account"))
 	}
 
 	require.NotNil(t, vaultsAccessAllowCmd.Flags().Lookup("allow-for"))
 	require.NotNil(t, vaultsAccessAllowCmd.Flags().Lookup("expires-at"))
 	require.Equal(t, "y", vaultsAccessRevokeCmd.Flags().ShorthandLookup("y").Shorthand)
+}
+
+func TestVaultAccessSubjectFlagGroups(t *testing.T) {
+	for _, command := range []*cobra.Command{vaultsAccessAllowCmd, vaultsAccessRevokeCmd} {
+		flagNames := []string{"repository-slug", "repository-branch-pattern", "email", "service-account"}
+		original := make(map[string]bool, len(flagNames))
+		for _, name := range flagNames {
+			flag := command.Flags().Lookup(name)
+			original[name] = flag.Changed
+			flag.Changed = false
+		}
+		t.Cleanup(func() {
+			for _, name := range flagNames {
+				command.Flags().Lookup(name).Changed = original[name]
+			}
+		})
+
+		require.Error(t, command.ValidateFlagGroups())
+		command.Flags().Lookup("email").Changed = true
+		require.NoError(t, command.ValidateFlagGroups())
+		command.Flags().Lookup("service-account").Changed = true
+		require.Error(t, command.ValidateFlagGroups())
+		command.Flags().Lookup("email").Changed = false
+		command.Flags().Lookup("service-account").Changed = false
+		command.Flags().Lookup("repository-slug").Changed = true
+		command.Flags().Lookup("repository-branch-pattern").Changed = true
+		require.NoError(t, command.ValidateFlagGroups())
+	}
+
+	allowFor := vaultsAccessAllowCmd.Flags().Lookup("allow-for")
+	expiresAt := vaultsAccessAllowCmd.Flags().Lookup("expires-at")
+	originalAllowFor := allowFor.Changed
+	originalExpiresAt := expiresAt.Changed
+	t.Cleanup(func() {
+		allowFor.Changed = originalAllowFor
+		expiresAt.Changed = originalExpiresAt
+	})
+	allowFor.Changed = true
+	expiresAt.Changed = true
+	require.Error(t, vaultsAccessAllowCmd.ValidateFlagGroups())
 }
