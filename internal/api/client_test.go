@@ -539,6 +539,58 @@ func TestAPIClient_VaultApprovers(t *testing.T) {
 	})
 }
 
+func TestAPIClient_VaultServiceAccountAttachments(t *testing.T) {
+	attachmentJSON := `{"id":"attachment-1","vault":{"id":"vault-1","name":"deploys"},"service_account":{"id":"account-1","name":"deploy-bot"},"created_at":"2026-10-01T12:34:56.123456Z"}`
+
+	t.Run("lists attachments", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/service_account_attachments", req.URL.Path)
+			return &http.Response{Status: "200 OK", StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"service_account_attachments":[` + attachmentJSON + `]}`))}, nil
+		})
+
+		result, err := client.ListVaultServiceAccountAttachments(api.ListVaultServiceAccountAttachmentsConfig{VaultID: "vault-1"})
+		require.NoError(t, err)
+		require.Equal(t, "attachment-1", result.ServiceAccountAttachments[0].ID)
+		require.Equal(t, "deploy-bot", result.ServiceAccountAttachments[0].ServiceAccount.Name)
+	})
+
+	t.Run("attaches by service account name", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodPost, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/service_account_attachments", req.URL.Path)
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"service_account":"deploy-bot"}`, string(body))
+			return &http.Response{Status: "201 Created", StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(`{"service_account_attachment":` + attachmentJSON + `}`))}, nil
+		})
+
+		result, err := client.AttachVaultServiceAccount(api.AttachVaultServiceAccountConfig{VaultID: "vault-1", ServiceAccount: "deploy-bot"})
+		require.NoError(t, err)
+		require.Equal(t, "attachment-1", result.ServiceAccountAttachment.ID)
+	})
+
+	t.Run("detaches by stable attachment ID", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodDelete, req.Method)
+			require.Equal(t, "/mint/api/vaults/vault-1/service_account_attachments/attachment-1", req.URL.Path)
+			return &http.Response{Status: "204 No Content", StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}, nil
+		})
+
+		_, err := client.DetachVaultServiceAccount(api.DetachVaultServiceAccountConfig{VaultID: "vault-1", AttachmentID: "attachment-1"})
+		require.NoError(t, err)
+	})
+
+	t.Run("surfaces attachment API errors", func(t *testing.T) {
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{Status: "403 Forbidden", StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader(`{"error_messages":[{"message":"service_account:manage permission is required"}]}`))}, nil
+		})
+
+		_, err := client.AttachVaultServiceAccount(api.AttachVaultServiceAccountConfig{VaultID: "vault-1", ServiceAccount: "deploy-bot"})
+		require.ErrorContains(t, err, "service_account:manage permission is required")
+	})
+}
+
 func TestAPIClient_InitiateDispatch(t *testing.T) {
 	t.Run("builds the request and parses the response", func(t *testing.T) {
 		body := struct {

@@ -37,6 +37,9 @@ type API struct {
 	MockListVaultApprovers                      func(api.ListVaultApproversConfig) (*api.ListVaultApproversResult, error)
 	MockAddVaultApprover                        func(api.AddVaultApproverConfig) (*api.AddVaultApproverResult, error)
 	MockRemoveVaultApprover                     func(api.RemoveVaultApproverConfig) (*api.RemoveVaultApproverResult, error)
+	MockListVaultServiceAccountAttachments      func(api.ListVaultServiceAccountAttachmentsConfig) (*api.ListVaultServiceAccountAttachmentsResult, error)
+	MockAttachVaultServiceAccount               func(api.AttachVaultServiceAccountConfig) (*api.AttachVaultServiceAccountResult, error)
+	MockDetachVaultServiceAccount               func(api.DetachVaultServiceAccountConfig) (*api.DetachVaultServiceAccountResult, error)
 	MockListSecrets                             func(api.ListSecretsConfig) (*api.ListSecretsResult, error)
 	MockCreateVaultOidcToken                    func(api.CreateVaultOidcTokenConfig) (*api.CreateVaultOidcTokenResult, error)
 	MockListVaultOidcTokens                     func(api.ListVaultOidcTokensConfig) (*api.ListVaultOidcTokensResult, error)
@@ -258,6 +261,30 @@ func (c *API) RemoveVaultApprover(cfg api.RemoveVaultApproverConfig) (*api.Remov
 	}
 
 	return nil, errors.New("MockRemoveVaultApprover was not configured")
+}
+
+func (c *API) ListVaultServiceAccountAttachments(cfg api.ListVaultServiceAccountAttachmentsConfig) (*api.ListVaultServiceAccountAttachmentsResult, error) {
+	if c.MockListVaultServiceAccountAttachments != nil {
+		return c.MockListVaultServiceAccountAttachments(cfg)
+	}
+
+	return nil, errors.New("MockListVaultServiceAccountAttachments was not configured")
+}
+
+func (c *API) AttachVaultServiceAccount(cfg api.AttachVaultServiceAccountConfig) (*api.AttachVaultServiceAccountResult, error) {
+	if c.MockAttachVaultServiceAccount != nil {
+		return c.MockAttachVaultServiceAccount(cfg)
+	}
+
+	return nil, errors.New("MockAttachVaultServiceAccount was not configured")
+}
+
+func (c *API) DetachVaultServiceAccount(cfg api.DetachVaultServiceAccountConfig) (*api.DetachVaultServiceAccountResult, error) {
+	if c.MockDetachVaultServiceAccount != nil {
+		return c.MockDetachVaultServiceAccount(cfg)
+	}
+
+	return nil, errors.New("MockDetachVaultServiceAccount was not configured")
 }
 
 func (c *API) ListSecrets(cfg api.ListSecretsConfig) (*api.ListSecretsResult, error) {

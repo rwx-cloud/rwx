@@ -65,3 +65,21 @@ func TestVaultApproverCommands(t *testing.T) {
 	}
 	require.Equal(t, "y", vaultsApproversRemoveCmd.Flags().ShorthandLookup("y").Shorthand)
 }
+
+func TestVaultServiceAccountCommands(t *testing.T) {
+	require.Same(t, vaultsServiceAccountsCmd, findSubcommand(vaultsCmd, "service-accounts"))
+	require.Len(t, vaultsServiceAccountsCmd.Commands(), 3)
+
+	list := findSubcommand(vaultsServiceAccountsCmd, "list")
+	require.NoError(t, list.Args(list, nil))
+	require.ErrorContains(t, list.ValidateRequiredFlags(), "vault")
+
+	for _, name := range []string{"attach", "detach"} {
+		command := findSubcommand(vaultsServiceAccountsCmd, name)
+		require.Error(t, command.Args(command, nil))
+		require.NoError(t, command.Args(command, []string{"value"}))
+		require.Error(t, command.Args(command, []string{"one", "two"}))
+		require.ErrorContains(t, command.ValidateRequiredFlags(), "vault")
+	}
+	require.Equal(t, "y", vaultsServiceAccountsDetachCmd.Flags().ShorthandLookup("y").Shorthand)
+}

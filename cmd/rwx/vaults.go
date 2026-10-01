@@ -423,6 +423,66 @@ var (
 	}
 )
 
+var vaultsServiceAccountsCmd = &cobra.Command{
+	Short: "Manage service accounts attached to a vault",
+	Use:   "service-accounts",
+}
+
+var (
+	serviceAccountsListVault string
+
+	vaultsServiceAccountsListCmd = &cobra.Command{
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.ListVaultServiceAccounts(cli.ListVaultServiceAccountsConfig{
+				Vault: serviceAccountsListVault,
+				Json:  useJsonOutput(),
+			})
+			return err
+		},
+		Short: "List service accounts attached to a vault",
+		Use:   "list [flags]",
+	}
+)
+
+var (
+	serviceAccountsAttachVault string
+
+	vaultsServiceAccountsAttachCmd = &cobra.Command{
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.AttachVaultServiceAccount(cli.AttachVaultServiceAccountConfig{
+				Vault:          serviceAccountsAttachVault,
+				ServiceAccount: args[0],
+				Json:           useJsonOutput(),
+			})
+			return err
+		},
+		Short: "Attach a service account to a vault",
+		Use:   "attach SERVICE_ACCOUNT [flags]",
+	}
+)
+
+var (
+	serviceAccountsDetachVault string
+	serviceAccountsDetachYes   bool
+
+	vaultsServiceAccountsDetachCmd = &cobra.Command{
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := service.DetachVaultServiceAccount(cli.DetachVaultServiceAccountConfig{
+				Vault:        serviceAccountsDetachVault,
+				AttachmentID: args[0],
+				Json:         useJsonOutput(),
+				Yes:          serviceAccountsDetachYes,
+			})
+			return err
+		},
+		Short: "Detach a service account from a vault",
+		Use:   "detach ATTACHMENT_ID [flags]",
+	}
+)
+
 // --- set-secrets alias (backwards compatibility) ---
 
 var (
@@ -543,6 +603,18 @@ func init() {
 	vaultsApproversRemoveCmd.Flags().BoolVarP(&approversRemoveYes, "yes", "y", false, "skip confirmation prompt")
 	vaultsApproversCmd.AddCommand(vaultsApproversRemoveCmd)
 	vaultsCmd.AddCommand(vaultsApproversCmd)
+
+	vaultsServiceAccountsListCmd.Flags().StringVar(&serviceAccountsListVault, "vault", "", "the name or ID of the vault")
+	_ = vaultsServiceAccountsListCmd.MarkFlagRequired("vault")
+	vaultsServiceAccountsCmd.AddCommand(vaultsServiceAccountsListCmd)
+	vaultsServiceAccountsAttachCmd.Flags().StringVar(&serviceAccountsAttachVault, "vault", "", "the name or ID of the vault")
+	_ = vaultsServiceAccountsAttachCmd.MarkFlagRequired("vault")
+	vaultsServiceAccountsCmd.AddCommand(vaultsServiceAccountsAttachCmd)
+	vaultsServiceAccountsDetachCmd.Flags().StringVar(&serviceAccountsDetachVault, "vault", "", "the name or ID of the vault")
+	_ = vaultsServiceAccountsDetachCmd.MarkFlagRequired("vault")
+	vaultsServiceAccountsDetachCmd.Flags().BoolVarP(&serviceAccountsDetachYes, "yes", "y", false, "skip confirmation prompt")
+	vaultsServiceAccountsCmd.AddCommand(vaultsServiceAccountsDetachCmd)
+	vaultsCmd.AddCommand(vaultsServiceAccountsCmd)
 
 	// vaults set-secrets (alias for backwards compatibility)
 	vaultsSetSecretsCmd.Flags().StringVar(&setSecretsVault, "vault", "default", "the name of the vault to set the secrets in")

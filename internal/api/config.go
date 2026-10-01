@@ -257,6 +257,42 @@ type RemoveVaultApproverConfig struct {
 
 type RemoveVaultApproverResult struct{}
 
+type ServiceAccountIdentity struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type VaultServiceAccountAttachment struct {
+	ID             string                 `json:"id"`
+	Vault          VaultIdentity          `json:"vault"`
+	ServiceAccount ServiceAccountIdentity `json:"service_account"`
+	CreatedAt      string                 `json:"created_at"`
+}
+
+type ListVaultServiceAccountAttachmentsConfig struct {
+	VaultID string
+}
+
+type ListVaultServiceAccountAttachmentsResult struct {
+	ServiceAccountAttachments []VaultServiceAccountAttachment `json:"service_account_attachments"`
+}
+
+type AttachVaultServiceAccountConfig struct {
+	VaultID        string `json:"-"`
+	ServiceAccount string `json:"service_account"`
+}
+
+type AttachVaultServiceAccountResult struct {
+	ServiceAccountAttachment VaultServiceAccountAttachment `json:"service_account_attachment"`
+}
+
+type DetachVaultServiceAccountConfig struct {
+	VaultID      string
+	AttachmentID string
+}
+
+type DetachVaultServiceAccountResult struct{}
+
 type ListSecretsConfig struct {
 	VaultName string
 }
