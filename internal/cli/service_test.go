@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/mocks"
 	"github.com/rwx-cloud/rwx/internal/telemetry"
@@ -78,6 +80,19 @@ func seedSkillFile(t *testing.T, dir, version string) {
 	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 	content := "---\nmetadata:\n  version: " + version + "\n---\nSkill content\n"
 	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644))
+}
+
+func skillSnapshot(latestVersion, latestContent string, historicalContents ...string) *api.SkillSnapshot {
+	digests := make(map[string]string, len(historicalContents)+1)
+	for i, content := range historicalContents {
+		digests[fmt.Sprintf("1.0.%d", i)] = fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
+	}
+	digests[latestVersion] = fmt.Sprintf("%x", sha256.Sum256([]byte(latestContent)))
+	return &api.SkillSnapshot{
+		LatestVersion: latestVersion,
+		LatestContent: latestContent,
+		SHA256Digests: digests,
+	}
 }
 
 func seedMarketplaceSkillFile(t *testing.T, homeDir, version string) {
@@ -279,18 +294,13 @@ func TestSkillStatus(t *testing.T) {
 func TestSkillUpdate(t *testing.T) {
 	t.Run("no installations returns empty entries", func(t *testing.T) {
 		s := setupSkillTest(t)
-
-		backend := versions.NewMemoryBackend()
-		_ = backend.Set("2.0.0")
-		s.config.SkillVersionsBackend = backend
-
 		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
 		var err error
 		s.service, err = cli.NewService(s.config)
 		require.NoError(t, err)
 
-		result, err := s.service.SkillUpdate("")
+		result, err := s.service.SkillUpdate("", false)
 		require.NoError(t, err)
 		require.Empty(t, result.Entries)
 	})
@@ -298,33 +308,31 @@ func TestSkillUpdate(t *testing.T) {
 	t.Run("all up to date returns empty entries", func(t *testing.T) {
 		s := setupSkillTest(t)
 		seedSkillFile(t, s.tmp, "2.0.0")
-
-		backend := versions.NewMemoryBackend()
-		_ = backend.Set("2.0.0")
-		s.config.SkillVersionsBackend = backend
+		content, err := os.ReadFile(filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md"))
+		require.NoError(t, err)
+		s.mockAPI.MockGetSkillSnapshot = func() (*api.SkillSnapshot, error) {
+			return skillSnapshot("2.0.0", string(content)), nil
+		}
 
 		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
 
-		var err error
 		s.service, err = cli.NewService(s.config)
 		require.NoError(t, err)
 
-		result, err := s.service.SkillUpdate("")
+		result, err := s.service.SkillUpdate("", false)
 		require.NoError(t, err)
 		require.Empty(t, result.Entries)
 	})
 
-	t.Run("updates outdated installation with content from API", func(t *testing.T) {
+	t.Run("updates an untouched historical release regardless of declared version", func(t *testing.T) {
 		s := setupSkillTest(t)
-		seedSkillFile(t, s.tmp, "1.0.0")
-
-		backend := versions.NewMemoryBackend()
-		_ = backend.Set("2.0.0")
-		s.config.SkillVersionsBackend = backend
-
+		historicalContent := "---\r\nmetadata:\r\n  version: 99.0.0\r\n---\r\nHistorical skill content\r\n"
 		newContent := "---\nmetadata:\n  version: 2.0.0\n---\nUpdated skill content\n"
-		s.mockAPI.MockGetSkillContent = func() (string, error) {
-			return newContent, nil
+		seedSkillFile(t, s.tmp, "99.0.0")
+		path := filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md")
+		require.NoError(t, os.WriteFile(path, []byte(historicalContent), 0o644))
+		s.mockAPI.MockGetSkillSnapshot = func() (*api.SkillSnapshot, error) {
+			return skillSnapshot("2.0.0", newContent, historicalContent), nil
 		}
 
 		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
@@ -333,11 +341,11 @@ func TestSkillUpdate(t *testing.T) {
 		s.service, err = cli.NewService(s.config)
 		require.NoError(t, err)
 
-		result, err := s.service.SkillUpdate("")
+		result, err := s.service.SkillUpdate("", false)
 		require.NoError(t, err)
 		require.Len(t, result.Entries, 1)
 		require.Equal(t, "updated", result.Entries[0].Action)
-		require.Equal(t, "1.0.0", result.Entries[0].OldVersion)
+		require.Equal(t, "99.0.0", result.Entries[0].OldVersion)
 		require.Equal(t, "2.0.0", result.Entries[0].NewVersion)
 
 		written, err := os.ReadFile(result.Entries[0].Installation.Path)
@@ -345,16 +353,98 @@ func TestSkillUpdate(t *testing.T) {
 		require.Equal(t, newContent, string(written))
 	})
 
+	for name, modifiedContent := range map[string]string{
+		"unchanged version":  "---\nmetadata:\n  version: 2.0.0\n---\nLocally modified\n",
+		"missing version":    "---\nmetadata: {}\n---\nLocally modified\n",
+		"malformed version":  "---\nmetadata:\n  version: nope\n---\nLocally modified\n",
+		"misleading version": "---\nmetadata:\n  version: 1.0.0\n---\nLocally modified\n",
+	} {
+		t.Run("non-interactive skips modified content with "+name, func(t *testing.T) {
+			s := setupSkillTest(t)
+			path := filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md")
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+			require.NoError(t, os.WriteFile(path, []byte(modifiedContent), 0o644))
+			newContent := "---\nmetadata:\n  version: 2.0.0\n---\nReleased content\n"
+			s.mockAPI.MockGetSkillSnapshot = func() (*api.SkillSnapshot, error) {
+				return skillSnapshot("2.0.0", newContent), nil
+			}
+			t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
+
+			var err error
+			s.service, err = cli.NewService(s.config)
+			require.NoError(t, err)
+			result, err := s.service.SkillUpdate("", false)
+			require.NoError(t, err)
+			require.Len(t, result.Entries, 1)
+			require.Equal(t, "modified", result.Entries[0].Action)
+			require.Contains(t, s.mockStderr.String(), path)
+			require.Contains(t, s.mockStderr.String(), "--force")
+			written, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, modifiedContent, string(written))
+		})
+	}
+
+	t.Run("declining interactive prompt preserves modified content", func(t *testing.T) {
+		s := setupSkillTest(t)
+		modifiedContent := "locally modified\n"
+		path := filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(modifiedContent), 0o644))
+		newContent := "---\nmetadata:\n  version: 2.0.0\n---\nReleased content\n"
+		s.mockAPI.MockGetSkillSnapshot = func() (*api.SkillSnapshot, error) {
+			return skillSnapshot("2.0.0", newContent), nil
+		}
+		s.config.StderrIsTTY = true
+		s.config.Stdin = bytes.NewBufferString("n\n")
+		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
+
+		var err error
+		s.service, err = cli.NewService(s.config)
+		require.NoError(t, err)
+		result, err := s.service.SkillUpdate("", false)
+		require.NoError(t, err)
+		require.Equal(t, "modified", result.Entries[0].Action)
+		require.Contains(t, s.mockStderr.String(), path)
+		require.Contains(t, s.mockStderr.String(), "[y/N]")
+		written, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, modifiedContent, string(written))
+	})
+
+	for name, force := range map[string]bool{"interactive confirmation": false, "force": true} {
+		t.Run(name+" overwrites modified content", func(t *testing.T) {
+			s := setupSkillTest(t)
+			path := filepath.Join(s.tmp, ".agents", "skills", "rwx", "SKILL.md")
+			require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+			require.NoError(t, os.WriteFile(path, []byte("locally modified\n"), 0o644))
+			newContent := "---\nmetadata:\n  version: 2.0.0\n---\nReleased content\n"
+			s.mockAPI.MockGetSkillSnapshot = func() (*api.SkillSnapshot, error) {
+				return skillSnapshot("2.0.0", newContent), nil
+			}
+			if !force {
+				s.config.StderrIsTTY = true
+				s.config.Stdin = bytes.NewBufferString("y\n")
+			}
+			t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
+
+			var err error
+			s.service, err = cli.NewService(s.config)
+			require.NoError(t, err)
+			result, err := s.service.SkillUpdate("", force)
+			require.NoError(t, err)
+			require.Equal(t, "updated", result.Entries[0].Action)
+			written, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, newContent, string(written))
+		})
+	}
+
 	t.Run("skips marketplace installations", func(t *testing.T) {
 		s := setupSkillTest(t)
 		seedMarketplaceSkillFile(t, s.tmp, "1.0.0")
-
-		backend := versions.NewMemoryBackend()
-		_ = backend.Set("2.0.0")
-		s.config.SkillVersionsBackend = backend
-
-		s.mockAPI.MockGetSkillLatestVersion = func() (string, error) {
-			return "2.0.0", nil
+		s.mockAPI.MockGetSkillSnapshot = func() (*api.SkillSnapshot, error) {
+			return skillSnapshot("2.0.0", "latest"), nil
 		}
 
 		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
@@ -363,7 +453,7 @@ func TestSkillUpdate(t *testing.T) {
 		s.service, err = cli.NewService(s.config)
 		require.NoError(t, err)
 
-		result, err := s.service.SkillUpdate("")
+		result, err := s.service.SkillUpdate("", false)
 		require.NoError(t, err)
 		require.Len(t, result.Entries, 1)
 		require.Equal(t, "skipped", result.Entries[0].Action)
@@ -374,8 +464,8 @@ func TestSkillUpdate(t *testing.T) {
 		s := setupSkillTest(t)
 		seedSkillFile(t, s.tmp, "1.0.0")
 
-		s.mockAPI.MockGetSkillLatestVersion = func() (string, error) {
-			return "dev", nil
+		s.mockAPI.MockGetSkillSnapshot = func() (*api.SkillSnapshot, error) {
+			return skillSnapshot("dev", "latest"), nil
 		}
 
 		t.Setenv("RWX_HIDE_LATEST_SKILL_VERSION", "1")
@@ -384,7 +474,7 @@ func TestSkillUpdate(t *testing.T) {
 		s.service, err = cli.NewService(s.config)
 		require.NoError(t, err)
 
-		result, err := s.service.SkillUpdate("")
+		result, err := s.service.SkillUpdate("", false)
 		require.NoError(t, err)
 		require.Empty(t, result.Entries)
 	})

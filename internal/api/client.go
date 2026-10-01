@@ -157,6 +157,40 @@ func (c Client) GetSkillContent() (string, error) {
 	return string(body), nil
 }
 
+type SkillSnapshot struct {
+	LatestVersion string            `json:"latest_version"`
+	LatestContent string            `json:"latest_content"`
+	SHA256Digests map[string]string `json:"sha256_digests"`
+}
+
+func (c Client) GetSkillSnapshot() (*SkillSnapshot, error) {
+	req, err := http.NewRequest(http.MethodGet, "/api/skill", nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create new HTTP request")
+	}
+
+	resp, err := c.RoundTrip(req)
+	if err != nil {
+		return nil, errors.Wrap(err, "HTTP request failed")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		msg := extractErrorMessage(resp.Body)
+		if msg == "" {
+			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+		}
+		return nil, errors.New(msg)
+	}
+
+	var result SkillSnapshot
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, errors.Wrap(err, "unable to parse API response")
+	}
+
+	return &result, nil
+}
+
 func (c Client) GetSkillLatestVersion() (string, error) {
 	req, err := http.NewRequest(http.MethodGet, "/api/skill/latest", nil)
 	if err != nil {

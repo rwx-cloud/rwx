@@ -43,9 +43,14 @@ var (
 		Short: "Update outdated RWX agent skill installations",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			symlink, _ := cmd.Flags().GetString("symlink")
-			result, err := service.SkillUpdate(symlink)
+			force, _ := cmd.Flags().GetBool("force")
+			result, err := service.SkillUpdate(symlink, force)
 			if err != nil {
 				return err
+			}
+
+			if useJsonOutput() {
+				return json.NewEncoder(os.Stdout).Encode(result)
 			}
 
 			outputSkillUpdateText(result)
@@ -77,6 +82,7 @@ var (
 func init() {
 	skillInstallCmd.Flags().BoolP("yes", "y", false, "skip confirmation prompt")
 	skillInstallCmd.Flags().String("symlink", "", "force a .claude/skills symlink even if .claude doesn't exist yet (use \"claude\")")
+	skillUpdateCmd.Flags().Bool("force", false, "overwrite locally modified skill files")
 	skillUpdateCmd.Flags().String("symlink", "", "create a .claude/skills symlink so Claude Code discovers the skill (use \"claude\")")
 	skillCmd.AddCommand(skillInstallCmd)
 	skillCmd.AddCommand(skillStatusCmd)
@@ -201,6 +207,9 @@ func outputSkillUpdateText(result *cli.SkillUpdateResult) {
 		case "skipped":
 			fmt.Fprintf(os.Stdout, "Skipped %s (marketplace)\n", shortenPath(entry.Installation.Path))
 			fmt.Fprintln(os.Stdout, "  To upgrade: claude plugin marketplace update rwx && claude plugin update rwx@rwx")
+		case "modified":
+			fmt.Fprintf(os.Stdout, "Skipped %s (locally modified)\n", shortenPath(entry.Installation.Path))
+			fmt.Fprintln(os.Stdout, "  To overwrite: rwx skill update --force")
 		}
 	}
 }
