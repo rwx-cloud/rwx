@@ -228,6 +228,77 @@ type DeleteVaultConfig struct {
 
 type DeleteVaultResult struct{}
 
+type UserIdentity struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+}
+
+type VaultApprover struct {
+	ID    string        `json:"id"`
+	Vault VaultIdentity `json:"vault"`
+	User  UserIdentity  `json:"user"`
+}
+
+type ListVaultApproversConfig struct {
+	VaultID string
+}
+
+type ListVaultApproversResult struct {
+	Approvers []VaultApprover `json:"approvers"`
+}
+
+type AddVaultApproverConfig struct {
+	VaultID string `json:"-"`
+	Email   string `json:"email"`
+}
+
+type AddVaultApproverResult struct {
+	Approver VaultApprover `json:"approver"`
+}
+
+type RemoveVaultApproverConfig struct {
+	VaultID    string
+	ApproverID string
+}
+
+type RemoveVaultApproverResult struct{}
+
+type ServiceAccountIdentity struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type VaultServiceAccountAttachment struct {
+	ID             string                 `json:"id"`
+	Vault          VaultIdentity          `json:"vault"`
+	ServiceAccount ServiceAccountIdentity `json:"service_account"`
+	CreatedAt      string                 `json:"created_at"`
+}
+
+type ListVaultServiceAccountAttachmentsConfig struct {
+	VaultID string
+}
+
+type ListVaultServiceAccountAttachmentsResult struct {
+	ServiceAccountAttachments []VaultServiceAccountAttachment `json:"service_account_attachments"`
+}
+
+type AttachVaultServiceAccountConfig struct {
+	VaultID        string `json:"-"`
+	ServiceAccount string `json:"service_account"`
+}
+
+type AttachVaultServiceAccountResult struct {
+	ServiceAccountAttachment VaultServiceAccountAttachment `json:"service_account_attachment"`
+}
+
+type DetachVaultServiceAccountConfig struct {
+	VaultID      string
+	AttachmentID string
+}
+
+type DetachVaultServiceAccountResult struct{}
+
 type ListSecretsConfig struct {
 	VaultName string
 }
