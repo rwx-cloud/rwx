@@ -333,8 +333,16 @@ func TestSandboxStorage_LoadAndSave(t *testing.T) {
 		storage, err := cli.LoadSandboxStorage()
 		require.NoError(t, err)
 		require.Equal(t, 1, storage.Version)
+		require.False(t, storage.HasChanges())
 
-		require.NoError(t, storage.Save())
+		metrics, err := storage.SaveWithMetrics()
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, metrics.DurationMs, int64(0))
+		require.GreaterOrEqual(t, metrics.SetupMs, int64(0))
+		require.GreaterOrEqual(t, metrics.EncodeWriteMs, int64(0))
+		require.GreaterOrEqual(t, metrics.SyncMs, int64(0))
+		require.GreaterOrEqual(t, metrics.CloseMs, int64(0))
+		require.GreaterOrEqual(t, metrics.RenameMs, int64(0))
 
 		localPath := filepath.Join(tmpDir, ".rwx", "sandboxes", "sandboxes.json")
 		contents, err := os.ReadFile(localPath)
@@ -431,11 +439,16 @@ func TestSandboxStorage_LoadAndSave(t *testing.T) {
 		storage, err := cli.LoadSandboxStorage()
 		require.NoError(t, err)
 		require.Len(t, storage.Sandboxes, 1)
+		require.True(t, storage.HasChanges())
+		require.True(t, storage.HasMigration())
 
 		// Should be accessible via new-format key
 		session, found := storage.GetSession("main", "/home/user/project/.rwx/sandbox.yml")
 		require.True(t, found)
 		require.Equal(t, "run-old", session.RunID)
+		require.NoError(t, storage.Save())
+		require.False(t, storage.HasChanges())
+		require.False(t, storage.HasMigration())
 	})
 
 	t.Run("skips migration when version is current", func(t *testing.T) {
@@ -451,11 +464,32 @@ func TestSandboxStorage_LoadAndSave(t *testing.T) {
 		storage, err := cli.LoadSandboxStorage()
 		require.NoError(t, err)
 		require.Len(t, storage.Sandboxes, 1)
+		require.False(t, storage.HasChanges())
 
 		session, found := storage.GetSession("main", "/home/user/project/.rwx/sandbox.yml")
 		require.True(t, found)
 		require.Equal(t, "run-current", session.RunID)
 	})
+}
+
+func TestSandboxStorage_TracksChanges(t *testing.T) {
+	storage := &cli.SandboxStorage{Sandboxes: make(map[string]cli.SandboxSession)}
+	session := cli.SandboxSession{RunID: "run-123", ConfigFile: "/repo/.rwx/sandbox.yml"}
+
+	require.False(t, storage.HasChanges())
+	storage.SetSession("main", session.ConfigFile, session)
+	require.True(t, storage.HasChanges())
+
+	setupTestStorageDir(t)
+	require.NoError(t, storage.Save())
+	require.False(t, storage.HasChanges())
+
+	storage.SetSession("main", session.ConfigFile, session)
+	require.False(t, storage.HasChanges())
+	storage.DeleteSession("other", session.ConfigFile)
+	require.False(t, storage.HasChanges())
+	storage.DeleteSession("main", session.ConfigFile)
+	require.True(t, storage.HasChanges())
 }
 
 func TestSandboxStorage_LocksCreateGitignore(t *testing.T) {

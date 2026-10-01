@@ -12,7 +12,7 @@ cleanup() {
   git restore --staged "${DELETED_FILE}" 2>/dev/null || true
   git restore "${DELETED_FILE}" "${EDITED_FILE}" 2>/dev/null || true
   rm -f setup-artifact.txt
-  "${RWX_CLI}" sandbox stop 2>/dev/null || true
+  "${RWX_CLI}" sandbox stop "${SCRIPT_DIR}/definitions/sandbox-setup-sync.yml" 2>/dev/null || true
 }
 trap cleanup EXIT
 

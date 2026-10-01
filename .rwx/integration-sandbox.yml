@@ -96,7 +96,9 @@ tasks:
         printf '%s\n' \
           "- key: ${key}" \
           "  use: [rwx-cli, git, jj]" \
-          "  run: ./${script}" \
+          "  run: |" \
+          '    git switch -c "sandbox-test-${RWX_TASK_ID}"' \
+          "    ./${script}" \
           "  env:" \
           '    RWX_ACCESS_TOKEN: \${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}' \
           "    COMMIT_SHA: ${COMMIT_SHA}" \

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -71,6 +72,17 @@ const sandboxStorageVersion = 1
 type SandboxStorage struct {
 	Version   int                       `json:"version,omitempty"`
 	Sandboxes map[string]SandboxSession `json:"sandboxes"`
+	changed   bool
+	migrated  bool
+}
+
+type SandboxStorageSaveMetrics struct {
+	DurationMs    int64
+	SetupMs       int64
+	EncodeWriteMs int64
+	SyncMs        int64
+	CloseMs       int64
+	RenameMs      int64
 }
 
 func sandboxStoragePath() (string, error) {
@@ -200,20 +212,35 @@ func LoadSandboxStorage() (*SandboxStorage, error) {
 	if storage.Version < sandboxStorageVersion {
 		storage.Sandboxes = migrateOldSessionKeys(storage.Sandboxes)
 		storage.Version = sandboxStorageVersion
+		storage.changed = true
+		storage.migrated = true
 	}
 
 	return storage, nil
 }
 
 func (s *SandboxStorage) Save() error {
+	_, err := s.SaveWithMetrics()
+	return err
+}
+
+func (s *SandboxStorage) SaveWithMetrics() (metrics SandboxStorageSaveMetrics, resultErr error) {
+	start := time.Now()
+	defer func() {
+		metrics.DurationMs = time.Since(start).Milliseconds()
+	}()
+
+	setupStart := time.Now()
 	path, err := sandboxStoragePath()
 	if err != nil {
-		return err
+		metrics.SetupMs = time.Since(setupStart).Milliseconds()
+		return metrics, err
 	}
 
 	dir := filepath.Dir(path)
 	if err := ensureSandboxStorageDir(dir); err != nil {
-		return errors.Wrapf(err, "unable to create directory for %q", path)
+		metrics.SetupMs = time.Since(setupStart).Milliseconds()
+		return metrics, errors.Wrapf(err, "unable to create directory for %q", path)
 	}
 
 	// Stamp the version on every save; fresh storage would otherwise serialize
@@ -222,29 +249,53 @@ func (s *SandboxStorage) Save() error {
 
 	fd, err := os.CreateTemp(dir, ".sandboxes-*.json.tmp")
 	if err != nil {
-		return errors.Wrapf(err, "unable to create temporary sandbox storage file in %q", dir)
+		metrics.SetupMs = time.Since(setupStart).Milliseconds()
+		return metrics, errors.Wrapf(err, "unable to create temporary sandbox storage file in %q", dir)
 	}
+	metrics.SetupMs = time.Since(setupStart).Milliseconds()
 	tempPath := fd.Name()
 	defer os.Remove(tempPath)
 
 	encoder := json.NewEncoder(fd)
 	encoder.SetIndent("", "  ")
+	encodeWriteStart := time.Now()
 	if err := encoder.Encode(s); err != nil {
+		metrics.EncodeWriteMs = time.Since(encodeWriteStart).Milliseconds()
 		_ = fd.Close()
-		return errors.Wrapf(err, "unable to write %q", tempPath)
+		return metrics, errors.Wrapf(err, "unable to write %q", tempPath)
 	}
+	metrics.EncodeWriteMs = time.Since(encodeWriteStart).Milliseconds()
+	syncStart := time.Now()
 	if err := fd.Sync(); err != nil {
+		metrics.SyncMs = time.Since(syncStart).Milliseconds()
 		_ = fd.Close()
-		return errors.Wrapf(err, "unable to sync %q", tempPath)
+		return metrics, errors.Wrapf(err, "unable to sync %q", tempPath)
 	}
+	metrics.SyncMs = time.Since(syncStart).Milliseconds()
+	closeStart := time.Now()
 	if err := fd.Close(); err != nil {
-		return errors.Wrapf(err, "unable to close %q", tempPath)
+		metrics.CloseMs = time.Since(closeStart).Milliseconds()
+		return metrics, errors.Wrapf(err, "unable to close %q", tempPath)
 	}
+	metrics.CloseMs = time.Since(closeStart).Milliseconds()
+	renameStart := time.Now()
 	if err := os.Rename(tempPath, path); err != nil {
-		return errors.Wrapf(err, "unable to replace %q", path)
+		metrics.RenameMs = time.Since(renameStart).Milliseconds()
+		return metrics, errors.Wrapf(err, "unable to replace %q", path)
 	}
+	metrics.RenameMs = time.Since(renameStart).Milliseconds()
+	s.changed = false
+	s.migrated = false
 
-	return nil
+	return metrics, nil
+}
+
+func (s *SandboxStorage) HasChanges() bool {
+	return s.changed
+}
+
+func (s *SandboxStorage) HasMigration() bool {
+	return s.migrated
 }
 
 func ensureSandboxStorageDir(dir string) error {
@@ -327,18 +378,27 @@ func (s *SandboxStorage) GetSessionsForBranch(branch string) []SandboxSession {
 
 func (s *SandboxStorage) SetSession(branch, configFile string, session SandboxSession) {
 	key := SessionKey(branch, configFile)
+	if existing, ok := s.Sandboxes[key]; ok && reflect.DeepEqual(existing, session) {
+		return
+	}
 	s.Sandboxes[key] = session
+	s.changed = true
 }
 
 func (s *SandboxStorage) DeleteSession(branch, configFile string) {
 	key := SessionKey(branch, configFile)
+	if _, ok := s.Sandboxes[key]; !ok {
+		return
+	}
 	delete(s.Sandboxes, key)
+	s.changed = true
 }
 
 func (s *SandboxStorage) DeleteSessionByRunID(runID string) bool {
 	for key, session := range s.Sandboxes {
 		if session.RunID == runID {
 			delete(s.Sandboxes, key)
+			s.changed = true
 			return true
 		}
 	}
@@ -413,6 +473,7 @@ func (s *SandboxStorage) GetSessionByAncestry(branch, configFile string, checker
 			delete(s.Sandboxes, key)
 			newKey := SessionKey(branch, configFile)
 			s.Sandboxes[newKey] = session
+			s.changed = true
 			return &session, true
 		}
 	}
@@ -453,6 +514,7 @@ func (s *SandboxStorage) GetSessionsForBranchByAncestry(branch string, checker A
 		delete(s.Sandboxes, r.oldKey)
 		newKey := SessionKey(branch, r.config)
 		s.Sandboxes[newKey] = r.session
+		s.changed = true
 		sessions = append(sessions, r.session)
 	}
 

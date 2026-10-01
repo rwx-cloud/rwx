@@ -7,7 +7,7 @@ source "${SCRIPT_DIR}/sandbox-helpers.sh"
 cleanup() {
   git reset HEAD integration-test-local-change.txt 2>/dev/null || true
   rm -f integration-test-local-change.txt setup-artifact.txt
-  "${RWX_CLI}" sandbox stop 2>/dev/null || true
+  "${RWX_CLI}" sandbox stop "${SCRIPT_DIR}/definitions/sandbox-setup-sync.yml" 2>/dev/null || true
 }
 trap cleanup EXIT
 
