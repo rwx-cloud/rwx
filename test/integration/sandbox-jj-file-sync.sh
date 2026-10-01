@@ -36,12 +36,12 @@ echo "# Change from jj" >> go.mod
 new_file_sha=$(sha1sum jj-new-file.txt | awk '{print $1}')
 changed_file_sha=$(sha1sum go.mod | awk '{print $1}')
 
-sandbox_new_file_sha=$("${RWX_CLI}" sandbox exec -- sha1sum jj-new-file.txt | awk 'NR==1{print $1}')
+sandbox_new_file_sha=$("${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sha1sum jj-new-file.txt | awk 'NR==1{print $1}')
 if [ "$new_file_sha" != "$sandbox_new_file_sha" ]; then
   fail "jj-new-file.txt content mismatch in sandbox (local: $new_file_sha, sandbox: $sandbox_new_file_sha)"
 fi
 
-sandbox_changed_file_sha=$("${RWX_CLI}" sandbox exec -- sha1sum go.mod | awk 'NR==1{print $1}')
+sandbox_changed_file_sha=$("${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sha1sum go.mod | awk 'NR==1{print $1}')
 if [ "$changed_file_sha" != "$sandbox_changed_file_sha" ]; then
   fail "go.mod content mismatch in sandbox (local: $changed_file_sha, sandbox: $sandbox_changed_file_sha)"
 fi
@@ -64,7 +64,7 @@ first_head=$(jj_head)
 echo "second change from jj" >> jj-new-file.txt
 second_file_sha=$(sha1sum jj-new-file.txt | awk '{print $1}')
 
-sandbox_second_file_sha=$("${RWX_CLI}" sandbox exec -- sha1sum jj-new-file.txt | awk 'NR==1{print $1}')
+sandbox_second_file_sha=$("${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sha1sum jj-new-file.txt | awk 'NR==1{print $1}')
 if [ "$second_file_sha" != "$sandbox_second_file_sha" ]; then
   fail "second jj-new-file.txt change did not sync (local: $second_file_sha, sandbox: $sandbox_second_file_sha)"
 fi
@@ -76,7 +76,7 @@ fi
 
 # The sandbox must contain the working-copy commit itself, since that is what
 # the jj backend pushes in place of a dirty patch.
-sandbox_has_head=$("${RWX_CLI}" sandbox exec -- git cat-file -t "$second_head" 2>/dev/null | awk 'NR==1{print $1}' || true)
+sandbox_has_head=$("${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- git cat-file -t "$second_head" 2>/dev/null | awk 'NR==1{print $1}' || true)
 if [ "$sandbox_has_head" != "commit" ]; then
   fail "sandbox does not contain the jj working-copy commit $second_head (got '$sandbox_has_head')"
 fi

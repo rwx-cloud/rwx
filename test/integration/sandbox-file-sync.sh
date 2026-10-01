@@ -13,13 +13,13 @@ echo "# Change to existing file" >> go.mod
 new_file_sha=$(sha1sum new-file.txt | awk '{print $1}')
 changed_file_sha=$(sha1sum go.mod | awk '{print $1}')
 
-sandbox_new_file_sha=$("${RWX_CLI}" sandbox exec -- sha1sum new-file.txt | awk 'NR==1{print $1}')
+sandbox_new_file_sha=$("${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sha1sum new-file.txt | awk 'NR==1{print $1}')
 if [ "$new_file_sha" != "$sandbox_new_file_sha" ]; then
   echo "new-file.txt content mismatch in sandbox (local: $new_file_sha, sandbox: $sandbox_new_file_sha)"
   exit 1
 fi
 
-changed_file_sha_check=$("${RWX_CLI}" sandbox exec -- sha1sum go.mod | awk 'NR==1{print $1}')
+changed_file_sha_check=$("${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sha1sum go.mod | awk 'NR==1{print $1}')
 if [ "$changed_file_sha" != "$changed_file_sha_check" ]; then
   echo "go.mod content mismatch in sandbox (local: $changed_file_sha, sandbox: $changed_file_sha_check)"
   exit 1

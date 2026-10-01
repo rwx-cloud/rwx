@@ -8,10 +8,10 @@ start_sandbox
 trap stop_sandbox EXIT
 
 # Create a file in the sandbox
-"${RWX_CLI}" sandbox exec -- sh -c 'echo "before-reset" > /tmp/reset-marker.txt'
+"${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- sh -c 'echo "before-reset" > /tmp/reset-marker.txt'
 
 # Verify the file exists
-marker_check=$("${RWX_CLI}" sandbox exec -- cat /tmp/reset-marker.txt | awk 'NR==1')
+marker_check=$("${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- cat /tmp/reset-marker.txt | awk 'NR==1')
 if [ "$marker_check" != "before-reset" ]; then
   echo "Marker file not found in sandbox before reset"
   exit 1
@@ -30,7 +30,7 @@ export SANDBOX_RUN_ID="$new_run_id"
 
 # After reset, the marker file should not exist in the fresh sandbox
 exit_code=0
-"${RWX_CLI}" sandbox exec -- cat /tmp/reset-marker.txt 2>/dev/null || exit_code=$?
+"${RWX_CLI}" sandbox exec --id "$SANDBOX_RUN_ID" -- cat /tmp/reset-marker.txt 2>/dev/null || exit_code=$?
 
 if [ "$exit_code" -eq 0 ]; then
   echo "Marker file still exists after sandbox reset - sandbox was not re-provisioned"
