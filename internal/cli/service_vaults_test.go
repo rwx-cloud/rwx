@@ -35,6 +35,8 @@ func TestService_CreateVault(t *testing.T) {
 			require.Equal(t, "my-vault", cfg.Name)
 			require.False(t, cfg.Unlocked)
 			require.Empty(t, cfg.RepositoryPermissions)
+			require.Nil(t, cfg.ApprovalsEnabled)
+			require.Nil(t, cfg.RequiredApprovals)
 			return &api.CreateVaultResult{}, nil
 		}
 
@@ -100,22 +102,30 @@ func TestService_CreateVault(t *testing.T) {
 		s := setupTest(t)
 
 		s.mockAPI.MockCreateVault = func(cfg api.CreateVaultConfig) (*api.CreateVaultResult, error) {
+			require.True(t, *cfg.ApprovalsEnabled)
+			require.Equal(t, 2, *cfg.RequiredApprovals)
 			return &api.CreateVaultResult{Vault: api.Vault{
-				ID:          "vault-1",
-				Name:        "my-vault",
-				LockStatus:  "locked",
-				OidcSubject: "org:acme:vault:my-vault",
+				ID:                "vault-1",
+				Name:              "my-vault",
+				LockStatus:        "locked",
+				OidcSubject:       "org:acme:vault:my-vault",
+				ApprovalsEnabled:  true,
+				RequiredApprovals: 2,
 			}}, nil
 		}
 
 		result, err := s.service.CreateVault(cli.CreateVaultConfig{
-			Name: "my-vault",
-			Json: true,
+			Name:                 "my-vault",
+			ApprovalsEnabled:     true,
+			ApprovalsEnabledSet:  true,
+			RequiredApprovals:    2,
+			RequiredApprovalsSet: true,
+			Json:                 true,
 		})
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		require.JSONEq(t, `{"Vault":"my-vault","ID":"vault-1","Name":"my-vault","LockStatus":"locked","RepositoryPermissions":[],"OidcSubject":"org:acme:vault:my-vault"}`, s.mockStdout.String())
+		require.JSONEq(t, `{"Vault":"my-vault","ID":"vault-1","Name":"my-vault","LockStatus":"locked","RepositoryPermissions":[],"OidcSubject":"org:acme:vault:my-vault","ApprovalsEnabled":true,"RequiredApprovals":2}`, s.mockStdout.String())
 	})
 }
 
@@ -146,10 +156,12 @@ func TestService_ListVaults(t *testing.T) {
 		s := setupTest(t)
 		s.mockAPI.MockListVaults = func() (*api.ListVaultsResult, error) {
 			return &api.ListVaultsResult{Vaults: []api.Vault{{
-				ID:          "vault-1",
-				Name:        "deploys",
-				LockStatus:  "locked",
-				OidcSubject: "org:acme:vault:deploys",
+				ID:                "vault-1",
+				Name:              "deploys",
+				LockStatus:        "locked",
+				OidcSubject:       "org:acme:vault:deploys",
+				ApprovalsEnabled:  true,
+				RequiredApprovals: 2,
 				RepositoryPermissions: []api.CreateVaultRepoPermission{
 					{RepositorySlug: "rwx-cloud/cloud", BranchPattern: "main"},
 				},
@@ -158,16 +170,18 @@ func TestService_ListVaults(t *testing.T) {
 
 		_, err := s.service.ListVaults(cli.ListVaultsConfig{Json: true})
 		require.NoError(t, err)
-		require.JSONEq(t, `{"Vaults":[{"ID":"vault-1","Name":"deploys","LockStatus":"locked","RepositoryPermissions":[{"RepositorySlug":"rwx-cloud/cloud","BranchPattern":"main"}],"OidcSubject":"org:acme:vault:deploys"}]}`, s.mockStdout.String())
+		require.JSONEq(t, `{"Vaults":[{"ID":"vault-1","Name":"deploys","LockStatus":"locked","RepositoryPermissions":[{"RepositorySlug":"rwx-cloud/cloud","BranchPattern":"main"}],"OidcSubject":"org:acme:vault:deploys","ApprovalsEnabled":true,"RequiredApprovals":2}]}`, s.mockStdout.String())
 	})
 }
 
 func testVault() api.Vault {
 	return api.Vault{
-		ID:          "vault-1",
-		Name:        "deploys",
-		LockStatus:  "locked",
-		OidcSubject: "org:acme:vault:deploys",
+		ID:                "vault-1",
+		Name:              "deploys",
+		LockStatus:        "locked",
+		OidcSubject:       "org:acme:vault:deploys",
+		ApprovalsEnabled:  true,
+		RequiredApprovals: 2,
 		RepositoryPermissions: []api.CreateVaultRepoPermission{
 			{RepositorySlug: "rwx-cloud/cloud", BranchPattern: "main"},
 		},
@@ -193,7 +207,7 @@ func TestService_ShowVault(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, "vault-1", result.ID)
-		require.JSONEq(t, `{"ID":"vault-1","Name":"deploys","LockStatus":"locked","RepositoryPermissions":[{"RepositorySlug":"rwx-cloud/cloud","BranchPattern":"main"}],"OidcSubject":"org:acme:vault:deploys"}`, s.mockStdout.String())
+		require.JSONEq(t, `{"ID":"vault-1","Name":"deploys","LockStatus":"locked","RepositoryPermissions":[{"RepositorySlug":"rwx-cloud/cloud","BranchPattern":"main"}],"OidcSubject":"org:acme:vault:deploys","ApprovalsEnabled":true,"RequiredApprovals":2}`, s.mockStdout.String())
 	})
 
 	t.Run("prints complete text", func(t *testing.T) {
@@ -206,42 +220,92 @@ func TestService_ShowVault(t *testing.T) {
 		_, err := s.service.ShowVault(cli.ShowVaultConfig{Vault: "deploys"})
 
 		require.NoError(t, err)
-		require.Equal(t, "ID: vault-1\nName: deploys\nLock status: locked\nRepository permissions: rwx-cloud/cloud:main\nOIDC subject: org:acme:vault:deploys\n", s.mockStdout.String())
+		require.Equal(t, "ID: vault-1\nName: deploys\nLock status: locked\nRepository permissions: rwx-cloud/cloud:main\nOIDC subject: org:acme:vault:deploys\nApprovals enabled: true\nRequired approvals: 2\n", s.mockStdout.String())
 	})
 }
 
 func TestService_UpdateVault(t *testing.T) {
-	t.Run("updates name and lock state and prints complete state", func(t *testing.T) {
+	t.Run("updates all fields and prints complete state", func(t *testing.T) {
 		s := setupTest(t)
 		configureVaultResolution(s)
 		s.mockAPI.MockUpdateVault = func(cfg api.UpdateVaultConfig) (*api.UpdateVaultResult, error) {
 			require.Equal(t, "vault-1", cfg.VaultID)
 			require.Equal(t, "production", *cfg.Name)
 			require.False(t, *cfg.Unlocked)
+			require.False(t, *cfg.ApprovalsEnabled)
+			require.Equal(t, 3, *cfg.RequiredApprovals)
 			vault := testVault()
 			vault.Name = "production"
+			vault.ApprovalsEnabled = false
+			vault.RequiredApprovals = 3
 			return &api.UpdateVaultResult{Vault: vault}, nil
 		}
 
 		result, err := s.service.UpdateVault(cli.UpdateVaultConfig{
-			Vault:       "deploys",
-			Name:        "production",
-			NameSet:     true,
-			Unlocked:    false,
-			UnlockedSet: true,
-			Json:        true,
+			Vault:                "deploys",
+			Name:                 "production",
+			NameSet:              true,
+			Unlocked:             false,
+			UnlockedSet:          true,
+			ApprovalsEnabled:     false,
+			ApprovalsEnabledSet:  true,
+			RequiredApprovals:    3,
+			RequiredApprovalsSet: true,
+			Json:                 true,
 		})
 
 		require.NoError(t, err)
 		require.Equal(t, "production", result.Name)
 		require.Contains(t, s.mockStdout.String(), `"ID":"vault-1"`)
 		require.Contains(t, s.mockStdout.String(), `"OidcSubject":"org:acme:vault:deploys"`)
+		require.Contains(t, s.mockStdout.String(), `"ApprovalsEnabled":false`)
+		require.Contains(t, s.mockStdout.String(), `"RequiredApprovals":3`)
+	})
+
+	t.Run("updates approvals enabled independently", func(t *testing.T) {
+		s := setupTest(t)
+		configureVaultResolution(s)
+		s.mockAPI.MockUpdateVault = func(cfg api.UpdateVaultConfig) (*api.UpdateVaultResult, error) {
+			require.Nil(t, cfg.Name)
+			require.Nil(t, cfg.Unlocked)
+			require.False(t, *cfg.ApprovalsEnabled)
+			require.Nil(t, cfg.RequiredApprovals)
+			return &api.UpdateVaultResult{Vault: testVault()}, nil
+		}
+
+		_, err := s.service.UpdateVault(cli.UpdateVaultConfig{
+			Vault:               "deploys",
+			ApprovalsEnabled:    false,
+			ApprovalsEnabledSet: true,
+		})
+
+		require.NoError(t, err)
+	})
+
+	t.Run("updates required approvals independently", func(t *testing.T) {
+		s := setupTest(t)
+		configureVaultResolution(s)
+		s.mockAPI.MockUpdateVault = func(cfg api.UpdateVaultConfig) (*api.UpdateVaultResult, error) {
+			require.Nil(t, cfg.Name)
+			require.Nil(t, cfg.Unlocked)
+			require.Nil(t, cfg.ApprovalsEnabled)
+			require.Equal(t, 4, *cfg.RequiredApprovals)
+			return &api.UpdateVaultResult{Vault: testVault()}, nil
+		}
+
+		_, err := s.service.UpdateVault(cli.UpdateVaultConfig{
+			Vault:                "deploys",
+			RequiredApprovals:    4,
+			RequiredApprovalsSet: true,
+		})
+
+		require.NoError(t, err)
 	})
 
 	t.Run("requires at least one change", func(t *testing.T) {
 		s := setupTest(t)
 		_, err := s.service.UpdateVault(cli.UpdateVaultConfig{Vault: "deploys"})
-		require.ErrorContains(t, err, "provide --name, --unlocked, or both")
+		require.ErrorContains(t, err, "provide at least one field to update")
 	})
 
 	t.Run("prints updated text", func(t *testing.T) {
@@ -289,7 +353,7 @@ func TestService_DeleteVault(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, "vault-1", result.ID)
-		require.JSONEq(t, `{"ID":"vault-1","Name":"deploys","LockStatus":"locked","RepositoryPermissions":[{"RepositorySlug":"rwx-cloud/cloud","BranchPattern":"main"}],"OidcSubject":"org:acme:vault:deploys"}`, s.mockStdout.String())
+		require.JSONEq(t, `{"ID":"vault-1","Name":"deploys","LockStatus":"locked","RepositoryPermissions":[{"RepositorySlug":"rwx-cloud/cloud","BranchPattern":"main"}],"OidcSubject":"org:acme:vault:deploys","ApprovalsEnabled":true,"RequiredApprovals":2}`, s.mockStdout.String())
 	})
 
 	t.Run("surfaces protected vault errors", func(t *testing.T) {

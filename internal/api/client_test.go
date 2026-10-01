@@ -405,15 +405,17 @@ func TestAPIClient_ListVaultData(t *testing.T) {
 }
 
 func TestAPIClient_VaultLifecycle(t *testing.T) {
-	vaultJSON := `{"id":"vault-1","name":"deploys","lock_status":"unlocked","repository_permissions":[{"repository_slug":"rwx-cloud/cloud","branch_pattern":"main"}],"oidc_subject":"org:acme:vault:deploys"}`
+	vaultJSON := `{"id":"vault-1","name":"deploys","lock_status":"unlocked","repository_permissions":[{"repository_slug":"rwx-cloud/cloud","branch_pattern":"main"}],"oidc_subject":"org:acme:vault:deploys","approvals_enabled":true,"required_approvals":2}`
 
 	t.Run("creates a vault and parses its complete state", func(t *testing.T) {
+		approvalsEnabled := true
+		requiredApprovals := 2
 		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
 			require.Equal(t, http.MethodPost, req.Method)
 			require.Equal(t, "/mint/api/vaults", req.URL.Path)
 			body, err := io.ReadAll(req.Body)
 			require.NoError(t, err)
-			require.JSONEq(t, `{"name":"deploys","unlocked":true,"repository_permissions":[{"repository_slug":"rwx-cloud/cloud","branch_pattern":"main"}]}`, string(body))
+			require.JSONEq(t, `{"name":"deploys","unlocked":true,"repository_permissions":[{"repository_slug":"rwx-cloud/cloud","branch_pattern":"main"}],"approvals_enabled":true,"required_approvals":2}`, string(body))
 			return &http.Response{Status: "201 Created", StatusCode: http.StatusCreated, Body: io.NopCloser(strings.NewReader(`{"vault":` + vaultJSON + `}`))}, nil
 		})
 
@@ -423,10 +425,14 @@ func TestAPIClient_VaultLifecycle(t *testing.T) {
 			RepositoryPermissions: []api.CreateVaultRepoPermission{
 				{RepositorySlug: "rwx-cloud/cloud", BranchPattern: "main"},
 			},
+			ApprovalsEnabled:  &approvalsEnabled,
+			RequiredApprovals: &requiredApprovals,
 		})
 		require.NoError(t, err)
 		require.Equal(t, "vault-1", result.Vault.ID)
 		require.Equal(t, "org:acme:vault:deploys", result.Vault.OidcSubject)
+		require.True(t, result.Vault.ApprovalsEnabled)
+		require.Equal(t, 2, result.Vault.RequiredApprovals)
 	})
 
 	t.Run("shows a vault by ID", func(t *testing.T) {
@@ -440,6 +446,8 @@ func TestAPIClient_VaultLifecycle(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "deploys", result.Vault.Name)
 		require.Equal(t, "unlocked", result.Vault.LockStatus)
+		require.True(t, result.Vault.ApprovalsEnabled)
+		require.Equal(t, 2, result.Vault.RequiredApprovals)
 	})
 
 	t.Run("updates only supplied fields", func(t *testing.T) {
@@ -459,6 +467,24 @@ func TestAPIClient_VaultLifecycle(t *testing.T) {
 			VaultID:  "vault-1",
 			Name:     &name,
 			Unlocked: &unlocked,
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("updates approval fields including false", func(t *testing.T) {
+		approvalsEnabled := false
+		requiredApprovals := 3
+		client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"approvals_enabled":false,"required_approvals":3}`, string(body))
+			return &http.Response{Status: "200 OK", StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"vault":` + vaultJSON + `}`))}, nil
+		})
+
+		_, err := client.UpdateVault(api.UpdateVaultConfig{
+			VaultID:           "vault-1",
+			ApprovalsEnabled:  &approvalsEnabled,
+			RequiredApprovals: &requiredApprovals,
 		})
 		require.NoError(t, err)
 	})

@@ -24,9 +24,11 @@ var vaultsListCmd = &cobra.Command{
 // --- vaults create ---
 
 var (
-	createVaultName      string
-	createVaultUnlocked  bool
-	createVaultRepoPerms []string
+	createVaultName              string
+	createVaultUnlocked          bool
+	createVaultRepoPerms         []string
+	createVaultApprovalsEnabled  bool
+	createVaultRequiredApprovals int
 
 	vaultsCreateCmd = &cobra.Command{
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -35,6 +37,10 @@ var (
 				Name:                  createVaultName,
 				Unlocked:              createVaultUnlocked,
 				RepositoryPermissions: createVaultRepoPerms,
+				ApprovalsEnabled:      createVaultApprovalsEnabled,
+				ApprovalsEnabledSet:   cmd.Flags().Changed("approvals-enabled"),
+				RequiredApprovals:     createVaultRequiredApprovals,
+				RequiredApprovalsSet:  cmd.Flags().Changed("required-approvals"),
 				Json:                  useJson,
 			})
 			return err
@@ -58,19 +64,25 @@ var vaultsShowCmd = &cobra.Command{
 }
 
 var (
-	updateVaultName     string
-	updateVaultUnlocked bool
+	updateVaultName              string
+	updateVaultUnlocked          bool
+	updateVaultApprovalsEnabled  bool
+	updateVaultRequiredApprovals int
 
 	vaultsUpdateCmd = &cobra.Command{
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, err := service.UpdateVault(cli.UpdateVaultConfig{
-				Vault:       args[0],
-				Name:        updateVaultName,
-				NameSet:     cmd.Flags().Changed("name"),
-				Unlocked:    updateVaultUnlocked,
-				UnlockedSet: cmd.Flags().Changed("unlocked"),
-				Json:        useJsonOutput(),
+				Vault:                args[0],
+				Name:                 updateVaultName,
+				NameSet:              cmd.Flags().Changed("name"),
+				Unlocked:             updateVaultUnlocked,
+				UnlockedSet:          cmd.Flags().Changed("unlocked"),
+				ApprovalsEnabled:     updateVaultApprovalsEnabled,
+				ApprovalsEnabledSet:  cmd.Flags().Changed("approvals-enabled"),
+				RequiredApprovals:    updateVaultRequiredApprovals,
+				RequiredApprovalsSet: cmd.Flags().Changed("required-approvals"),
+				Json:                 useJsonOutput(),
 			})
 			return err
 		},
@@ -399,12 +411,16 @@ func init() {
 	_ = vaultsCreateCmd.MarkFlagRequired("name")
 	vaultsCreateCmd.Flags().BoolVar(&createVaultUnlocked, "unlocked", false, "whether the vault should be unlocked")
 	vaultsCreateCmd.Flags().StringSliceVar(&createVaultRepoPerms, "repository-permission", nil, "repository permission in the format REPO_SLUG:REF_PATTERN (repeatable)")
+	vaultsCreateCmd.Flags().BoolVar(&createVaultApprovalsEnabled, "approvals-enabled", false, "whether approvals should be enabled")
+	vaultsCreateCmd.Flags().IntVar(&createVaultRequiredApprovals, "required-approvals", 0, "the number of approvals required when approvals are enabled")
 	vaultsCmd.AddCommand(vaultsCreateCmd)
 
 	vaultsCmd.AddCommand(vaultsShowCmd)
 
 	vaultsUpdateCmd.Flags().StringVar(&updateVaultName, "name", "", "the new name of the vault")
 	vaultsUpdateCmd.Flags().BoolVar(&updateVaultUnlocked, "unlocked", false, "whether the vault should be unlocked")
+	vaultsUpdateCmd.Flags().BoolVar(&updateVaultApprovalsEnabled, "approvals-enabled", false, "whether approvals should be enabled")
+	vaultsUpdateCmd.Flags().IntVar(&updateVaultRequiredApprovals, "required-approvals", 0, "the number of approvals required when approvals are enabled")
 	vaultsCmd.AddCommand(vaultsUpdateCmd)
 
 	vaultsDeleteCmd.Flags().BoolVarP(&deleteVaultYes, "yes", "y", false, "skip confirmation prompt")
