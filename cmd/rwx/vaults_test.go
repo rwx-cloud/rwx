@@ -17,6 +17,10 @@ func TestVaultLifecycleCommands(t *testing.T) {
 
 	require.NotNil(t, vaultsUpdateCmd.Flags().Lookup("name"))
 	require.NotNil(t, vaultsUpdateCmd.Flags().Lookup("unlocked"))
+	require.NotNil(t, vaultsUpdateCmd.Flags().Lookup("approvals-enabled"))
+	require.NotNil(t, vaultsUpdateCmd.Flags().Lookup("required-approvals"))
+	require.NotNil(t, vaultsCreateCmd.Flags().Lookup("approvals-enabled"))
+	require.NotNil(t, vaultsCreateCmd.Flags().Lookup("required-approvals"))
 	require.Equal(t, "y", vaultsDeleteCmd.Flags().ShorthandLookup("y").Shorthand)
 }
 

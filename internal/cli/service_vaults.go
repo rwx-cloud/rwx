@@ -13,6 +13,10 @@ type CreateVaultConfig struct {
 	Name                  string
 	Unlocked              bool
 	RepositoryPermissions []string
+	ApprovalsEnabled      bool
+	ApprovalsEnabledSet   bool
+	RequiredApprovals     int
+	RequiredApprovalsSet  bool
 	Json                  bool
 }
 
@@ -37,6 +41,8 @@ type CreateVaultResult struct {
 	LockStatus            string
 	RepositoryPermissions []RepositoryPermissionInfo
 	OidcSubject           string
+	ApprovalsEnabled      bool
+	RequiredApprovals     int
 }
 
 func (s Service) CreateVault(cfg CreateVaultConfig) (*CreateVaultResult, error) {
@@ -54,11 +60,19 @@ func (s Service) CreateVault(cfg CreateVaultConfig) (*CreateVaultResult, error) 
 		})
 	}
 
-	apiResult, err := s.APIClient.CreateVault(api.CreateVaultConfig{
+	apiConfig := api.CreateVaultConfig{
 		Name:                  cfg.Name,
 		Unlocked:              cfg.Unlocked,
 		RepositoryPermissions: repoPermissions,
-	})
+	}
+	if cfg.ApprovalsEnabledSet {
+		apiConfig.ApprovalsEnabled = &cfg.ApprovalsEnabled
+	}
+	if cfg.RequiredApprovalsSet {
+		apiConfig.RequiredApprovals = &cfg.RequiredApprovals
+	}
+
+	apiResult, err := s.APIClient.CreateVault(apiConfig)
 
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to create vault")
@@ -87,6 +101,8 @@ func (s Service) CreateVault(cfg CreateVaultConfig) (*CreateVaultResult, error) 
 		LockStatus:            vault.LockStatus,
 		RepositoryPermissions: vault.RepositoryPermissions,
 		OidcSubject:           vault.OidcSubject,
+		ApprovalsEnabled:      vault.ApprovalsEnabled,
+		RequiredApprovals:     vault.RequiredApprovals,
 	}
 
 	if cfg.Json {
@@ -106,6 +122,8 @@ type VaultInfo struct {
 	LockStatus            string
 	RepositoryPermissions []RepositoryPermissionInfo
 	OidcSubject           string
+	ApprovalsEnabled      bool
+	RequiredApprovals     int
 }
 
 type RepositoryPermissionInfo struct {
@@ -129,12 +147,16 @@ type ShowVaultConfig struct {
 type ShowVaultResult = VaultInfo
 
 type UpdateVaultConfig struct {
-	Vault       string
-	Name        string
-	NameSet     bool
-	Unlocked    bool
-	UnlockedSet bool
-	Json        bool
+	Vault                string
+	Name                 string
+	NameSet              bool
+	Unlocked             bool
+	UnlockedSet          bool
+	ApprovalsEnabled     bool
+	ApprovalsEnabledSet  bool
+	RequiredApprovals    int
+	RequiredApprovalsSet bool
+	Json                 bool
 }
 
 type UpdateVaultResult = VaultInfo
@@ -161,6 +183,8 @@ func vaultInfo(vault api.Vault) VaultInfo {
 		LockStatus:            vault.LockStatus,
 		RepositoryPermissions: permissions,
 		OidcSubject:           vault.OidcSubject,
+		ApprovalsEnabled:      vault.ApprovalsEnabled,
+		RequiredApprovals:     vault.RequiredApprovals,
 	}
 }
 
@@ -174,6 +198,8 @@ func writeVault(stdout interface{ Write([]byte) (int, error) }, vault VaultInfo)
 	fmt.Fprintf(stdout, "Lock status: %s\n", vault.LockStatus)
 	fmt.Fprintf(stdout, "Repository permissions: %s\n", strings.Join(permissions, ", "))
 	fmt.Fprintf(stdout, "OIDC subject: %s\n", vault.OidcSubject)
+	fmt.Fprintf(stdout, "Approvals enabled: %t\n", vault.ApprovalsEnabled)
+	fmt.Fprintf(stdout, "Required approvals: %d\n", vault.RequiredApprovals)
 }
 
 func (s Service) ListVaults(cfg ListVaultsConfig) (*ListVaultsResult, error) {
@@ -242,8 +268,8 @@ func (s Service) ShowVault(cfg ShowVaultConfig) (*ShowVaultResult, error) {
 }
 
 func (s Service) UpdateVault(cfg UpdateVaultConfig) (*UpdateVaultResult, error) {
-	if !cfg.NameSet && !cfg.UnlockedSet {
-		return nil, errors.New("provide --name, --unlocked, or both")
+	if !cfg.NameSet && !cfg.UnlockedSet && !cfg.ApprovalsEnabledSet && !cfg.RequiredApprovalsSet {
+		return nil, errors.New("provide at least one field to update")
 	}
 	if cfg.NameSet && cfg.Name == "" {
 		return nil, errors.New("the vault name must not be empty")
@@ -255,6 +281,12 @@ func (s Service) UpdateVault(cfg UpdateVaultConfig) (*UpdateVaultResult, error) 
 	}
 	if cfg.UnlockedSet {
 		apiConfig.Unlocked = &cfg.Unlocked
+	}
+	if cfg.ApprovalsEnabledSet {
+		apiConfig.ApprovalsEnabled = &cfg.ApprovalsEnabled
+	}
+	if cfg.RequiredApprovalsSet {
+		apiConfig.RequiredApprovals = &cfg.RequiredApprovals
 	}
 
 	vaultID, err := s.resolveVaultID(cfg.Vault)
