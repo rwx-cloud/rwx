@@ -386,6 +386,88 @@ tasks:
     env:
       RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
 
+  - key: test-vault-service-account-access-lifecycle
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      vault_name="rwx-cli-service-account-access-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      service_account="rwx-cli-ci"
+      vault_created=false
+      vault_deleted=false
+
+      cleanup() {
+        status=$?
+        trap - EXIT
+        if [ "$vault_created" = true ] && [ "$vault_deleted" = false ]; then
+          if ! rwx vaults delete "$vault_name" --yes >/dev/null; then
+            echo "Failed to delete vault $vault_name during cleanup" >&2
+            status=1
+          fi
+        fi
+        exit "$status"
+      }
+      trap cleanup EXIT
+
+      created=$(rwx vaults create --name "$vault_name" --json)
+      vault_created=true
+      vault_id=$(echo "$created" | jq -er '.ID | select(type == "string" and length > 0)')
+
+      grant=$(rwx vaults access allow \
+        --vault "$vault_name" \
+        --service-account "$service_account" \
+        --json)
+      grant_id=$(echo "$grant" | jq -er '.ID | select(type == "string" and length > 0)')
+      service_account_id=$(echo "$grant" | jq -er '.ServiceAccountID | select(type == "string" and length > 0)')
+      echo "$grant" | jq -e \
+        --arg grant_id "$grant_id" \
+        --arg vault_id "$vault_id" \
+        --arg service_account_id "$service_account_id" \
+        --arg service_account "$service_account" '
+          .ID == $grant_id and
+          .Vault.ID == $vault_id and
+          .AccessType == "service_account" and
+          .ServiceAccountID == $service_account_id and
+          .ServiceAccountName == $service_account and
+          .ExpiresAt == null
+        ' >/dev/null
+
+      listed=$(rwx vaults access list --vault "$vault_id" --json)
+      echo "$listed" | jq -e \
+        --arg grant_id "$grant_id" \
+        --arg service_account_id "$service_account_id" \
+        --arg service_account "$service_account" '
+          any(.AccessGrants[];
+            .ID == $grant_id and
+            .AccessType == "service_account" and
+            .ServiceAccountID == $service_account_id and
+            .ServiceAccountName == $service_account
+          )
+        ' >/dev/null
+
+      revoked=$(rwx vaults access revoke \
+        --vault "$vault_id" \
+        --service-account "$service_account" \
+        --yes \
+        --json)
+      echo "$revoked" | jq -e \
+        --arg grant_id "$grant_id" \
+        --arg service_account "$service_account" '
+          .ID == $grant_id and
+          .AccessType == "service_account" and
+          .ServiceAccountName == $service_account
+        ' >/dev/null
+
+      listed=$(rwx vaults access list --vault "$vault_id" --json)
+      echo "$listed" | jq -e --arg grant_id "$grant_id" '
+        all(.AccessGrants[]; .ID != $grant_id)
+      ' >/dev/null
+
+      rwx vaults delete "$vault_id" --yes >/dev/null
+      vault_deleted=true
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+
   - key: test-vault-oidc-token-lifecycle
     use: rwx-cli
     run: |
