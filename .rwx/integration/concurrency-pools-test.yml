@@ -1,0 +1,64 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.2.0
+
+tasks:
+  - key: code
+    call: git/clone 2.2.0
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: test-concurrency-pools
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      pool_id="rwx-cloud/rwx:main"
+      list=$(rwx concurrency-pools list --search "$pool_id" --limit 1 --json)
+      echo "$list" | jq -e --arg id "$pool_id" '
+        .ConcurrencyPools | type == "array" and any(.ID == $id)
+      ' >/dev/null
+      echo "$list" | jq -e '
+        (.Pagination.Limit == 1) and (.Pagination | has("NextCursor"))
+      ' >/dev/null
+
+      table=$(rwx concurrency-pools list --search "$pool_id" --limit 1)
+      echo "$table" | grep -q "POOL"
+      echo "$table" | grep -q "USES (7D)"
+      echo "$table" | grep -q "$pool_id"
+
+      shown=$(rwx concurrency-pools show "$pool_id" --limit 1 --json)
+      echo "$shown" | jq -e --arg id "$pool_id" '
+        .ConcurrencyPool.ID == $id and
+        (.ConcurrencyPool.RecentRuns | type == "array") and
+        (.Queue | type == "array") and
+        (.Pagination.Limit == 1) and
+        (.Pagination | has("NextCursor"))
+      ' >/dev/null
+
+      detail=$(rwx concurrency-pools show "$pool_id" --limit 1)
+      echo "$detail" | grep -q "Pool: $pool_id"
+      echo "$detail" | grep -q "CURRENT QUEUE"
+      echo "$detail" | grep -q "RECENT RUNS"
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}

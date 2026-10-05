@@ -33,6 +33,11 @@ tasks:
     init:
       ref: ${{ init.commit-sha }}
 
+  - key: run-rwx-concurrency-pools-test
+    call: ${{ run.dir }}/integration/concurrency-pools-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
   - key: run-rwx-apps-test
     call: ${{ run.dir }}/integration/apps-test.yml
     init:
