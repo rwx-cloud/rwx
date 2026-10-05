@@ -15,7 +15,7 @@ tasks:
     call: aws/install-cli 1.1.0
 
   - key: code
-    call: git/clone 2.1.0
+    call: git/clone 2.2.0
     with:
       repository: https://github.com/rwx-cloud/rwx.git
       ref: ${{ init.ref }}
