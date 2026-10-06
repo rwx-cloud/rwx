@@ -72,6 +72,9 @@ type API struct {
 	MockRunStatus                               func(api.RunStatusConfig) (api.RunStatusResult, error)
 	MockGetRunDetails                           func(api.RunDetailsConfig) (map[string]any, error)
 	MockListRuns                                func(api.ListRunsConfig) (*api.ListRunsResult, error)
+	MockListConcurrencyPools                    func(api.ListConcurrencyPoolsConfig) (*api.ListConcurrencyPoolsResult, error)
+	MockShowConcurrencyPool                     func(string) (*api.ConcurrencyPool, error)
+	MockListConcurrencyPoolQueue                func(api.ListConcurrencyPoolQueueConfig) (*api.ListConcurrencyPoolQueueResult, error)
 	MockGetRetryOptions                         func(api.RetryTarget) (api.RetryOptions, error)
 	MockRequestRetry                            func(api.RequestRetryConfig) (api.RequestRetryResult, error)
 	MockGetLogDownloadRequest                   func(string) (api.LogDownloadRequestResult, error)
@@ -547,6 +550,30 @@ func (c *API) ListRuns(cfg api.ListRunsConfig) (*api.ListRunsResult, error) {
 	}
 
 	return nil, errors.New("MockListRuns was not configured")
+}
+
+func (c *API) ListConcurrencyPools(cfg api.ListConcurrencyPoolsConfig) (*api.ListConcurrencyPoolsResult, error) {
+	if c.MockListConcurrencyPools != nil {
+		return c.MockListConcurrencyPools(cfg)
+	}
+
+	return nil, errors.New("MockListConcurrencyPools was not configured")
+}
+
+func (c *API) ShowConcurrencyPool(id string) (*api.ConcurrencyPool, error) {
+	if c.MockShowConcurrencyPool != nil {
+		return c.MockShowConcurrencyPool(id)
+	}
+
+	return nil, errors.New("MockShowConcurrencyPool was not configured")
+}
+
+func (c *API) ListConcurrencyPoolQueue(cfg api.ListConcurrencyPoolQueueConfig) (*api.ListConcurrencyPoolQueueResult, error) {
+	if c.MockListConcurrencyPoolQueue != nil {
+		return c.MockListConcurrencyPoolQueue(cfg)
+	}
+
+	return nil, errors.New("MockListConcurrencyPoolQueue was not configured")
 }
 
 func (c *API) GetLogDownloadRequest(taskId string) (api.LogDownloadRequestResult, error) {
