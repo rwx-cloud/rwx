@@ -237,13 +237,19 @@ CONFIG FILE
 }
 
 var sandboxPushCmd = &cobra.Command{
-	Use:    "push [config-file]",
-	Short:  "Push local changes to a sandbox",
-	Hidden: true,
-	Args:   cobra.MaximumNArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireExperimentalSandboxAccess()
-	},
+	Use:   "push [config-file]",
+	Short: "Push local changes to a sandbox",
+	Long: `Sync local changes to an existing sandbox without running a command.
+
+"rwx sandbox exec" syncs local changes before running its command. Use push
+when you want to update the sandbox without running a command.
+
+The sandbox is reset to the local Git state, including staged, unstaged, and
+untracked changes. Changes made only in the sandbox are not preserved.
+
+By default, push targets the sandbox for the current directory and Git branch.
+Use --id to target a specific sandbox.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var configFile string
 		if len(args) > 0 {
@@ -272,16 +278,17 @@ var sandboxPushCmd = &cobra.Command{
 }
 
 var sandboxBackgroundCmd = &cobra.Command{
-	Use:    "background [config-file] -- <command>",
-	Short:  "Start or replace a sandbox background process",
-	Hidden: true,
-	Long: `Start or replace a named managed process in an existing sandbox.
-Local changes are synced before the process starts. When --port is provided,
-the port is forwarded locally and its localhost URL is printed.`,
+	Use:   "background [config-file] -- <command>",
+	Short: "Start or replace a sandbox background process",
+	Long: `Start or replace a named process in an existing sandbox.
+
+Starting a process syncs the local Git state first. Changes made only in the
+sandbox are not preserved. The process runs until you stop it or the sandbox
+stops.
+
+Use --port to forward a sandbox port to localhost. Use --id to target a
+specific sandbox.`,
 	Args: cobra.ArbitraryArgs,
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireExperimentalSandboxAccess()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dashIndex := cmd.ArgsLenAtDash()
 		if dashIndex < 0 || dashIndex >= len(args) {
@@ -324,10 +331,11 @@ the port is forwarded locally and its localhost URL is printed.`,
 var sandboxBackgroundRestartCmd = &cobra.Command{
 	Use:   "restart [config-file]",
 	Short: "Sync changes and restart a sandbox background process",
-	Args:  cobra.MaximumNArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireExperimentalSandboxAccess()
-	},
+	Long: `Sync the local Git state and restart a named process, reusing its saved
+command and sandbox port. Changes made only in the sandbox are not preserved.
+If the process forwards a port, restart reopens the local tunnel and prints its
+URL.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var configFile string
 		if len(args) > 0 {
@@ -355,13 +363,9 @@ var sandboxBackgroundRestartCmd = &cobra.Command{
 }
 
 var sandboxTunnelCmd = &cobra.Command{
-	Use:    "tunnel [config-file]",
-	Short:  "Expose a sandbox background process through a local tunnel",
-	Hidden: true,
-	Args:   cobra.MaximumNArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireExperimentalSandboxAccess()
-	},
+	Use:   "tunnel [config-file]",
+	Short: "Expose a sandbox background process through a local tunnel",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var configFile string
 		if len(args) > 0 {
@@ -395,9 +399,6 @@ var sandboxBackgroundStopCmd = &cobra.Command{
 	Use:   "stop [config-file]",
 	Short: "Stop a sandbox background process",
 	Args:  cobra.MaximumNArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireExperimentalSandboxAccess()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var configFile string
 		if len(args) > 0 {
@@ -427,10 +428,9 @@ var sandboxBackgroundStopCmd = &cobra.Command{
 var sandboxBackgroundLogsCmd = &cobra.Command{
 	Use:   "logs [config-file]",
 	Short: "Show logs for a sandbox background process",
-	Args:  cobra.MaximumNArgs(1),
-	PreRunE: func(cmd *cobra.Command, args []string) error {
-		return requireExperimentalSandboxAccess()
-	},
+	Long: `Show logs for an ad hoc background process or one declared in the sandbox
+configuration. Use --follow to stream new output.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var configFile string
 		if len(args) > 0 {
@@ -663,8 +663,8 @@ func init() {
 
 	// background flags
 	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxRunID, "id", "", "Use specific run ID")
-	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxBackgroundName, "key", "", "Key of the managed sandbox process")
-	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxBackgroundName, "name", "", "Name of the managed sandbox process")
+	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxBackgroundName, "key", "", "Key of the sandbox background process")
+	sandboxBackgroundCmd.PersistentFlags().StringVar(&sandboxBackgroundName, "name", "", "Name of the sandbox background process")
 	if err := sandboxBackgroundCmd.PersistentFlags().MarkDeprecated("name", "use --key instead"); err != nil {
 		panic(err)
 	}
