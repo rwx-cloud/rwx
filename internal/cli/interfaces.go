@@ -45,6 +45,7 @@ type APIClient interface {
 	DeleteVaultAccessGrant(api.DeleteVaultAccessGrantConfig) (*api.DeleteVaultAccessGrantResult, error)
 	DisableApp(string) error
 	EnableApp(string) error
+	BillingUsage(string) (*api.BillingUsageResult, error)
 	ListCrons() (*api.ListCronsResult, error)
 	ShowCron(string) (*api.CronResult, error)
 	PauseCron(string) (*api.CronResult, error)
