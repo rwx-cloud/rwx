@@ -1,0 +1,97 @@
+{
+  "organization_slug": "acme",
+  "period": {
+    "month": "2026-09",
+    "starts_on": "2026-09-01",
+    "ends_on": "2026-09-30",
+    "finalized_through": "2026-09-01"
+  },
+  "currency": "USD",
+  "usage_cost_in_dollars": "82.469135780246913578",
+  "available_credit_in_dollars": "50.123456789",
+  "summary": [
+    {
+      "sku": "compute.general_purpose.vcpu_second",
+      "label": "Compute: general purpose",
+      "qualifiers": [
+        "Spot"
+      ],
+      "unit": {
+        "code": "vcpu_second",
+        "label": "vCPU-second"
+      },
+      "quantity": "123456.7890123456789",
+      "unit_price_in_dollars": "0.00002",
+      "included": false,
+      "cost_in_dollars": "2.469135780246913578"
+    },
+    {
+      "sku": "abq.parallel_job",
+      "label": "ABQ",
+      "qualifiers": [],
+      "unit": {
+        "code": "parallel_job",
+        "label": "parallel job"
+      },
+      "quantity": "8.0",
+      "unit_price_in_dollars": "10.0",
+      "included": false,
+      "cost_in_dollars": "80.0"
+    }
+  ],
+  "days": [
+    {
+      "date": "2026-09-01",
+      "processing": false,
+      "cost_in_dollars": "2.469135780246913578",
+      "lines": [
+        {
+          "sku": "compute.general_purpose.vcpu_second",
+          "label": "Compute: general purpose",
+          "qualifiers": [
+            "Spot"
+          ],
+          "unit": {
+            "code": "vcpu_second",
+            "label": "vCPU-second"
+          },
+          "quantity": "123456.7890123456789",
+          "unit_price_in_dollars": "0.00002",
+          "included": false,
+          "cost_in_dollars": "2.469135780246913578"
+        },
+        {
+          "sku": "egress.aggregate.gib",
+          "label": "External data transfer",
+          "qualifiers": [],
+          "unit": {
+            "code": "gib",
+            "label": "GiB"
+          },
+          "quantity": "3.25",
+          "unit_price_in_dollars": null,
+          "included": true,
+          "cost_in_dollars": "0.0"
+        }
+      ]
+    },
+    {
+      "date": "2026-09-02",
+      "processing": true,
+      "cost_in_dollars": null,
+      "lines": []
+    },
+    {
+      "date": "2026-09-03",
+      "processing": true,
+      "cost_in_dollars": null,
+      "lines": []
+    },
+    {
+      "date": "2026-09-04",
+      "processing": true,
+      "cost_in_dollars": null,
+      "lines": []
+    }
+  ]
+}
