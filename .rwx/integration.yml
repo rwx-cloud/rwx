@@ -83,6 +83,11 @@ tasks:
     init:
       ref: ${{ init.commit-sha }}
 
+  - key: run-rwx-billing-usage-test
+    call: ${{ run.dir }}/integration/billing-usage-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
+
   - key: run-rwx-vaults-test
     call: ${{ run.dir }}/integration/vaults-test.yml
     init:
