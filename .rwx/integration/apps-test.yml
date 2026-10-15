@@ -36,6 +36,7 @@ tasks:
       endpoint="cli-app-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
       run_id=""
       fixture_ready=false
+      work=$(mktemp -d)
 
       cleanup() {
         status=$?
@@ -47,6 +48,7 @@ tasks:
           echo "Failed to disable test endpoint $endpoint during cleanup" >&2
           status=1
         fi
+        rm -rf "$work"
         exit "$status"
       }
       trap cleanup EXIT
@@ -102,6 +104,66 @@ tasks:
           exit 1
         fi
       done
+
+      # Share URLs and cookies grant access; keep them out of task logs.
+      set +x
+      for mode in default custom; do
+        args=("$endpoint")
+        description=""
+        duration=$((7 * 24 * 60 * 60))
+        if [ "$mode" = custom ]; then
+          description='CLI integration "share"'
+          args=("$app_url" --description "$description" --expires-in 8d)
+          duration=$((8 * 24 * 60 * 60))
+        fi
+        started=$(date +%s)
+        output=$(rwx apps share "${args[@]}" --json)
+        finished=$(date +%s)
+        echo "$output" | jq -e \
+          --arg prefix "$app_url/rwx-share?code=" --arg description "$description" \
+          --argjson earliest "$((started + duration))" --argjson latest "$((finished + duration))" \
+          '(.URL | startswith($prefix)) and (.Description == $description) and
+           (.ExpiresAt | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 | . >= $earliest and . <= $latest)' >/dev/null
+        echo "Share JSON verified: $mode expiry and description"
+      done
+
+      share_url=$(rwx apps share "$endpoint" --expires-in 1h)
+      [[ "$share_url" == "$app_url/rwx-share?code="* && "$share_url" != *$'\n'* ]]
+
+      status=$(curl --silent --show-error --max-time 15 --output /dev/null \
+        --dump-header "$work/unauth.headers" --write-out '%{http_code}' "$app_url/")
+      test "$status" = 302
+      grep -qi '^location: .*\/preview_apps\/authorizations\/new?' "$work/unauth.headers"
+      echo "Private app denies unauthenticated access"
+
+      status=$(curl --silent --show-error --max-time 15 --output "$work/handoff" \
+        --write-out '%{http_code}' "$share_url")
+      test "$status" = 200
+      grep -q 'Opening Preview' "$work/handoff"
+
+      # Submit the handoff form as a fresh client, without the CLI's bearer token.
+      share_code="${share_url##*?code=}"
+      status=$(curl --silent --show-error --max-time 15 --output /dev/null \
+        --write-out '%{http_code}' --cookie-jar "$work/cookies" \
+        --header "Origin: $app_url" --data-urlencode "share_code=$share_code" \
+        "$app_url/.rwx/auth/share")
+      test "$status" = 303
+
+      ready=false
+      for attempt in $(seq 1 30); do
+        status=$(curl --silent --show-error --max-time 15 --output "$work/body" \
+          --write-out '%{http_code}' --cookie "$work/cookies" "$app_url/")
+        if [ "$status" = 200 ] && [ "$(cat "$work/body")" = "CLI app integration test" ]; then
+          ready=true
+          break
+        fi
+        sleep 2
+      done
+      if [ "$ready" != true ]; then
+        echo "Shared app did not serve the fixture body (last HTTP status: $status)" >&2
+        exit 1
+      fi
+      echo "Share text output redeemed successfully and served the private app"
     env:
       RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
       RUN_DEF: ${{ run.dir }}/integration/apps-test/app.yml
