@@ -1,0 +1,102 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.2.0
+
+tasks:
+  - key: code
+    call: git/clone 2.2.0
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: test-billing-usage
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+      rwx billing usage --json > default.json
+      month=$(jq -er '.Period.Month' default.json)
+      rwx billing usage --month "$month" --format json > explicit.json
+      previous_month=$(date -u -d "$month-01 -1 month" +%Y-%m)
+      rwx billing usage --month "$previous_month" --json > previous.json
+      rwx billing usage --month 2000-02 --json > empty.json
+      for file in default.json explicit.json previous.json empty.json; do
+        jq -e '
+          (.OrganizationSlug | length > 0) and
+          (.Period.Month | test("^[0-9]{4}-[0-9]{2}$")) and
+          (.Period.StartsOn == .Period.Month + "-01") and
+          (.Period.EndsOn | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) and
+          (.Period | has("FinalizedThrough")) and
+          (.Period.FinalizedThrough | . == null or type == "string") and
+          (.Currency == "USD") and
+          (.UsageCostInDollars | type == "string") and
+          (.AvailableCreditInDollars | type == "string") and
+          (.Summary | type == "array") and
+          (.Days | type == "array") and
+          ([.Days[].Date] == ([.Days[].Date] | sort | unique)) and
+          (.Period as $period | all(.Days[]; .Date >= $period.StartsOn and .Date <= $period.EndsOn)) and
+          (.Period.FinalizedThrough as $finalized | $finalized == null or any(.Days[]; .Date == $finalized and .Processing == false)) and
+          (all(.Days[]; (.Processing | type == "boolean") and if .Processing then .CostInDollars == null and .Lines == [] else (.CostInDollars | type == "string") end)) and
+          (all((.Summary[], .Days[].Lines[]);
+            (.Quantity | type == "string") and
+            (.CostInDollars | type == "string") and
+            (.Unit.Code | length > 0) and
+            (.Unit.Label | length > 0) and
+            (.Qualifiers | type == "array") and
+            (.Included | type == "boolean") and
+            (.SKU | startswith("mint.") | not) and
+            (if .Included then .UnitPriceInDollars == null else (.UnitPriceInDollars | type == "string") end)))
+        ' "$file"
+      done
+      test "$(jq -r '.Period.Month' explicit.json)" = "$month"
+      test "$(jq -r '.Period.Month' previous.json)" = "$previous_month"
+      previous_end=$(date -u -d "$month-01 -1 day" +%Y-%m-%d)
+      jq -e --arg first "$previous_month-01" --arg last "$previous_end" '
+        .Period.StartsOn == $first and .Period.EndsOn == $last and
+        .Days[0].Date == $first and .Days[-1].Date == $last and
+        (.Days | length) == ($last | split("-")[-1] | tonumber)
+      ' previous.json
+      jq -e '
+        .Period.Month == "2000-02" and
+        .Period.EndsOn == "2000-02-29" and
+        .Period.FinalizedThrough == null and
+        .Summary == [] and
+        (.Days | length == 29) and
+        .Days[0].Date == "2000-02-01" and
+        .Days[-1].Date == "2000-02-29" and
+        all(.Days[]; .Processing == false and .CostInDollars == "0.0" and .Lines == [])
+      ' empty.json
+      rwx billing usage --month "$month" > usage.txt
+      grep -q 'Usage cost:' usage.txt
+      grep -q 'Finalized through:' usage.txt
+      if rwx billing usage --month 2026-13 > malformed.txt 2>&1; then
+        echo "Malformed month unexpectedly accepted"
+        exit 1
+      fi
+      grep -q 'month must be in YYYY-MM format' malformed.txt
+      if rwx billing usage --month 9999-12 > future.txt 2>&1; then
+        echo "Future month unexpectedly accepted"
+        exit 1
+      fi
+      grep -q '400 Bad Request' future.txt
+      jq '{Month: .Period.Month, Days: (.Days | length), SummaryLines: (.Summary | length), ProcessingDays: ([.Days[] | select(.Processing)] | length)}' default.json
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}

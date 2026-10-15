@@ -223,6 +223,7 @@ func init() {
 	// Add commands (GroupID is set in each command's definition)
 	rootCmd.AddCommand(appsCmd)
 	rootCmd.AddCommand(artifactsCmd)
+	rootCmd.AddCommand(billingCmd)
 	rootCmd.AddCommand(cancelCmd)
 	rootCmd.AddCommand(debugCmd)
 	rootCmd.AddCommand(dispatchCmd)
