@@ -11,6 +11,7 @@ type API struct {
 	MockDisableApp                              func(string) error
 	MockEnableApp                               func(string) error
 	MockBillingUsage                            func(string) (*api.BillingUsageResult, error)
+	MockShareApp                                func(api.ShareAppConfig) (*api.ShareAppResult, error)
 	MockListCrons                               func() (*api.ListCronsResult, error)
 	MockShowCron                                func(string) (*api.CronResult, error)
 	MockPauseCron                               func(string) (*api.CronResult, error)

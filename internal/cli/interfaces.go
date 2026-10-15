@@ -46,6 +46,7 @@ type APIClient interface {
 	DisableApp(string) error
 	EnableApp(string) error
 	BillingUsage(string) (*api.BillingUsageResult, error)
+	ShareApp(api.ShareAppConfig) (*api.ShareAppResult, error)
 	ListCrons() (*api.ListCronsResult, error)
 	ShowCron(string) (*api.CronResult, error)
 	PauseCron(string) (*api.CronResult, error)

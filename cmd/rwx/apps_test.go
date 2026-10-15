@@ -15,7 +15,8 @@ import (
 func TestAppsCommands(t *testing.T) {
 	require.Same(t, appsCmd, findSubcommand(rootCmd, "apps"))
 	require.Equal(t, "api", appsCmd.GroupID)
-	require.Len(t, appsCmd.Commands(), 2)
+	require.Len(t, appsCmd.Commands(), 3)
+	require.Same(t, appsShareCmd, findSubcommand(appsCmd, "share"))
 	for _, action := range []string{"disable", "enable"} {
 		t.Run(action, func(t *testing.T) {
 			cmd := findSubcommand(appsCmd, action)
