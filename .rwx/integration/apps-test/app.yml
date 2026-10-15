@@ -13,6 +13,7 @@ tasks:
     app:
       endpoint: ${{ init.endpoint }}
       port: 3000
+      public: false
     run: |
       mkdir -p /tmp/cli-app-test
       echo "CLI app integration test" > /tmp/cli-app-test/index.html
