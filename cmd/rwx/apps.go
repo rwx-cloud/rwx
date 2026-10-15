@@ -15,7 +15,7 @@ var appsCmd = &cobra.Command{
 var appsDisableCmd = &cobra.Command{
 	Use:   "disable ENDPOINT_OR_URL",
 	Short: "Disable a preview app endpoint",
-	Long:  "Disable a preview app by endpoint or URL, including all versions, and queue running instances for shutdown.",
+	Long:  "Disable a preview app by endpoint or URL and queue running instances for shutdown.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := service.DisableApp(cli.AppConfig{Endpoint: args[0], Json: useJsonOutput()})
