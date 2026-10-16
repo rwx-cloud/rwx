@@ -826,31 +826,48 @@ func (c Client) CreateVault(cfg CreateVaultConfig) (*CreateVaultResult, error) {
 }
 
 func (c Client) ListVaults() (*ListVaultsResult, error) {
-	req, err := http.NewRequest(http.MethodGet, "/mint/api/vaults", nil)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to create new HTTP request")
-	}
-
-	resp, err := c.RoundTrip(req)
-	if err != nil {
-		return nil, errors.Wrap(err, "HTTP request failed")
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		msg := extractErrorMessage(resp.Body)
-		if msg == "" {
-			msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+	result := &ListVaultsResult{}
+	cursor := ""
+	for {
+		endpoint := "/mint/api/vaults"
+		if cursor != "" {
+			endpoint += "?" + url.Values{"cursor": {cursor}}.Encode()
 		}
-		return nil, errors.New(msg)
-	}
+		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to create new HTTP request")
+		}
 
-	result := ListVaultsResult{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, errors.Wrap(err, "unable to parse API response")
-	}
+		resp, err := c.RoundTrip(req)
+		if err != nil {
+			return nil, errors.Wrap(err, "HTTP request failed")
+		}
+		if resp.StatusCode != 200 {
+			msg := extractErrorMessage(resp.Body)
+			resp.Body.Close()
+			if msg == "" {
+				msg = fmt.Sprintf("Unable to call RWX API - %s", resp.Status)
+			}
+			return nil, errors.New(msg)
+		}
 
-	return &result, nil
+		var page struct {
+			ListVaultsResult
+			Pagination struct {
+				NextCursor string `json:"next_cursor"`
+			} `json:"pagination"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&page)
+		resp.Body.Close()
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to parse API response")
+		}
+		result.Vaults = append(result.Vaults, page.Vaults...)
+		cursor = page.Pagination.NextCursor
+		if cursor == "" {
+			return result, nil
+		}
+	}
 }
 
 func (c Client) ShowVault(cfg ShowVaultConfig) (*ShowVaultResult, error) {
