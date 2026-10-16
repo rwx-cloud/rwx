@@ -26,7 +26,7 @@ exec_exit_code=0
 exec_result=$("${RWX_CLI}" sandbox exec \
   --json \
   "${SCRIPT_DIR}/definitions/sandbox.yml" \
-  --init ref=main \
+  --init ref=jason/integration-test-org \
   --init "cli=${COMMIT_SHA}" \
   -- sh -c 'test "$(cat unpushed-commit-test.txt)" = "unpushed commit content" && test "$(cat uncommitted-test.txt)" = "uncommitted edit"') || exec_exit_code=$?
 SANDBOX_RUN_ID=$(echo "$exec_result" | jq -r '.RunID // empty')

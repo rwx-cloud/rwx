@@ -18,7 +18,7 @@ if [ "$marker_check" != "before-reset" ]; then
 fi
 
 # Reset the sandbox
-reset_output=$("${RWX_CLI}" sandbox reset "${SCRIPT_DIR}/definitions/sandbox.yml" --json --init ref=main --init "cli=${COMMIT_SHA}" --wait)
+reset_output=$("${RWX_CLI}" sandbox reset "${SCRIPT_DIR}/definitions/sandbox.yml" --json --init ref=jason/integration-test-org --init "cli=${COMMIT_SHA}" --wait)
 new_run_id=$(echo "$reset_output" | jq -r '.NewRunID // empty')
 
 if [ -z "$new_run_id" ]; then

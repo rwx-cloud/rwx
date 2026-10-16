@@ -124,7 +124,7 @@ start_git_state_sandbox() {
   fi
 
   local sandbox_result
-  sandbox_result=$("${RWX_CLI}" sandbox start "$SANDBOX_CONFIG" --json --init ref=main --init "cli=${COMMIT_SHA}" --wait)
+  sandbox_result=$("${RWX_CLI}" sandbox start "$SANDBOX_CONFIG" --json --init ref=jason/integration-test-org --init "cli=${COMMIT_SHA}" --wait)
   SANDBOX_RUN_ID=$(echo "$sandbox_result" | jq -r ".RunID")
 
   local sandbox_url

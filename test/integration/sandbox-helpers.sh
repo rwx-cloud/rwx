@@ -9,7 +9,7 @@ start_sandbox() {
   local sandbox_config="${1:-${SCRIPT_DIR}/definitions/sandbox.yml}"
   local sandbox_result
   local exit_code=0
-  sandbox_result=$("${RWX_CLI}" sandbox start "${sandbox_config}" --json --init ref=main --init "cli=${COMMIT_SHA}" --wait) || exit_code=$?
+  sandbox_result=$("${RWX_CLI}" sandbox start "${sandbox_config}" --json --init ref=jason/integration-test-org --init "cli=${COMMIT_SHA}" --wait) || exit_code=$?
 
   if [ "$exit_code" -ne 0 ]; then
     echo "sandbox start failed with exit code ${exit_code}"

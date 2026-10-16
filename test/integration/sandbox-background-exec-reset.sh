@@ -20,7 +20,7 @@ curl --fail --silent --show-error --max-time 10 "$preview_url" >/dev/null
 exec_result=$("${RWX_CLI}" sandbox exec \
   --json \
   --reset \
-  --init ref=main \
+  --init ref=jason/integration-test-org \
   --init "cli=${COMMIT_SHA}" \
   "${SCRIPT_DIR}/definitions/sandbox-background.yml" \
   -- true)
