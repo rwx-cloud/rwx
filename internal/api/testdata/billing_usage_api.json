@@ -42,7 +42,6 @@
   "days": [
     {
       "date": "2026-09-01",
-      "processing": false,
       "cost_in_dollars": "2.469135780246913578",
       "lines": [
         {
@@ -77,19 +76,16 @@
     },
     {
       "date": "2026-09-02",
-      "processing": true,
       "cost_in_dollars": null,
       "lines": []
     },
     {
       "date": "2026-09-03",
-      "processing": true,
       "cost_in_dollars": null,
       "lines": []
     },
     {
       "date": "2026-09-04",
-      "processing": true,
       "cost_in_dollars": null,
       "lines": []
     }

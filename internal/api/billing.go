@@ -42,7 +42,6 @@ type BillingLine struct {
 
 type BillingDay struct {
 	Date          string        `json:"date"`
-	Processing    bool          `json:"processing"`
 	CostInDollars *string       `json:"cost_in_dollars"`
 	Lines         []BillingLine `json:"lines"`
 }

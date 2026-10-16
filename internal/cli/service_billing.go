@@ -52,7 +52,6 @@ type BillingLine struct {
 
 type BillingDay struct {
 	Date          string
-	Processing    bool
 	CostInDollars *string
 	Lines         []BillingLine
 }
@@ -86,7 +85,7 @@ func (s Service) BillingUsage(cfg BillingUsageConfig) (*BillingUsageResult, erro
 		Days:                     make([]BillingDay, len(response.Days)),
 	}
 	for i, day := range response.Days {
-		result.Days[i] = BillingDay{Date: day.Date, Processing: day.Processing, CostInDollars: day.CostInDollars, Lines: billingLines(day.Lines)}
+		result.Days[i] = BillingDay{Date: day.Date, CostInDollars: day.CostInDollars, Lines: billingLines(day.Lines)}
 	}
 	if cfg.Json {
 		if err := json.NewEncoder(s.Stdout).Encode(result); err != nil {
@@ -111,11 +110,7 @@ func (s Service) BillingUsage(cfg BillingUsageConfig) (*BillingUsageResult, erro
 		fmt.Fprintln(w, "No daily usage.")
 	}
 	for _, day := range result.Days {
-		status := "Available"
-		if day.Processing {
-			status = "Processing"
-		}
-		fmt.Fprintf(w, "%s\t%s\tCost: %s\n", day.Date, status, billingDecimal(day.CostInDollars))
+		fmt.Fprintf(w, "%s\tCost: %s\n", day.Date, billingDecimal(day.CostInDollars))
 		if len(day.Lines) > 0 {
 			writeBillingLines(w, day.Lines)
 		}

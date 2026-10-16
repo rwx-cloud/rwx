@@ -53,8 +53,8 @@ tasks:
           (.Days | type == "array") and
           ([.Days[].Date] == ([.Days[].Date] | sort | unique)) and
           (.Period as $period | all(.Days[]; .Date >= $period.StartsOn and .Date <= $period.EndsOn)) and
-          (.Period.FinalizedThrough as $finalized | $finalized == null or any(.Days[]; .Date == $finalized and .Processing == false)) and
-          (all(.Days[]; (.Processing | type == "boolean") and if .Processing then .CostInDollars == null and .Lines == [] else (.CostInDollars | type == "string") end)) and
+          (.Period.FinalizedThrough as $finalized | $finalized == null or any(.Days[]; .Date == $finalized and (.CostInDollars | type == "string"))) and
+          (all(.Days[]; if .CostInDollars == null then .Lines == [] else (.CostInDollars | type == "string") end)) and
           (all((.Summary[], .Days[].Lines[]);
             (.Quantity | type == "string") and
             (.CostInDollars | type == "string") and
@@ -82,7 +82,7 @@ tasks:
         (.Days | length == 29) and
         .Days[0].Date == "2000-02-01" and
         .Days[-1].Date == "2000-02-29" and
-        all(.Days[]; .Processing == false and .CostInDollars == "0.0" and .Lines == [])
+        all(.Days[]; .CostInDollars == "0.0" and .Lines == [])
       ' empty.json
       rwx billing usage --month "$month" > usage.txt
       grep -q 'Usage cost:' usage.txt
@@ -97,6 +97,6 @@ tasks:
         exit 1
       fi
       grep -q '400 Bad Request' future.txt
-      jq '{Month: .Period.Month, Days: (.Days | length), SummaryLines: (.Summary | length), ProcessingDays: ([.Days[] | select(.Processing)] | length)}' default.json
+      jq '{Month: .Period.Month, Days: (.Days | length), SummaryLines: (.Summary | length), UnavailableDays: ([.Days[] | select(.CostInDollars == null)] | length)}' default.json
     env:
       RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}

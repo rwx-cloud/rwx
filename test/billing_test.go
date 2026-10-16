@@ -72,11 +72,16 @@ func TestBillingUsageMockAPI(t *testing.T) {
 				require.Equal(t, "2026-09-01", output["Period"].(map[string]any)["FinalizedThrough"])
 				require.Len(t, output["Days"].([]any), 4)
 				require.Nil(t, output["Days"].([]any)[1].(map[string]any)["CostInDollars"])
+				for _, day := range output["Days"].([]any) {
+					require.NotContains(t, day.(map[string]any), "Processing")
+				}
 			} else {
 				require.Contains(t, result.stdout, "Usage cost: 82.469135780246913578")
 				require.Contains(t, result.stdout, "123456.7890123456789")
-				require.Contains(t, result.stdout, "Pending")
-				require.Contains(t, result.stdout, "Available")
+				text := strings.Join(strings.Fields(result.stdout), " ")
+				require.Contains(t, text, "2026-09-01 Cost: 2.469135780246913578")
+				require.Contains(t, text, "2026-09-02 Cost: Pending")
+				require.NotContains(t, result.stdout, "Processing")
 			}
 		})
 	}

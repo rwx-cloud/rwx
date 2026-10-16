@@ -9,12 +9,12 @@
     {"sku": "abq.parallel_job", "label": "ABQ", "qualifiers": [], "unit": {"code": "parallel_job", "label": "parallel job"}, "quantity": "8.0", "unit_price_in_dollars": "10.0", "included": false, "cost_in_dollars": "80.0"}
   ],
   "days": [
-    {"date": "2026-09-01", "processing": false, "cost_in_dollars": "2.0", "lines": [
+    {"date": "2026-09-01", "cost_in_dollars": "2.0", "lines": [
       {"sku": "artifact_storage.gib_day", "label": "Artifact storage", "qualifiers": ["Standard"], "unit": {"code": "gib_day", "label": "GiB-day"}, "quantity": "100.0", "unit_price_in_dollars": "0.02", "included": false, "cost_in_dollars": "2.0"},
       {"sku": "egress.aggregate.gib", "label": "External data transfer", "qualifiers": [], "unit": {"code": "gib", "label": "GiB"}, "quantity": "5.25", "unit_price_in_dollars": null, "included": true, "cost_in_dollars": "0.0"}
     ]},
-    {"date": "2026-09-02", "processing": true, "cost_in_dollars": null, "lines": []},
-    {"date": "2026-09-03", "processing": false, "cost_in_dollars": "1.450000000000000001", "lines": [
+    {"date": "2026-09-02", "cost_in_dollars": null, "lines": []},
+    {"date": "2026-09-03", "cost_in_dollars": "1.450000000000000001", "lines": [
       {"sku": "artifact_storage.gib_day", "label": "Artifact storage", "qualifiers": ["Standard"], "unit": {"code": "gib_day", "label": "GiB-day"}, "quantity": "72.50000000000000005", "unit_price_in_dollars": "0.02", "included": false, "cost_in_dollars": "1.450000000000000001"}
     ]}
   ]
