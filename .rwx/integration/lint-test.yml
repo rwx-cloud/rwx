@@ -34,7 +34,7 @@ tasks:
 
   - key: go
     use: go-installation
-    run: echo "$(go env GOPATH)/bin" > "${MINT_ENV}/PATH"
+    run: echo "$(go env GOPATH)/bin" > "${RWX_ENV}/PATH"
 
   - key: node
     call: nodejs/install 1.2.0

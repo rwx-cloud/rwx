@@ -165,5 +165,5 @@ tasks:
       fi
       echo "Share text output redeemed successfully and served the private app"
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
       RUN_DEF: ${{ run.dir }}/integration/apps-test/app.yml

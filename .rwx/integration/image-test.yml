@@ -56,7 +56,7 @@ tasks:
       IMAGE_TASK_ID: ${{ tasks.build-image.tasks.image.id }}
       REGISTRY_HOST: 646244215049.dkr.ecr.us-east-2.amazonaws.com
       AWS_OIDC_TOKEN:
-        value: ${{ vaults.rwx_cli_development.oidc.aws }}
+        value: ${{ vaults.rwx-cli-development.oidc.aws }}
         cache-key: excluded
 
   - key: push-image-gzip
@@ -73,7 +73,7 @@ tasks:
       IMAGE_TASK_ID: ${{ tasks.build-image.tasks.image.id }}
       REGISTRY_HOST: 646244215049.dkr.ecr.us-east-2.amazonaws.com
       AWS_OIDC_TOKEN:
-        value: ${{ vaults.rwx_cli_development.oidc.aws }}
+        value: ${{ vaults.rwx-cli-development.oidc.aws }}
         cache-key: excluded
 
   - key: pull-image-uncompressed
@@ -108,7 +108,7 @@ tasks:
     env:
       ECR_IMAGE: ${{ tasks.push-image.values.ecr-image }}
       AWS_OIDC_TOKEN:
-        value: ${{ vaults.rwx_cli_development.oidc.aws }}
+        value: ${{ vaults.rwx-cli-development.oidc.aws }}
         cache-key: excluded
 
   - key: test-image-build
@@ -127,5 +127,5 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
       BUILD_IMAGE_DEF: ${{ run.dir }}/integration/image-test/build-image.yml

@@ -99,4 +99,4 @@ tasks:
       grep -q '400 Bad Request' future.txt
       jq '{Month: .Period.Month, Days: (.Days | length), SummaryLines: (.Summary | length), UnavailableDays: ([.Days[] | select(.CostInDollars == null)] | length)}' default.json
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
