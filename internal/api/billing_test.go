@@ -42,10 +42,8 @@ func TestBillingUsageRequests(t *testing.T) {
 			require.True(t, result.Days[0].Lines[1].Included)
 			require.Nil(t, result.Days[0].Lines[1].UnitPriceInDollars)
 			require.Equal(t, "0.0", *result.Days[0].Lines[1].CostInDollars)
-			require.True(t, result.Days[1].Processing)
 			require.Nil(t, result.Days[1].CostInDollars)
 			require.Empty(t, result.Days[1].Lines)
-			require.False(t, result.Days[2].Processing)
 			require.Equal(t, "1.450000000000000001", *result.Days[2].CostInDollars)
 		})
 	}

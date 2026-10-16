@@ -45,7 +45,7 @@ func TestService_BillingUsage(t *testing.T) {
 				require.Len(t, summary, 2)
 				require.JSONEq(t, `{"SKU":"artifact_storage.gib_day","Label":"Artifact storage","Qualifiers":["Standard"],"Unit":{"Code":"gib_day","Label":"GiB-day"},"Quantity":"172.50000000000000005","UnitPriceInDollars":"0.02","Included":false,"CostInDollars":"3.450000000000000001"}`, mustBillingJSON(t, summary[0]))
 				days := decoded["Days"].([]any)
-				require.JSONEq(t, `{"Date":"2026-09-02","Processing":true,"CostInDollars":null,"Lines":[]}`, mustBillingJSON(t, days[1]))
+				require.JSONEq(t, `{"Date":"2026-09-02","CostInDollars":null,"Lines":[]}`, mustBillingJSON(t, days[1]))
 				included := days[0].(map[string]any)["Lines"].([]any)[1]
 				require.JSONEq(t, `{"SKU":"egress.aggregate.gib","Label":"External data transfer","Qualifiers":[],"Unit":{"Code":"gib","Label":"GiB"},"Quantity":"5.25","UnitPriceInDollars":null,"Included":true,"CostInDollars":"0.0"}`, mustBillingJSON(t, included))
 				require.Equal(t, "1.450000000000000001", days[2].(map[string]any)["CostInDollars"])
@@ -54,8 +54,8 @@ func TestService_BillingUsage(t *testing.T) {
 					require.Contains(t, output, want)
 				}
 				require.Contains(t, strings.Join(strings.Fields(output), " "), "egress.aggregate.gib External data transfer 5.25 GiB gib - true 0.0")
-				require.Contains(t, strings.Join(strings.Fields(output), " "), "2026-09-02 Processing Cost: Pending")
-				require.Contains(t, strings.Join(strings.Fields(output), " "), "2026-09-03 Available Cost: 1.450000000000000001")
+				require.Contains(t, strings.Join(strings.Fields(output), " "), "2026-09-02 Cost: Pending")
+				require.Contains(t, strings.Join(strings.Fields(output), " "), "2026-09-03 Cost: 1.450000000000000001")
 				require.NotContains(t, output, "Finalized\t")
 			}
 		})
@@ -89,11 +89,11 @@ func TestService_BillingUsageEmptyMonth(t *testing.T) {
 		if jsonOutput {
 			require.Contains(t, s.mockStdout.String(), `"FinalizedThrough":null`)
 			require.Contains(t, s.mockStdout.String(), `"Summary":[]`)
-			require.Contains(t, s.mockStdout.String(), `{"Date":"2026-02-28","Processing":false,"CostInDollars":"0.0","Lines":[]}`)
+			require.Contains(t, s.mockStdout.String(), `{"Date":"2026-02-28","CostInDollars":"0.0","Lines":[]}`)
 		} else {
 			require.Contains(t, s.mockStdout.String(), "Finalized through: None")
 			require.Contains(t, s.mockStdout.String(), "No summarized usage.")
-			require.Contains(t, strings.Join(strings.Fields(s.mockStdout.String()), " "), "2026-02-28 Available Cost: 0.0")
+			require.Contains(t, strings.Join(strings.Fields(s.mockStdout.String()), " "), "2026-02-28 Cost: 0.0")
 			require.NotContains(t, s.mockStdout.String(), "Pending")
 		}
 	}
