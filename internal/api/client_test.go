@@ -372,6 +372,59 @@ func TestAPIClient_ListVaultData(t *testing.T) {
 		require.Equal(t, "org:acme:vault:deploys", result.Vaults[0].OidcSubject)
 	})
 
+	t.Run("lists every page of vaults", func(t *testing.T) {
+		roundTrip := func(req *http.Request) (*http.Response, error) {
+			require.Equal(t, http.MethodGet, req.Method)
+			require.Equal(t, "/mint/api/vaults", req.URL.Path)
+			var body string
+			switch req.URL.Query().Get("cursor") {
+			case "":
+				body = `{"vaults":[{"id":"vault-1","name":"first"}],"pagination":{"next_cursor":"next+page/=&","limit":1}}`
+			case "next+page/=&":
+				body = `{"vaults":[{"id":"vault-2","name":"second"}],"pagination":{"next_cursor":"last-page","limit":1}}`
+			case "last-page":
+				body = `{"vaults":[{"id":"vault-3","name":"last"}],"pagination":{"next_cursor":null,"limit":1}}`
+			default:
+				t.Fatalf("unexpected cursor: %q", req.URL.Query().Get("cursor"))
+			}
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+		}
+
+		result, err := api.NewClientWithRoundTrip(roundTrip).ListVaults()
+		require.NoError(t, err)
+		require.Equal(t, []api.Vault{
+			{ID: "vault-1", Name: "first"},
+			{ID: "vault-2", Name: "second"},
+			{ID: "vault-3", Name: "last"},
+		}, result.Vaults)
+	})
+
+	t.Run("does not return partial vaults when a later page fails", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			status int
+			body   string
+			err    error
+			want   string
+		}{
+			{name: "transport", err: errors.New("offline"), want: "HTTP request failed: offline"},
+			{name: "API", status: http.StatusInternalServerError, body: `{"error":"unavailable"}`, want: "unavailable"},
+			{name: "JSON", status: http.StatusOK, body: `invalid`, want: "unable to parse API response"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+					if req.URL.Query().Get("cursor") == "" {
+						return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"vaults":[{"id":"vault-1"}],"pagination":{"next_cursor":"next-page"}}`))}, nil
+					}
+					return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.body))}, tc.err
+				})
+				result, err := client.ListVaults()
+				require.ErrorContains(t, err, tc.want)
+				require.Nil(t, result)
+			})
+		}
+	})
+
 	t.Run("lists secret metadata", func(t *testing.T) {
 		body := `{"secrets":[{"name":"API_KEY","description":"Production API key"},{"name":"ZEBRA","description":null}]}`
 		roundTrip := func(req *http.Request) (*http.Response, error) {
