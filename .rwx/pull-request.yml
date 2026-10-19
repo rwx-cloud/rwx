@@ -29,6 +29,7 @@ tasks:
     call: ${{ run.dir }}/integration-launch.yml
     init:
       commit-sha: ${{ init.commit-sha }}
+      definition: .rwx/integration.yml
 
   - key: integration-sandbox
     call: ${{ run.dir }}/integration-launch.yml
