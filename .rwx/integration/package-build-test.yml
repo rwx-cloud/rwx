@@ -50,7 +50,7 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   # --timestamp must make the digest reproducible even when mtimes change,
   # which is what makes content-based caching work.
@@ -97,7 +97,7 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   # Without --timestamp the real mtimes are preserved, so the digest tracks them.
   - key: test-package-build-without-timestamp-tracks-mtimes
@@ -130,7 +130,7 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   # Every validation failure the registry can return must reach the user.
   - key: test-package-build-displays-server-validation-errors
@@ -195,7 +195,7 @@ tasks:
       printf 'package:\n  name: not-your-org/rwx-cli-integration-test\n  version: 0.0.1\n  description: d\n  visibility: private\n  tasks:\n    - key: noop\n      run: echo hi\n' > "$d/rwx-package.yml"
       assert_error "wrong organization" "but request was made under organization" "$d"
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-package-build-displays-unauthorized-error
     use: rwx-cli
@@ -218,7 +218,7 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   # A malformed --timestamp is rejected locally, before anything is uploaded.
   - key: test-package-build-rejects-an-invalid-timestamp
@@ -242,4 +242,4 @@ tasks:
         exit 1
       fi
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}

@@ -24,7 +24,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-sandbox_result=$("${RWX_CLI}" sandbox start "$SANDBOX_CONFIG" --json --init ref=main --init "cli=${COMMIT_SHA}" --wait)
+sandbox_result=$("${RWX_CLI}" sandbox start "$SANDBOX_CONFIG" --json --init "ref=${COMMIT_SHA}" --init "cli=${COMMIT_SHA}" --wait)
 SANDBOX_RUN_ID=$(echo "$sandbox_result" | jq -r ".RunID")
 
 sandbox_url=$(echo "$sandbox_result" | jq -r ".RunURL // empty")

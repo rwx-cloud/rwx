@@ -33,7 +33,7 @@ tasks:
     run: |
       set -euo pipefail
 
-      endpoint="cli-app-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      endpoint="a-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
       run_id=""
       fixture_ready=false
       work=$(mktemp -d)
@@ -165,5 +165,5 @@ tasks:
       fi
       echo "Share text output redeemed successfully and served the private app"
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
       RUN_DEF: ${{ run.dir }}/integration/apps-test/app.yml

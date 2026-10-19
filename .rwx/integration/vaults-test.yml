@@ -37,7 +37,7 @@ tasks:
 
       echo "$output" | jq -e '
         (.Vaults | type == "array") and
-        any(.Vaults[]; .Name == "rwx_cli_development") and
+        any(.Vaults[]; .Name == "rwx-cli-development") and
         all(.Vaults[];
           (.Name | type == "string") and
           (.LockStatus == "locked" or .LockStatus == "unlocked") and
@@ -49,14 +49,14 @@ tasks:
         )
       ' >/dev/null
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-vault-secrets-list
     use: rwx-cli
     run: |
       set -euo pipefail
 
-      output=$(rwx vaults secrets list --vault rwx_cli_development --json)
+      output=$(rwx vaults secrets list --vault rwx-cli-development --json)
 
       echo "$output" | jq -e '
         (.Secrets | type == "array") and
@@ -68,14 +68,14 @@ tasks:
         )
       ' >/dev/null
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-vault-vars-list
     use: rwx-cli
     run: |
       set -euo pipefail
 
-      output=$(rwx vaults vars list --vault rwx_cli_development --json)
+      output=$(rwx vaults vars list --vault rwx-cli-development --json)
 
       echo "$output" | jq -e '
         (.Vars | type == "array") and
@@ -85,7 +85,7 @@ tasks:
         )
       ' >/dev/null
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-vault-lifecycle
     use: rwx-cli
@@ -163,14 +163,14 @@ tasks:
           .Name == $updated_name
         ' >/dev/null
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-vault-repository-access-lifecycle
     use: rwx-cli
     run: |
       set -euo pipefail
 
-      vault_name="rwx_cli_development"
+      vault_name="rwx-cli-development"
       repository_slug="rwx-cloud/rwx"
       prefix="rwx-cli-tests/${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
       first_pattern="${prefix}/first"
@@ -289,7 +289,7 @@ tasks:
         --yes >/dev/null
       second_allowed=false
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-vault-user-access-lifecycle
     use: rwx-cli
@@ -297,7 +297,7 @@ tasks:
       set -euo pipefail
 
       vault_name="rwx-cli-access-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
-      user_email="dan+demo@rwx.com"
+      user_email="jason@rwx.com"
       repository_slug="rwx-cloud/rwx"
       branch_pattern="rwx-cli-access/${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
       vault_created=false
@@ -384,7 +384,7 @@ tasks:
       rwx vaults delete "$vault_id" --yes >/dev/null
       vault_deleted=true
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-vault-service-account-access-lifecycle
     use: rwx-cli
@@ -466,14 +466,14 @@ tasks:
       rwx vaults delete "$vault_id" --yes >/dev/null
       vault_deleted=true
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-vault-oidc-token-lifecycle
     use: rwx-cli
     run: |
       set -euo pipefail
 
-      vault_name="rwx_cli_development"
+      vault_name="rwx-cli-development"
       token_name="rwx-cli-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
       updated_name="${token_name}-updated"
       audience="https://rwx.com/oidc-tests/${token_name}"
@@ -576,4 +576,4 @@ tasks:
           }
         ' >/dev/null
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}

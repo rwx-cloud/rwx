@@ -61,4 +61,4 @@ tasks:
       echo "$detail" | grep -q "CURRENT QUEUE"
       echo "$detail" | grep -q "RECENT RUNS"
     env:
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}

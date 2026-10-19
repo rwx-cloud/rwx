@@ -14,7 +14,6 @@ tasks:
       preserve-git-dir: true
       repository: https://github.com/rwx-cloud/rwx.git
       ref: ${{ init.ref }}
-      github-token: ${{ github['rwx-cloud'].token }}
 
   - key: tool-versions
     use: code

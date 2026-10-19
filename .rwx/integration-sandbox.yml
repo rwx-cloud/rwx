@@ -14,7 +14,6 @@ tasks:
       preserve-git-dir: true
       repository: https://github.com/rwx-cloud/rwx.git
       ref: ${{ init.commit-sha }}
-      github-token: ${{ github['rwx-cloud'].token }}
 
   - key: tool-versions
     use: code
@@ -34,7 +33,7 @@ tasks:
 
   - key: go
     use: go-installation
-    run: echo "$(go env GOPATH)/bin" > "${MINT_ENV}/PATH"
+    run: echo "$(go env GOPATH)/bin" > "${RWX_ENV}/PATH"
 
   - key: go-deps
     use: [go, code]
@@ -100,7 +99,7 @@ tasks:
           '    git switch -c "sandbox-test-${RWX_TASK_ID}"' \
           "    ./${script}" \
           "  env:" \
-          '    RWX_ACCESS_TOKEN: \${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}' \
+          '    RWX_ACCESS_TOKEN: \${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}' \
           "    COMMIT_SHA: ${COMMIT_SHA}" \
           >> "$RWX_DYNAMIC_TASKS/sandbox-tests.yml"
       done
