@@ -297,7 +297,7 @@ tasks:
       set -euo pipefail
 
       vault_name="rwx-cli-access-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
-      user_email="dan+demo@rwx.com"
+      user_email="jason@rwx.com"
       repository_slug="rwx-cloud/rwx"
       branch_pattern="rwx-cli-access/${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
       vault_created=false

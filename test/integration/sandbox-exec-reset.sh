@@ -21,7 +21,7 @@ fi
 exec_result=$("${RWX_CLI}" sandbox exec \
   --json \
   --reset \
-  --init ref=jason/integration-test-org \
+  --init "ref=${COMMIT_SHA}" \
   --init "cli=${COMMIT_SHA}" \
   "${SCRIPT_DIR}/definitions/sandbox.yml" \
   -- sh -c 'echo "exec-reset-complete" >&2')

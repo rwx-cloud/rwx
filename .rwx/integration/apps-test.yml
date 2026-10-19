@@ -33,7 +33,7 @@ tasks:
     run: |
       set -euo pipefail
 
-      endpoint="cli-app-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      endpoint="a-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
       run_id=""
       fixture_ready=false
       work=$(mktemp -d)

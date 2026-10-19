@@ -1,0 +1,35 @@
+on:
+  cli:
+    init:
+      commit-sha: ${{ event.git.sha }}
+      definition: .rwx/integration.yml
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.2.0
+
+tasks:
+  - key: code
+    call: git/clone 2.2.0
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.commit-sha }}
+      preserve-git-dir: true
+
+  - key: cli
+    call: rwx/install-cli 4.1.0
+
+  - key: integration
+    use: [code, cli]
+    timeout: 60m
+    run: |
+      set -euo pipefail
+      rwx whoami --json | jq -e '.organization_slug == "rwx-integration-testing"' >/dev/null
+      status=0
+      rwx run "$RUN_DEFINITION" --wait --json > /tmp/integration-result.json || status=$?
+      jq -r '.RunURL' /tmp/integration-result.json > "$RWX_LINKS/Integration run"
+      rwx results "$(jq -er '.RunID' /tmp/integration-result.json)"
+      exit "$status"
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.secrets.rwx-integration-testing-access-token }}
+      RUN_DEFINITION: ${{ init.definition }}

@@ -26,14 +26,15 @@ tasks:
       commit-sha: ${{ init.commit-sha }}
 
   - key: integration
-    call: ${{ run.dir }}/integration.yml
+    call: ${{ run.dir }}/integration-launch.yml
     init:
       commit-sha: ${{ init.commit-sha }}
 
   - key: integration-sandbox
-    call: ${{ run.dir }}/integration-sandbox.yml
+    call: ${{ run.dir }}/integration-launch.yml
     init:
       commit-sha: ${{ init.commit-sha }}
+      definition: .rwx/integration-sandbox.yml
 
   - key: integration-dispatch
     call: ${{ run.dir }}/integration/dispatch-test.yml
