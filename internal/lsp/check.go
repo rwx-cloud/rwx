@@ -299,8 +299,11 @@ func shutdownServer(conn *jsonrpcConn, stdinPipe io.WriteCloser, cmd *exec.Cmd) 
 	_ = conn.notify("exit", nil)
 	_ = stdinPipe.Close()
 
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
 
 	select {
 	case <-done:

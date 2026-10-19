@@ -1,5 +1,5 @@
 golang 1.27.2
-golangci-lint 2.14.0
+golangci-lint 2.15.0
 ginkgo 2.33.1
-nodejs 24.21.0
+nodejs 24.22.0
 jj 0.46.0
