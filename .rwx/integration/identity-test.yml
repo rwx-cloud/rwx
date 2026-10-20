@@ -234,3 +234,49 @@ tasks:
       rwx service-accounts permissions show "$account" --json | jq -e '.Permissions | length == 1' >/dev/null
       rwx service-accounts permissions clear "$account" --yes --json | jq -e '.Permissions == []' >/dev/null
       rwx service-accounts permissions show "$account" --json | jq -e '.Permissions == []' >/dev/null
+
+  - key: test-group-relationships
+    use: rwx-cli
+    cache: false
+    run: |
+      set -euo pipefail
+      name="cli-rel-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      parent=""
+      child=""
+      cleanup() {
+        status=$?
+        trap - EXIT
+        for group in "$child" "$parent"; do
+          if [ -n "$group" ]; then
+            rwx groups delete "$group" --yes >/dev/null || status=1
+          fi
+        done
+        exit "$status"
+      }
+      trap cleanup EXIT
+      output=$(rwx groups create --name "$name-parent" --json)
+      parent="$name-parent"
+      parent=$(echo "$output" | jq -er '.ID | select(length > 0)')
+      output=$(rwx groups create --name "$name-child" --json)
+      child="$name-child"
+      child=$(echo "$output" | jq -er '.ID | select(length > 0)')
+      rwx groups relationships add --parent "$name-parent" --child "$child" --json | jq -e --arg parent "$parent" --arg child "$child" '.ParentGroupID == $parent and .ChildGroupID == $child' >/dev/null
+      rwx groups relationships show --parent "$parent" --child "$name-child" --format json | jq -e --arg parent "$parent" --arg child "$child" '.ParentGroupID == $parent and .ChildGroupID == $child' >/dev/null
+      if rwx groups relationships add --parent "$child" --child "$parent"; then
+        echo "Cyclic relationship was accepted" >&2
+        exit 1
+      fi
+      printf '%s\n' '{"permissions":[{"key":"run:read"}]}' | rwx groups permissions replace "$parent" --file - --yes >/dev/null
+      rwx groups permissions show "$child" --json | jq -e '.Permissions == []' >/dev/null
+      if rwx groups relationships remove --parent "$parent" --child "$child" </dev/null; then
+        echo "Relationship removal without confirmation succeeded" >&2
+        exit 1
+      fi
+      rwx groups relationships show --parent "$parent" --child "$child" --json | jq -e --arg child "$child" '.ChildGroupID == $child' >/dev/null
+      rwx groups relationships remove --parent "$parent" --child "$child" --yes --json | jq -e --arg parent "$parent" --arg child "$child" '.ParentGroupID == $parent and .ChildGroupID == $child' >/dev/null
+      if rwx groups relationships show --parent "$parent" --child "$child" --json; then
+        echo "Removed relationship is still visible" >&2
+        exit 1
+      fi
+      rwx groups show "$parent" --json | jq -e --arg id "$parent" '.ID == $id' >/dev/null
+      rwx groups show "$child" --json | jq -e --arg id "$child" '.ID == $id' >/dev/null
