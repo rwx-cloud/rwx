@@ -244,6 +244,7 @@ func init() {
 	rootCmd.AddCommand(sshCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(vaultsCmd)
+	rootCmd.AddCommand(serviceAccountsCmd)
 	rootCmd.AddCommand(cronsCmd)
 	rootCmd.AddCommand(concurrencyPoolsCmd)
 	rootCmd.AddCommand(groupsCmd)

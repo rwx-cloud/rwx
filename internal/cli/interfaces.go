@@ -11,6 +11,11 @@ import (
 
 type APIClient interface {
 	GetPermissionCatalog(api.GetPermissionCatalogConfig) (*api.PermissionCatalog, error)
+	ListServiceAccounts(api.ListServiceAccountsConfig) (*api.ListServiceAccountsResult, error)
+	ShowServiceAccount(string) (*api.ServiceAccountResult, error)
+	CreateServiceAccount(api.CreateServiceAccountConfig) (*api.ServiceAccountResult, error)
+	UpdateServiceAccount(api.UpdateServiceAccountConfig) (*api.ServiceAccountResult, error)
+	DeactivateServiceAccount(string) error
 	GetSkillContent() (string, error)
 	GetSkillSnapshot() (*api.SkillSnapshot, error)
 	GetSkillLatestVersion() (string, error)

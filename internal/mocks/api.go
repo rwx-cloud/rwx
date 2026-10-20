@@ -9,6 +9,11 @@ import (
 
 type API struct {
 	MockGetPermissionCatalog                    func(api.GetPermissionCatalogConfig) (*api.PermissionCatalog, error)
+	MockListServiceAccounts                     func(api.ListServiceAccountsConfig) (*api.ListServiceAccountsResult, error)
+	MockShowServiceAccount                      func(string) (*api.ServiceAccountResult, error)
+	MockCreateServiceAccount                    func(api.CreateServiceAccountConfig) (*api.ServiceAccountResult, error)
+	MockUpdateServiceAccount                    func(api.UpdateServiceAccountConfig) (*api.ServiceAccountResult, error)
+	MockDeactivateServiceAccount                func(string) error
 	MockDisableApp                              func(string) error
 	MockEnableApp                               func(string) error
 	MockBillingUsage                            func(string) (*api.BillingUsageResult, error)
