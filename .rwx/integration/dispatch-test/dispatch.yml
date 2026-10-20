@@ -10,7 +10,7 @@ on:
       target: [fail-fast, fail-slow]
 
 base:
-  image: ubuntu:24.04
+  image: ubuntu:26.04
   config: none
 
 tasks:
