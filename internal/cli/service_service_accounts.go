@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/google/uuid"
 	"github.com/rwx-cloud/rwx/internal/api"
@@ -25,7 +26,7 @@ type ServiceAccountSelector struct {
 
 func (cfg ServiceAccountSelector) Validate() error {
 	if (cfg.ServiceAccount == "") == (cfg.DisplayName == "") {
-		return errors.New("provide a service-account ID or immutable name, or --display-name, but not both")
+		return errors.Wrap(errors.ErrBadRequest, "provide a service-account ID or immutable name, or --display-name, but not both")
 	}
 	return nil
 }
@@ -54,10 +55,10 @@ func (s Service) ResolveServiceAccount(cfg ServiceAccountSelector) (*ServiceAcco
 			return nil, errors.Wrap(err, "unable to find service account")
 		}
 		matches = append(matches, page.ServiceAccounts...)
-		query.Cursor = page.Pagination.NextCursor
-		if query.Cursor == "" {
+		if page.Pagination.NextCursor == nil || *page.Pagination.NextCursor == "" {
 			break
 		}
+		query.Cursor = *page.Pagination.NextCursor
 	}
 	selector := cfg.ServiceAccount
 	if cfg.DisplayName != "" {
@@ -67,7 +68,7 @@ func (s Service) ResolveServiceAccount(cfg ServiceAccountSelector) (*ServiceAcco
 		return nil, errors.Wrapf(errors.ErrNotFound, "service account %q was not found", selector)
 	}
 	if len(matches) != 1 {
-		return nil, errors.Errorf("more than one service account matches %q; use its ID or immutable name", selector)
+		return nil, errors.Wrapf(errors.ErrBadRequest, "more than one service account matches %q; use its ID or immutable name", selector)
 	}
 	account := serviceAccountInfo(matches[0])
 	return &account, nil
@@ -81,22 +82,23 @@ type ListServiceAccountsConfig struct {
 
 type ListServiceAccountsResult struct {
 	ServiceAccounts []ServiceAccountInfo
-	NextCursor      string
-	Limit           int
+	Pagination      ServiceAccountPagination
+}
+
+type ServiceAccountPagination struct {
+	NextCursor *string
+	Limit      int
 }
 
 func (s Service) ListServiceAccounts(cfg ListServiceAccountsConfig) (*ListServiceAccountsResult, error) {
-	if cfg.Limit == 0 {
-		cfg.Limit = 50
-	}
-	if cfg.Limit < 1 || cfg.Limit > 100 {
-		return nil, errors.New("limit must be between 1 and 100")
+	if cfg.Limit < 0 || cfg.Limit > 100 {
+		return nil, errors.Wrap(errors.ErrBadRequest, "limit must be between 1 and 100")
 	}
 	page, err := s.APIClient.ListServiceAccounts(api.ListServiceAccountsConfig{Limit: cfg.Limit, Cursor: cfg.Cursor})
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to list service accounts")
 	}
-	result := &ListServiceAccountsResult{ServiceAccounts: make([]ServiceAccountInfo, 0, len(page.ServiceAccounts)), NextCursor: page.Pagination.NextCursor, Limit: page.Pagination.Limit}
+	result := &ListServiceAccountsResult{ServiceAccounts: make([]ServiceAccountInfo, 0, len(page.ServiceAccounts)), Pagination: ServiceAccountPagination{NextCursor: page.Pagination.NextCursor, Limit: page.Pagination.Limit}}
 	for _, account := range page.ServiceAccounts {
 		result.ServiceAccounts = append(result.ServiceAccounts, serviceAccountInfo(account))
 	}
@@ -105,14 +107,21 @@ func (s Service) ListServiceAccounts(cfg ListServiceAccountsConfig) (*ListServic
 			return nil, errors.Wrap(err, "unable to encode JSON output")
 		}
 	} else {
+		writer := tabwriter.NewWriter(s.Stdout, 0, 0, 2, ' ', 0)
+		if len(result.ServiceAccounts) > 0 {
+			fmt.Fprintln(writer, "ID\tNAME\tDISPLAY NAME")
+		}
 		for _, account := range result.ServiceAccounts {
-			fmt.Fprintf(s.Stdout, "%s\t%s\t%s\n", account.ID, account.Name, account.DisplayName)
+			fmt.Fprintf(writer, "%s\t%s\t%s\n", account.ID, account.Name, account.DisplayName)
+		}
+		if err := writer.Flush(); err != nil {
+			return nil, errors.Wrap(err, "unable to write service accounts")
 		}
 		if len(result.ServiceAccounts) == 0 {
 			fmt.Fprintln(s.Stdout, "No service accounts found.")
 		}
-		if result.NextCursor != "" {
-			fmt.Fprintf(s.Stdout, "Next cursor: %s\n", result.NextCursor)
+		if result.Pagination.NextCursor != nil && *result.Pagination.NextCursor != "" {
+			fmt.Fprintf(s.Stderr, "\nMore results available. Fetch the next page with --cursor %s\n", *result.Pagination.NextCursor)
 		}
 	}
 	return result, nil
@@ -147,7 +156,7 @@ type CreateServiceAccountConfig struct {
 
 func (s Service) CreateServiceAccount(cfg CreateServiceAccountConfig) (*CreateServiceAccountResult, error) {
 	if strings.TrimSpace(cfg.DisplayName) == "" {
-		return nil, errors.New("display name must be provided")
+		return nil, errors.Wrap(errors.ErrBadRequest, "display name must be provided")
 	}
 	response, err := s.APIClient.CreateServiceAccount(api.CreateServiceAccountConfig{DisplayName: cfg.DisplayName, Description: cfg.Description})
 	if err != nil {
@@ -172,10 +181,10 @@ type UpdateServiceAccountConfig struct {
 
 func (s Service) UpdateServiceAccount(cfg UpdateServiceAccountConfig) (*UpdateServiceAccountResult, error) {
 	if cfg.DisplayName == nil && cfg.Description == nil {
-		return nil, errors.New("provide --new-display-name or --description to update")
+		return nil, errors.Wrap(errors.ErrBadRequest, "provide --new-display-name or --description to update")
 	}
 	if cfg.DisplayName != nil && strings.TrimSpace(*cfg.DisplayName) == "" {
-		return nil, errors.New("display name must not be empty")
+		return nil, errors.Wrap(errors.ErrBadRequest, "display name must not be empty")
 	}
 	account, err := s.ResolveServiceAccount(cfg.ServiceAccountSelector)
 	if err != nil {

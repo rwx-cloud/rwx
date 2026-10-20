@@ -85,7 +85,8 @@ func TestServiceAccountsListWirePagination(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result.ServiceAccounts)
 	require.Empty(t, result.ServiceAccounts)
-	require.Equal(t, "next+/=", result.Pagination.NextCursor)
+	require.NotNil(t, result.Pagination.NextCursor)
+	require.Equal(t, "next+/=", *result.Pagination.NextCursor)
 	require.Equal(t, 17, result.Pagination.Limit)
 }
 

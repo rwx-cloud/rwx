@@ -23,8 +23,8 @@ func newServiceAccountsListCommand() *cobra.Command {
 			return err
 		},
 	}
-	cmd.Flags().IntVar(&limit, "limit", 50, "maximum accounts to return (1-100)")
-	cmd.Flags().StringVar(&cursor, "cursor", "", "continuation cursor from a previous list response")
+	cmd.Flags().IntVar(&limit, "limit", 0, "page size (max 100; server default applies when unset)")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "cursor for fetching the next page")
 	return cmd
 }
 

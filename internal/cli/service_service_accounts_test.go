@@ -92,7 +92,7 @@ func TestServiceAccountsListOnePage(t *testing.T) {
 	result, err := svc.ListServiceAccounts(cli.ListServiceAccountsConfig{Limit: 7, Cursor: "start+/=", Json: true})
 	require.NoError(t, err)
 	require.Empty(t, result.ServiceAccounts)
-	require.JSONEq(t, `{"ServiceAccounts":[],"NextCursor":"next","Limit":7}`, stdout.String())
+	require.JSONEq(t, `{"ServiceAccounts":[],"Pagination":{"NextCursor":"next","Limit":7}}`, stdout.String())
 	for _, limit := range []int{-1, 101} {
 		_, err := svc.ListServiceAccounts(cli.ListServiceAccountsConfig{Limit: limit})
 		require.ErrorContains(t, err, "limit")

@@ -25,12 +25,14 @@ type ListServiceAccountsConfig struct {
 	Cursor      string
 }
 
+type ServiceAccountPagination struct {
+	NextCursor *string `json:"next_cursor"`
+	Limit      int     `json:"limit"`
+}
+
 type ListServiceAccountsResult struct {
-	ServiceAccounts []ServiceAccount `json:"service_accounts"`
-	Pagination      struct {
-		NextCursor string `json:"next_cursor"`
-		Limit      int    `json:"limit"`
-	} `json:"pagination"`
+	ServiceAccounts []ServiceAccount         `json:"service_accounts"`
+	Pagination      ServiceAccountPagination `json:"pagination"`
 }
 
 type ServiceAccountResult struct {
