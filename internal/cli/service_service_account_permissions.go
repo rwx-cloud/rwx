@@ -88,5 +88,6 @@ func (s Service) writeServiceAccountPermissions(result *ServiceAccountPermission
 	if useJSON {
 		return errors.Wrap(json.NewEncoder(s.Stdout).Encode(result), "unable to encode JSON output")
 	}
+	fmt.Fprintf(s.Stdout, "Service account: %s\n", result.ServiceAccountID)
 	return s.writeDirectPermissions(result.Permissions)
 }

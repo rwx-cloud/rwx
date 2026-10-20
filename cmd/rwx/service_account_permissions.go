@@ -29,7 +29,11 @@ func newServiceAccountPermissionsReplaceCommand() *cobra.Command {
 		_, err := service.ReplaceServiceAccountPermissions(cli.ReplaceServiceAccountPermissionsConfig{ServiceAccountSelector: selector, File: file, Yes: yes, Json: useJsonOutput()})
 		return err
 	})
-	cmd.Flags().StringVar(&file, "file", "", "JSON file containing {\"permissions\":[{\"key\":\"run:read\",\"resource_id\":\"optional\"}]}; use - for stdin")
+	cmd.Long = `Replace the complete direct-permission set; inherited group permissions remain unchanged.
+Use --file PATH (or --file - for stdin) with JSON such as:
+{"permissions":[{"key":"run:read"},{"key":"vault:manage","resource_id":"vault-id"}]}
+An empty permissions array explicitly clears direct permissions. The server applies all changes or none.`
+	cmd.Flags().StringVar(&file, "file", "", "replacement JSON file, or - for stdin")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "confirm replacement without prompting")
 	_ = cmd.MarkFlagRequired("file")
 	return cmd
