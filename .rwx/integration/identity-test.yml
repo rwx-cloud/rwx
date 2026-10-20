@@ -24,19 +24,18 @@ tasks:
       ref: ${{ init.ref }}
 
   - key: rwx-cli
-    run: |
-      set -euo pipefail
-      sudo install "$CLI_BINARY" /usr/local/bin
-      rwx whoami --json | jq -e '.organization_slug == "rwx-integration-testing"' >/dev/null
+    run: sudo install "$CLI_BINARY" /usr/local/bin
     env:
       CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
-      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
 
   - key: test-groups
     use: rwx-cli
     cache: false
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
     run: |
       set -euo pipefail
+      rwx whoami --json | jq -e '.organization_slug == "rwx-integration-testing" and .token_kind == "service_account" and .service_account_name == "rwx-cli-ci"' >/dev/null
       name="cli-group-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
       group=""
       cleanup() {
@@ -85,8 +84,11 @@ tasks:
   - key: test-service-accounts
     use: rwx-cli
     cache: false
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
     run: |
       set -euo pipefail
+      rwx whoami --json | jq -e '.organization_slug == "rwx-integration-testing" and .token_kind == "service_account" and .service_account_name == "rwx-cli-ci"' >/dev/null
       name="cli-sa-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
       account=""
       created=false
@@ -141,8 +143,11 @@ tasks:
   - key: test-permission-catalog
     use: rwx-cli
     cache: false
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
     run: |
       set -euo pipefail
+      rwx whoami --json | jq -e '.organization_slug == "rwx-integration-testing" and .token_kind == "service_account" and .service_account_name == "rwx-cli-ci"' >/dev/null
       rwx permissions list --json | jq -e '
         (.UnremovablePermissions | type == "array") and
         any(.Permissions[]; .Key == "run:read") and
