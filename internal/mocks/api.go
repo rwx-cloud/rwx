@@ -74,6 +74,11 @@ type API struct {
 	MockRunStatus                               func(api.RunStatusConfig) (api.RunStatusResult, error)
 	MockGetRunDetails                           func(api.RunDetailsConfig) (map[string]any, error)
 	MockListRuns                                func(api.ListRunsConfig) (*api.ListRunsResult, error)
+	MockListGroups                              func(api.ListGroupsConfig) (*api.ListGroupsResult, error)
+	MockShowGroup                               func(string) (*api.GroupResult, error)
+	MockCreateGroup                             func(api.CreateGroupConfig) (*api.GroupResult, error)
+	MockUpdateGroup                             func(string, api.UpdateGroupConfig) (*api.GroupResult, error)
+	MockDeleteGroup                             func(string) error
 	MockListConcurrencyPools                    func(api.ListConcurrencyPoolsConfig) (*api.ListConcurrencyPoolsResult, error)
 	MockShowConcurrencyPool                     func(string) (*api.ConcurrencyPool, error)
 	MockListConcurrencyPoolQueue                func(api.ListConcurrencyPoolQueueConfig) (*api.ListConcurrencyPoolQueueResult, error)
