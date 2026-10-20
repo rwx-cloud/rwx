@@ -15,7 +15,9 @@ import (
 
 func TestServiceAccountCommands(t *testing.T) {
 	require.Same(t, serviceAccountsCmd, findSubcommand(rootCmd, "service-accounts"))
-	require.Len(t, serviceAccountsCmd.Commands(), 5)
+	for _, name := range []string{"list", "show", "create", "update", "deactivate", "permissions"} {
+		require.NotNil(t, findSubcommand(serviceAccountsCmd, name))
+	}
 	for _, constructor := range []func() *cobra.Command{newServiceAccountsShowCommand, newServiceAccountsUpdateCommand, newServiceAccountsDeactivateCommand} {
 		cmd := constructor()
 		require.Error(t, cmd.Args(cmd, nil))

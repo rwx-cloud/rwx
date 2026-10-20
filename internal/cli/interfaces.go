@@ -18,6 +18,8 @@ type APIClient interface {
 	CreateServiceAccount(api.CreateServiceAccountConfig) (*api.ServiceAccountResult, error)
 	UpdateServiceAccount(api.UpdateServiceAccountConfig) (*api.ServiceAccountResult, error)
 	DeactivateServiceAccount(string) error
+	GetServiceAccountPermissions(string) (*api.ServiceAccountPermissionsResult, error)
+	ReplaceServiceAccountPermissions(api.ReplaceServiceAccountPermissionsConfig) (*api.ServiceAccountPermissionsResult, error)
 	GetSkillContent() (string, error)
 	GetSkillSnapshot() (*api.SkillSnapshot, error)
 	GetSkillLatestVersion() (string, error)

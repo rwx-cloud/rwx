@@ -16,6 +16,8 @@ type API struct {
 	MockCreateServiceAccount                    func(api.CreateServiceAccountConfig) (*api.ServiceAccountResult, error)
 	MockUpdateServiceAccount                    func(api.UpdateServiceAccountConfig) (*api.ServiceAccountResult, error)
 	MockDeactivateServiceAccount                func(string) error
+	MockGetServiceAccountPermissions            func(string) (*api.ServiceAccountPermissionsResult, error)
+	MockReplaceServiceAccountPermissions        func(api.ReplaceServiceAccountPermissionsConfig) (*api.ServiceAccountPermissionsResult, error)
 	MockDisableApp                              func(string) error
 	MockEnableApp                               func(string) error
 	MockBillingUsage                            func(string) (*api.BillingUsageResult, error)
