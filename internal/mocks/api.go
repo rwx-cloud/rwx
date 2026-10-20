@@ -9,6 +9,8 @@ import (
 
 type API struct {
 	MockGetPermissionCatalog                    func(api.GetPermissionCatalogConfig) (*api.PermissionCatalog, error)
+	MockGetGroupPermissions                     func(string) (*api.GroupPermissionsResult, error)
+	MockReplaceGroupPermissions                 func(string, []api.Permission) (*api.GroupPermissionsResult, error)
 	MockListServiceAccounts                     func(api.ListServiceAccountsConfig) (*api.ListServiceAccountsResult, error)
 	MockShowServiceAccount                      func(string) (*api.ServiceAccountResult, error)
 	MockCreateServiceAccount                    func(api.CreateServiceAccountConfig) (*api.ServiceAccountResult, error)
@@ -227,6 +229,20 @@ func (c *API) GetPermissionCatalog(cfg api.GetPermissionCatalogConfig) (*api.Per
 	}
 
 	return nil, errors.New("MockGetPermissionCatalog was not configured")
+}
+
+func (c *API) GetGroupPermissions(id string) (*api.GroupPermissionsResult, error) {
+	if c.MockGetGroupPermissions != nil {
+		return c.MockGetGroupPermissions(id)
+	}
+	return nil, errors.New("MockGetGroupPermissions was not configured")
+}
+
+func (c *API) ReplaceGroupPermissions(id string, permissions []api.Permission) (*api.GroupPermissionsResult, error) {
+	if c.MockReplaceGroupPermissions != nil {
+		return c.MockReplaceGroupPermissions(id, permissions)
+	}
+	return nil, errors.New("MockReplaceGroupPermissions was not configured")
 }
 
 func (c *API) CreateVault(cfg api.CreateVaultConfig) (*api.CreateVaultResult, error) {
