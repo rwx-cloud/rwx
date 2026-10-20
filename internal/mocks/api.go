@@ -89,6 +89,9 @@ type API struct {
 	MockCreateGroup                             func(api.CreateGroupConfig) (*api.GroupResult, error)
 	MockUpdateGroup                             func(string, api.UpdateGroupConfig) (*api.GroupResult, error)
 	MockDeleteGroup                             func(string) error
+	MockShowGroupRelationship                   func(api.GroupRelationship) (*api.GroupRelationshipResult, error)
+	MockAddGroupRelationship                    func(api.GroupRelationship) (*api.GroupRelationshipResult, error)
+	MockRemoveGroupRelationship                 func(api.GroupRelationship) error
 	MockListConcurrencyPools                    func(api.ListConcurrencyPoolsConfig) (*api.ListConcurrencyPoolsResult, error)
 	MockShowConcurrencyPool                     func(string) (*api.ConcurrencyPool, error)
 	MockListConcurrencyPoolQueue                func(api.ListConcurrencyPoolQueueConfig) (*api.ListConcurrencyPoolQueueResult, error)
