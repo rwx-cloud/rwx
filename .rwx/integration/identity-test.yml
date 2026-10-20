@@ -182,9 +182,9 @@ tasks:
       group=$(echo "$output" | jq -er '.ID | select(length > 0)')
       rwx permissions list --group-id "$group" --json | jq -e 'any(.Permissions[]; .Key == "run:read" and .Grantable.Unscoped)' >/dev/null
       rwx groups permissions show "$name" --json | jq -e --arg id "$group" '.GroupID == $id and .Permissions == []' >/dev/null
-      printf '%s\n' '{"permissions":[{"key":"run:read"},{"key":"org:access"}]}' > permissions.json
-      rwx groups permissions replace "$group" --file permissions.json --yes --json | jq -e --arg id "$group" '.GroupID == $id and ([.Permissions[].Key] | sort) == ["org:access","run:read"]' >/dev/null
-      rwx groups permissions show "$name" --format json | jq -e '([.Permissions[].Key] | sort) == ["org:access","run:read"]' >/dev/null
+      printf '%s\n' '{"permissions":[{"key":"run:read"},{"key":"image:access"}]}' > permissions.json
+      rwx groups permissions replace "$group" --file permissions.json --yes --json | jq -e --arg id "$group" '.GroupID == $id and ([.Permissions[].Key] | sort) == ["image:access","run:read"]' >/dev/null
+      rwx groups permissions show "$name" --format json | jq -e '([.Permissions[].Key] | sort) == ["image:access","run:read"]' >/dev/null
       printf '%s\n' '{"permissions":[{"key":"run:read"}]}' | rwx groups permissions replace "$name" --file - --yes --json | jq -e '.Permissions == [{Key:"run:read",ResourceID:null}]' >/dev/null
       if rwx groups permissions clear "$group" </dev/null; then
         echo "Clear without confirmation succeeded" >&2
@@ -223,9 +223,9 @@ tasks:
       account=$(echo "$output" | jq -er '.ID | select(length > 0)')
       rwx permissions list --service-account-id "$account" --format json | jq -e 'any(.Permissions[]; .Key == "run:read" and .Grantable.Unscoped)' >/dev/null
       rwx service-accounts permissions show --display-name "$name" --json | jq -e --arg id "$account" '.ServiceAccountID == $id and .Permissions == []' >/dev/null
-      printf '%s\n' '{"permissions":[{"key":"run:read"},{"key":"org:access"}]}' > permissions.json
-      rwx service-accounts permissions replace "$account" --file permissions.json --yes --json | jq -e --arg id "$account" '.ServiceAccountID == $id and ([.Permissions[].Key] | sort) == ["org:access","run:read"]' >/dev/null
-      rwx service-accounts permissions show --display-name "$name" --format json | jq -e '([.Permissions[].Key] | sort) == ["org:access","run:read"]' >/dev/null
+      printf '%s\n' '{"permissions":[{"key":"run:read"},{"key":"image:access"}]}' > permissions.json
+      rwx service-accounts permissions replace "$account" --file permissions.json --yes --json | jq -e --arg id "$account" '.ServiceAccountID == $id and ([.Permissions[].Key] | sort) == ["image:access","run:read"]' >/dev/null
+      rwx service-accounts permissions show --display-name "$name" --format json | jq -e '([.Permissions[].Key] | sort) == ["image:access","run:read"]' >/dev/null
       printf '%s\n' '{"permissions":[{"key":"run:read"}]}' | rwx service-accounts permissions replace --display-name "$name" --file - --yes --json | jq -e '.Permissions == [{Key:"run:read",ResourceID:null}]' >/dev/null
       if rwx service-accounts permissions clear "$account" </dev/null; then
         echo "Clear without confirmation succeeded" >&2
