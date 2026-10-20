@@ -234,6 +234,7 @@ func init() {
 	rootCmd.AddCommand(lspCmd)
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(packagesCmd)
+	rootCmd.AddCommand(permissionsCmd)
 	rootCmd.AddCommand(pushCmd)
 	rootCmd.AddCommand(resolveCmd)
 	rootCmd.AddCommand(retryCmd)

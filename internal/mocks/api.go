@@ -8,6 +8,7 @@ import (
 )
 
 type API struct {
+	MockGetPermissionCatalog                    func(api.GetPermissionCatalogConfig) (*api.PermissionCatalog, error)
 	MockDisableApp                              func(string) error
 	MockEnableApp                               func(string) error
 	MockBillingUsage                            func(string) (*api.BillingUsageResult, error)
@@ -213,6 +214,14 @@ func (c *API) SetSecretsInVault(cfg api.SetSecretsInVaultConfig) (*api.SetSecret
 	}
 
 	return nil, errors.New("MockSetSecretsInVault was not configured")
+}
+
+func (c *API) GetPermissionCatalog(cfg api.GetPermissionCatalogConfig) (*api.PermissionCatalog, error) {
+	if c.MockGetPermissionCatalog != nil {
+		return c.MockGetPermissionCatalog(cfg)
+	}
+
+	return nil, errors.New("MockGetPermissionCatalog was not configured")
 }
 
 func (c *API) CreateVault(cfg api.CreateVaultConfig) (*api.CreateVaultResult, error) {

@@ -10,6 +10,7 @@ import (
 )
 
 type APIClient interface {
+	GetPermissionCatalog(api.GetPermissionCatalogConfig) (*api.PermissionCatalog, error)
 	GetSkillContent() (string, error)
 	GetSkillSnapshot() (*api.SkillSnapshot, error)
 	GetSkillLatestVersion() (string, error)
