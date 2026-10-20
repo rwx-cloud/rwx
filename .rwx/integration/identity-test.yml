@@ -161,8 +161,11 @@ tasks:
   - key: test-group-permissions
     use: rwx-cli
     cache: false
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
     run: |
       set -euo pipefail
+      rwx whoami --json | jq -e '.organization_slug == "rwx-integration-testing" and .token_kind == "service_account" and .service_account_name == "rwx-cli-ci"' >/dev/null
       name="cli-perms-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
       group=""
       cleanup() {
@@ -194,8 +197,11 @@ tasks:
   - key: test-service-account-permissions
     use: rwx-cli
     cache: false
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
     run: |
       set -euo pipefail
+      rwx whoami --json | jq -e '.organization_slug == "rwx-integration-testing" and .token_kind == "service_account" and .service_account_name == "rwx-cli-ci"' >/dev/null
       name="cli-sa-perms-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
       account=""
       created=false
