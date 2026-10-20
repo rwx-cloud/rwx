@@ -35,7 +35,7 @@ type ListPermissionsResult struct {
 
 func (s Service) ListPermissions(cfg ListPermissionsConfig) (*ListPermissionsResult, error) {
 	if cfg.GroupID != "" && cfg.ServiceAccountID != "" {
-		return nil, errors.New("--group-id and --service-account-id cannot be used together")
+		return nil, errors.Wrap(errors.ErrBadRequest, "--group-id and --service-account-id cannot be used together")
 	}
 	catalog, err := s.APIClient.GetPermissionCatalog(api.GetPermissionCatalogConfig{
 		GroupID: cfg.GroupID, ServiceAccountID: cfg.ServiceAccountID,

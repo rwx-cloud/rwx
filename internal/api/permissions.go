@@ -36,7 +36,7 @@ type GetPermissionCatalogConfig struct {
 
 func (c Client) GetPermissionCatalog(cfg GetPermissionCatalogConfig) (*PermissionCatalog, error) {
 	if cfg.GroupID != "" && cfg.ServiceAccountID != "" {
-		return nil, errors.New("provide group_id or service_account_id, not both")
+		return nil, errors.Wrap(errors.ErrBadRequest, "provide group_id or service_account_id, not both")
 	}
 	query := url.Values{}
 	if cfg.GroupID != "" {
