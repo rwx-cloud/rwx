@@ -4,7 +4,7 @@ on:
       commit-sha: ${{ event.git.sha }}
 
 base:
-  image: ubuntu:24.04
+  image: ubuntu:26.04
   config: rwx/base 1.2.0
 
 tasks:

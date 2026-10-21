@@ -24,7 +24,7 @@ concurrency-pools:
     on-overflow: cancel-waiting
 
 base:
-  image: ubuntu:24.04
+  image: ubuntu:26.04
   config: rwx/base 1.2.0
 
 tasks:
