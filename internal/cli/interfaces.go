@@ -11,11 +11,15 @@ import (
 
 type APIClient interface {
 	GetPermissionCatalog(api.GetPermissionCatalogConfig) (*api.PermissionCatalog, error)
+	GetGroupPermissions(string) (*api.GroupPermissionsResult, error)
+	ReplaceGroupPermissions(string, []api.Permission) (*api.GroupPermissionsResult, error)
 	ListServiceAccounts(api.ListServiceAccountsConfig) (*api.ListServiceAccountsResult, error)
 	ShowServiceAccount(string) (*api.ServiceAccountResult, error)
 	CreateServiceAccount(api.CreateServiceAccountConfig) (*api.ServiceAccountResult, error)
 	UpdateServiceAccount(api.UpdateServiceAccountConfig) (*api.ServiceAccountResult, error)
 	DeactivateServiceAccount(string) error
+	GetServiceAccountPermissions(string) (*api.ServiceAccountPermissionsResult, error)
+	ReplaceServiceAccountPermissions(api.ReplaceServiceAccountPermissionsConfig) (*api.ServiceAccountPermissionsResult, error)
 	GetSkillContent() (string, error)
 	GetSkillSnapshot() (*api.SkillSnapshot, error)
 	GetSkillLatestVersion() (string, error)
