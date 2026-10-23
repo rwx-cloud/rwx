@@ -57,7 +57,7 @@ tasks:
       run_id=$(echo "$kickoff" | jq -er '.RunID | select(. != null and . != "")')
       echo "$kickoff" | jq -r '.RunURL' > "$RWX_LINKS/App fixture run"
 
-      result=$(rwx results "$run_id" --wait --json)
+      result=$(rwx results "$run_id" --wait --json --verbose)
       if ! echo "$result" | jq -e '.ResultStatus == "succeeded"' >/dev/null; then
         echo "App fixture run did not succeed"
         echo "$result"

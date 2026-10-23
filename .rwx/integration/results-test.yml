@@ -49,8 +49,7 @@ tasks:
         echo "Run URL: $run_url"
       fi
 
-      # Exercise rwx results --wait --json
-      result=$(rwx results --wait --json "$run_id")
+      result=$(rwx results --wait --json --verbose "$run_id")
       status=$(echo "$result" | jq -r '.ResultStatus')
       completed=$(echo "$result" | jq -r '.Completed')
       result_run_id=$(echo "$result" | jq -r '.RunID')
@@ -93,9 +92,8 @@ tasks:
         exit 1
       fi
 
-      # Exercise rwx results --wait --fail-fast --json
       exit_code=0
-      result=$(rwx results --wait --fail-fast --json "$run_id") || exit_code=$?
+      result=$(rwx results --wait --fail-fast --json --verbose "$run_id") || exit_code=$?
 
       if [ "$exit_code" -eq 0 ]; then
         echo "Expected non-zero exit code with --fail-fast on failing run"
@@ -132,7 +130,7 @@ tasks:
       run_url=$(echo "$kickoff" | jq -r '.RunURL // empty')
       echo "$run_url" > "$RWX_LINKS/Run URL"
 
-      task_result=$(rwx results $run_id --task will-pass --wait --json)
+      task_result=$(rwx results $run_id --task will-pass --wait --json --verbose)
       task_status=$(echo "$task_result" | jq -r '.ResultStatus')
       task_result_task_id=$(echo "$task_result" | jq -r '.TaskID')
 

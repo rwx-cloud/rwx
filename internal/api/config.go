@@ -634,6 +634,7 @@ type RunStatusConfig struct {
 type RunDetailsConfig struct {
 	RunID   string
 	TaskKey string
+	Compact bool
 }
 
 // PollingRunStatus is the minimal status object returned by the results

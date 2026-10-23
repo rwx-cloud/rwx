@@ -24,6 +24,7 @@ var (
 	ResultsDefinition string
 	ResultsCommit     string
 	ResultsTaskKey    string
+	ResultsVerbose    bool
 
 	resultsCmd = &cobra.Command{
 		GroupID: "outputs",
@@ -34,14 +35,20 @@ var (
 The default output is an LLM-friendly prompt for investigating run failures: the
 run's status plus a failure summary you can hand to a coding agent.
 
-Pass --output json to get structured run and task fields instead. For the full
-list of JSON fields, see https://rwx.com/docs/results or run:
+Pass --json (or --format json) to get structured run and task fields.
+For more fields such as definitions, environment, metrics, attempt history, and
+retry enrichment, pass --verbose as well.
+
+For field details, see https://rwx.com/docs/results or run:
 
     rwx docs pull /results`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			taskKeySet := cmd.Flags().Changed("task")
+			if ResultsVerbose && !useJson {
+				return errors.New("--verbose requires --json or --format json")
+			}
 
 			var runID string
 			runIDFromGit := false
@@ -116,16 +123,13 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 					return err
 				}
 
-				// Fetch the enriched payload and fold it into the base output. An
-				// empty object means enrichment is not enabled for the org, so the
-				// merge is a no-op. Pass the original run/task identifier (not the
-				// resolved run ID) so a task-scoped lookup stays task-scoped.
 				details, err := service.GetRunDetails(cli.GetRunDetailsConfig{
 					RunID:   runID,
 					TaskKey: ResultsTaskKey,
+					Compact: !ResultsVerbose,
 				})
 				if err != nil {
-					return err
+					return handleResultsTaskKeyError(err)
 				}
 				if len(details) > 0 {
 					base = MergeEnrichedResults(base, details)
@@ -184,6 +188,7 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 )
 
 func init() {
+	resultsCmd.Flags().BoolVar(&ResultsVerbose, "verbose", false, "request additional JSON fields beyond the default set (requires --json or --format json)")
 	resultsCmd.Flags().BoolVar(&ResultsOpen, "open", false, "open the run in a browser")
 	resultsCmd.Flags().BoolVar(&ResultsWait, "wait", false, "poll for the run to complete and report the result status")
 	resultsCmd.Flags().BoolVar(&ResultsFailFast, "fail-fast", false, "stop waiting when failures are available (only has an effect when used with --wait)")

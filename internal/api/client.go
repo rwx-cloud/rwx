@@ -1860,6 +1860,9 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 }
 
 func (c Client) GetRunDetails(cfg RunDetailsConfig) (map[string]any, error) {
+	if cfg.Compact {
+		return c.getCompactDetails(cfg)
+	}
 	endpoint := "/mint/api/results/" + url.PathEscape(cfg.RunID)
 	if cfg.TaskKey != "" {
 		params := url.Values{}

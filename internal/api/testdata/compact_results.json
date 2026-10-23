@@ -1,0 +1,17 @@
+{
+  "run": [
+    {"id":"run","status":{"result":"succeeded"},"repository_name":null,"tasks":[{"id":"group-old","key":"checks","attempt_number":2}],"messages":[],"outputs":{"values":[],"links":[]},"dependencies":[],"scoped_dependencies":[],"fragments":[],"polling":{"completed":true},"truncated":true,"next_cursor":"opaque+/=1"},
+    {"id":"run","tasks":[{"id":"a-release","key":"release","attempt_number":2}],"messages":[{"type":"warning","text":"run warning"}],"outputs":{"values":[],"links":[]},"dependencies":[],"scoped_dependencies":[],"fragments":[],"polling":{"completed":true},"truncated":true,"next_cursor":"opaque+/=2"},
+    {"id":"run","tasks":[],"messages":[],"outputs":{"values":[],"links":[]},"dependencies":[],"scoped_dependencies":[],"fragments":[],"polling":{"completed":true},"truncated":false,"next_cursor":null}
+  ],
+  "group-old": [
+    {"id":"group-old","key":"checks","scoped_key":"checks","task_type":"group","attempt_number":2,"latest_attempt_number":2,"attempt_count":2,"status":{"result":"succeeded"},"completed_runtime_seconds":7,"subtasks":[{"id":"leaf-old","key":"checks"}],"messages":[],"outputs":{"values":[{"key":"first","value":"before"}],"links":[]},"dependencies":[],"scoped_dependencies":[],"fragments":[{"collection":"values","position":"output-id","offset":0,"json":"{\"key\":\"雪","complete":false}],"polling":{"completed":false,"backoff_ms":2000},"truncated":true,"next_cursor":"group-next"},
+    {"id":"group-old","subtasks":[],"messages":[{"type":"info","text":"historical"}],"outputs":{"values":[{"key":"last","value":"after"}],"links":[{"name":"docs","url":"https://rwx.com"}]},"dependencies":["build"],"scoped_dependencies":["ci.build"],"fragments":[{"collection":"values","position":"output-id","offset":9,"json":"\",\"value\":\"山\\n\\\"終\"}","complete":true}],"polling":{"completed":false,"backoff_ms":2000},"truncated":false,"next_cursor":null}
+  ],
+  "leaf-old": [
+    {"id":"leaf-old","key":"checks","scoped_key":"checks.checks","attempt_number":1,"latest_attempt_number":2,"attempt_count":2,"subtasks":[],"messages":[],"outputs":{"values":[],"links":[]},"dependencies":[],"scoped_dependencies":[],"fragments":[],"polling":{"completed":true},"truncated":false,"next_cursor":null}
+  ],
+  "a-release": [
+    {"id":"a-release","key":"release","scoped_key":"release","attempt_number":2,"subtasks":[],"messages":[],"outputs":{"values":[],"links":[]},"dependencies":[],"scoped_dependencies":[],"fragments":[],"polling":{"completed":true},"truncated":false,"next_cursor":null}
+  ]
+}
