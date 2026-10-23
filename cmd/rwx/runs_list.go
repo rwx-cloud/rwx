@@ -39,7 +39,8 @@ Results are paginated: the default page shows the most recent runs and --limit
 sets the page size (capped at 100). When more runs remain, pass the reported
 cursor to --cursor to fetch the next page.
 
-For a given run's full payload, run 'rwx results <id> --json'.`,
+For a given run's compact payload, run 'rwx results <id> --json'.
+Add --verbose for the legacy rich payload.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
