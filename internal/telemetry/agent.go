@@ -19,7 +19,9 @@ var agentEnvVars = []struct {
 	// https://code.claude.com/docs/en/env-vars
 	{"claude_code", []string{"CLAUDECODE", "CLAUDE_CODE"}},
 	{"cursor", []string{"CURSOR_AGENT"}},
-	{"codex", []string{"CODEX_SANDBOX", "CODEX_CI"}},
+	// Codex sets CODEX_THREAD_ID on every shell command; the others depend on
+	// the sandbox and exec path.
+	{"codex", []string{"CODEX_THREAD_ID", "CODEX_SANDBOX", "CODEX_CI"}},
 	{"gemini_cli", []string{"GEMINI_CLI"}},
 	{"copilot_cli", []string{"COPILOT_CLI"}},
 	// Amp sets AMP_THREAD_ID in its orbs.
@@ -28,6 +30,10 @@ var agentEnvVars = []struct {
 	// AI_AGENT is a generic, agent-agnostic signal; only used when no specific
 	// agent above matched. Its value is reported when it names the agent.
 	{genericAgent, []string{"AI_AGENT"}},
+	// Emdash launches other agents and sets EMDASH_TASK_ID in every task
+	// session, so this catches agents not detected above. It is also set in
+	// task terminals a human types into.
+	{"emdash", []string{"EMDASH_TASK_ID"}},
 }
 
 const genericAgent = "agent"

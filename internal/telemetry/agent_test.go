@@ -46,6 +46,32 @@ func TestDetectAgent(t *testing.T) {
 		require.Equal(t, "codex", detectAgent())
 	})
 
+	t.Run("codex via thread id", func(t *testing.T) {
+		clearAgentEnv(t)
+		t.Setenv("CODEX_THREAD_ID", "019a-thread")
+		require.Equal(t, "codex", detectAgent())
+	})
+
+	t.Run("emdash", func(t *testing.T) {
+		clearAgentEnv(t)
+		t.Setenv("EMDASH_TASK_ID", "task-1")
+		require.Equal(t, "emdash", detectAgent())
+	})
+
+	t.Run("detected agent wins over emdash", func(t *testing.T) {
+		clearAgentEnv(t)
+		t.Setenv("EMDASH_TASK_ID", "task-1")
+		t.Setenv("CLAUDECODE", "1")
+		require.Equal(t, "claude_code", detectAgent())
+	})
+
+	t.Run("named AI_AGENT wins over emdash", func(t *testing.T) {
+		clearAgentEnv(t)
+		t.Setenv("EMDASH_TASK_ID", "task-1")
+		t.Setenv("AI_AGENT", "kilocode")
+		require.Equal(t, "kilocode", detectAgent())
+	})
+
 	t.Run("generic AI_AGENT", func(t *testing.T) {
 		clearAgentEnv(t)
 		t.Setenv("AI_AGENT", "true")
