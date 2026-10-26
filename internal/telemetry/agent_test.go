@@ -52,6 +52,31 @@ func TestDetectAgent(t *testing.T) {
 		require.Equal(t, "agent", detectAgent())
 	})
 
+	t.Run("generic AI_AGENT with a name", func(t *testing.T) {
+		clearAgentEnv(t)
+		t.Setenv("AI_AGENT", " Some-Agent ")
+		require.Equal(t, "some-agent", detectAgent())
+	})
+
+	t.Run("amp", func(t *testing.T) {
+		clearAgentEnv(t)
+		t.Setenv("AMP_THREAD_ID", "T-123")
+		require.Equal(t, "amp", detectAgent())
+	})
+
+	t.Run("amp via AI_AGENT", func(t *testing.T) {
+		clearAgentEnv(t)
+		t.Setenv("AI_AGENT", "amp")
+		require.Equal(t, "amp", detectAgent())
+	})
+
+	t.Run("opencode", func(t *testing.T) {
+		clearAgentEnv(t)
+		t.Setenv("OPENCODE", "1")
+		t.Setenv("AI_AGENT", "opencode")
+		require.Equal(t, "opencode", detectAgent())
+	})
+
 	t.Run("specific agent wins over generic", func(t *testing.T) {
 		clearAgentEnv(t)
 		t.Setenv("AI_AGENT", "1")
