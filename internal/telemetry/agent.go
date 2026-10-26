@@ -22,10 +22,15 @@ var agentEnvVars = []struct {
 	{"codex", []string{"CODEX_SANDBOX", "CODEX_CI"}},
 	{"gemini_cli", []string{"GEMINI_CLI"}},
 	{"copilot_cli", []string{"COPILOT_CLI"}},
+	// Amp sets AMP_THREAD_ID in its orbs.
+	{"amp", []string{"AMP_THREAD_ID"}},
+	{"opencode", []string{"OPENCODE"}},
 	// AI_AGENT is a generic, agent-agnostic signal; only used when no specific
-	// agent above matched.
-	{"agent", []string{"AI_AGENT"}},
+	// agent above matched. Its value is reported when it names the agent.
+	{genericAgent, []string{"AI_AGENT"}},
 }
+
+const genericAgent = "agent"
 
 // ciEnvVars maps CI systems to environment variables whose presence signals
 // them. Order matters: provider-specific signals win over the generic CI=true
@@ -52,12 +57,27 @@ var ciEnvVars = []struct {
 func detectAgent() string {
 	for _, e := range agentEnvVars {
 		for _, v := range e.envVars {
-			if envSet(v) {
-				return e.agent
+			if !envSet(v) {
+				continue
 			}
+			if e.agent == genericAgent {
+				return genericAgentName(os.Getenv(v))
+			}
+			return e.agent
 		}
 	}
 	return ""
+}
+
+// genericAgentName returns the agent named by a generic signal such as
+// AI_AGENT=opencode, or "agent" when the value is only a boolean flag.
+func genericAgentName(value string) string {
+	name := strings.ToLower(strings.TrimSpace(value))
+	switch name {
+	case "1", "true", "yes":
+		return genericAgent
+	}
+	return name
 }
 
 // detectCI returns the name of the CI environment the CLI appears to be
