@@ -157,3 +157,80 @@ tasks:
           (.Grantable.ResourceIDs | type == "array"))
       ' >/dev/null
       rwx permissions list | grep -F 'CALLER CAN GRANT UNSCOPED'
+
+  - key: test-group-permissions
+    use: rwx-cli
+    cache: false
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
+    run: |
+      set -euo pipefail
+      rwx whoami --json | jq -e '.organization_slug == "rwx-integration-testing" and .token_kind == "service_account" and .service_account_name == "rwx-cli-ci"' >/dev/null
+      name="cli-perms-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      group=""
+      cleanup() {
+        status=$?
+        trap - EXIT
+        if [ -n "$group" ]; then
+          rwx groups delete "$group" --yes >/dev/null || status=1
+        fi
+        exit "$status"
+      }
+      trap cleanup EXIT
+      output=$(rwx groups create --name "$name" --json)
+      group="$name"
+      group=$(echo "$output" | jq -er '.ID | select(length > 0)')
+      rwx permissions list --group-id "$group" --json | jq -e 'any(.Permissions[]; .Key == "run:read" and .Grantable.Unscoped)' >/dev/null
+      rwx groups permissions show "$name" --json | jq -e --arg id "$group" '.GroupID == $id and .Permissions == []' >/dev/null
+      printf '%s\n' '{"permissions":[{"key":"run:read"},{"key":"image:access"}]}' > permissions.json
+      rwx groups permissions replace "$group" --file permissions.json --yes --json | jq -e --arg id "$group" '.GroupID == $id and ([.Permissions[].Key] | sort) == ["image:access","run:read"]' >/dev/null
+      rwx groups permissions show "$name" --format json | jq -e '([.Permissions[].Key] | sort) == ["image:access","run:read"]' >/dev/null
+      printf '%s\n' '{"permissions":[{"key":"run:read"}]}' | rwx groups permissions replace "$name" --file - --yes --json | jq -e '.Permissions == [{Key:"run:read",ResourceID:null}]' >/dev/null
+      if rwx groups permissions clear "$group" </dev/null; then
+        echo "Clear without confirmation succeeded" >&2
+        exit 1
+      fi
+      rwx groups permissions show "$group" --json | jq -e '.Permissions | length == 1' >/dev/null
+      rwx groups permissions clear "$group" --yes --json | jq -e '.Permissions == []' >/dev/null
+      rwx groups permissions show "$name" --json | jq -e '.Permissions == []' >/dev/null
+
+  - key: test-service-account-permissions
+    use: rwx-cli
+    cache: false
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
+    run: |
+      set -euo pipefail
+      rwx whoami --json | jq -e '.organization_slug == "rwx-integration-testing" and .token_kind == "service_account" and .service_account_name == "rwx-cli-ci"' >/dev/null
+      name="cli-sa-perms-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      account=""
+      created=false
+      cleanup() {
+        status=$?
+        trap - EXIT
+        if [ "$created" = true ]; then
+          if [ -n "$account" ]; then
+            rwx service-accounts deactivate "$account" --yes >/dev/null || status=1
+          else
+            rwx service-accounts deactivate --display-name "$name" --yes >/dev/null || status=1
+          fi
+        fi
+        exit "$status"
+      }
+      trap cleanup EXIT
+      output=$(rwx service-accounts create --display-name "$name" --json)
+      created=true
+      account=$(echo "$output" | jq -er '.ID | select(length > 0)')
+      rwx permissions list --service-account-id "$account" --format json | jq -e 'any(.Permissions[]; .Key == "run:read" and .Grantable.Unscoped)' >/dev/null
+      rwx service-accounts permissions show --display-name "$name" --json | jq -e --arg id "$account" '.ServiceAccountID == $id and .Permissions == []' >/dev/null
+      printf '%s\n' '{"permissions":[{"key":"run:read"},{"key":"image:access"}]}' > permissions.json
+      rwx service-accounts permissions replace "$account" --file permissions.json --yes --json | jq -e --arg id "$account" '.ServiceAccountID == $id and ([.Permissions[].Key] | sort) == ["image:access","run:read"]' >/dev/null
+      rwx service-accounts permissions show --display-name "$name" --format json | jq -e '([.Permissions[].Key] | sort) == ["image:access","run:read"]' >/dev/null
+      printf '%s\n' '{"permissions":[{"key":"run:read"}]}' | rwx service-accounts permissions replace --display-name "$name" --file - --yes --json | jq -e '.Permissions == [{Key:"run:read",ResourceID:null}]' >/dev/null
+      if rwx service-accounts permissions clear "$account" </dev/null; then
+        echo "Clear without confirmation succeeded" >&2
+        exit 1
+      fi
+      rwx service-accounts permissions show "$account" --json | jq -e '.Permissions | length == 1' >/dev/null
+      rwx service-accounts permissions clear "$account" --yes --json | jq -e '.Permissions == []' >/dev/null
+      rwx service-accounts permissions show "$account" --json | jq -e '.Permissions == []' >/dev/null
