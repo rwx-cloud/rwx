@@ -1896,6 +1896,7 @@ func (c Client) GetRunPrompt(runID string) (string, error) {
 		return "", errors.Wrap(err, "unable to create new HTTP request")
 	}
 	req.Header.Set("Accept", "text/plain")
+	req.Header.Set("X-RWX-Prompt-Presentation", "cli")
 
 	resp, err := c.RoundTrip(req)
 	if err != nil {
@@ -1933,6 +1934,7 @@ func (c Client) GetRunPromptByTaskKey(runID, taskKey string) (string, error) {
 		return "", errors.Wrap(err, "unable to create new HTTP request")
 	}
 	req.Header.Set("Accept", "text/plain")
+	req.Header.Set("X-RWX-Prompt-Presentation", "cli")
 
 	resp, err := c.RoundTrip(req)
 	if err != nil {

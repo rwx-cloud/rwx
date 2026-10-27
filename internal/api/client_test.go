@@ -2262,6 +2262,49 @@ func TestAPIClient_GetRunPrompt(t *testing.T) {
 	})
 }
 
+func TestAPIClient_PromptRequests(t *testing.T) {
+	for _, endpoint := range []string{"run", "task key"} {
+		t.Run(endpoint, func(t *testing.T) {
+			for _, tc := range []struct {
+				name string
+				text string
+			}{
+				{name: "full server prompt", text: "# Failed task:\n\nYou can pull the logs for this task using `rwx logs <task-id>` and see available artifacts using `rwx artifacts list <task-id>`\n\n- tests (task-id: task-123) (has artifacts)\n\nFor more documentation on the RWX CLI, see `rwx --help`\n"},
+				{name: "empty prompt"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					client := api.NewClientWithRoundTrip(func(req *http.Request) (*http.Response, error) {
+						require.Equal(t, http.MethodGet, req.Method)
+						require.Equal(t, "/mint/api/results/prompt", req.URL.Path)
+						require.Equal(t, "text/plain", req.Header.Get("Accept"))
+						require.Equal(t, "cli", req.Header.Get("X-RWX-Prompt-Presentation"))
+						if endpoint == "task key" {
+							require.Equal(t, "run-123", req.URL.Query().Get("run_id"))
+							require.Equal(t, "ci.tests", req.URL.Query().Get("task_key"))
+						} else {
+							require.Equal(t, "run-123", req.URL.Query().Get("id"))
+						}
+						return &http.Response{
+							StatusCode: http.StatusOK,
+							Body:       io.NopCloser(strings.NewReader(tc.text)),
+						}, nil
+					})
+
+					var text string
+					var err error
+					if endpoint == "run" {
+						text, err = client.GetRunPrompt("run-123")
+					} else {
+						text, err = client.GetRunPromptByTaskKey("run-123", "ci.tests")
+					}
+					require.NoError(t, err)
+					require.Equal(t, tc.text, text)
+				})
+			}
+		})
+	}
+}
+
 func TestAPIClient_DownloadArtifact(t *testing.T) {
 	t.Run("makes GET request to presigned URL", func(t *testing.T) {
 		artifactContents := []byte("artifact binary data")
