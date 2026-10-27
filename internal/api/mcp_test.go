@@ -24,6 +24,7 @@ func TestClient_McpGetRunTestFailures(t *testing.T) {
 			require.Equal(t, "POST", req.Method)
 			require.Equal(t, "application/json", req.Header.Get("Content-Type"))
 			require.Equal(t, "application/json", req.Header.Get("Accept"))
+			require.Empty(t, req.Header.Get("X-RWX-Prompt-Presentation"))
 
 			var requestBody api.McpGetRunTestFailuresRequest
 			bodyBytes, _ := io.ReadAll(req.Body)
