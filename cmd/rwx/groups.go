@@ -100,5 +100,5 @@ func newGroupsDeleteCommand() *cobra.Command {
 }
 
 func init() {
-	groupsCmd.AddCommand(newGroupsListCommand(), newGroupsShowCommand(), newGroupsCreateCommand(), newGroupsUpdateCommand(), newGroupsDeleteCommand(), newGroupPermissionsCommand())
+	groupsCmd.AddCommand(newGroupsListCommand(), newGroupsShowCommand(), newGroupsCreateCommand(), newGroupsUpdateCommand(), newGroupsDeleteCommand(), newGroupRelationshipsCommand(), newGroupPermissionsCommand())
 }
