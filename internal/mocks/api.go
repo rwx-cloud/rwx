@@ -8,6 +8,12 @@ import (
 )
 
 type API struct {
+	MockGetPermissionCatalog                    func(api.GetPermissionCatalogConfig) (*api.PermissionCatalog, error)
+	MockListServiceAccounts                     func(api.ListServiceAccountsConfig) (*api.ListServiceAccountsResult, error)
+	MockShowServiceAccount                      func(string) (*api.ServiceAccountResult, error)
+	MockCreateServiceAccount                    func(api.CreateServiceAccountConfig) (*api.ServiceAccountResult, error)
+	MockUpdateServiceAccount                    func(api.UpdateServiceAccountConfig) (*api.ServiceAccountResult, error)
+	MockDeactivateServiceAccount                func(string) error
 	MockDisableApp                              func(string) error
 	MockEnableApp                               func(string) error
 	MockBillingUsage                            func(string) (*api.BillingUsageResult, error)
@@ -74,6 +80,11 @@ type API struct {
 	MockRunStatus                               func(api.RunStatusConfig) (api.RunStatusResult, error)
 	MockGetRunDetails                           func(api.RunDetailsConfig) (map[string]any, error)
 	MockListRuns                                func(api.ListRunsConfig) (*api.ListRunsResult, error)
+	MockListGroups                              func(api.ListGroupsConfig) (*api.ListGroupsResult, error)
+	MockShowGroup                               func(string) (*api.GroupResult, error)
+	MockCreateGroup                             func(api.CreateGroupConfig) (*api.GroupResult, error)
+	MockUpdateGroup                             func(string, api.UpdateGroupConfig) (*api.GroupResult, error)
+	MockDeleteGroup                             func(string) error
 	MockListConcurrencyPools                    func(api.ListConcurrencyPoolsConfig) (*api.ListConcurrencyPoolsResult, error)
 	MockShowConcurrencyPool                     func(string) (*api.ConcurrencyPool, error)
 	MockListConcurrencyPoolQueue                func(api.ListConcurrencyPoolQueueConfig) (*api.ListConcurrencyPoolQueueResult, error)
@@ -208,6 +219,14 @@ func (c *API) SetSecretsInVault(cfg api.SetSecretsInVaultConfig) (*api.SetSecret
 	}
 
 	return nil, errors.New("MockSetSecretsInVault was not configured")
+}
+
+func (c *API) GetPermissionCatalog(cfg api.GetPermissionCatalogConfig) (*api.PermissionCatalog, error) {
+	if c.MockGetPermissionCatalog != nil {
+		return c.MockGetPermissionCatalog(cfg)
+	}
+
+	return nil, errors.New("MockGetPermissionCatalog was not configured")
 }
 
 func (c *API) CreateVault(cfg api.CreateVaultConfig) (*api.CreateVaultResult, error) {

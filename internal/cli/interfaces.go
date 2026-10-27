@@ -10,6 +10,12 @@ import (
 )
 
 type APIClient interface {
+	GetPermissionCatalog(api.GetPermissionCatalogConfig) (*api.PermissionCatalog, error)
+	ListServiceAccounts(api.ListServiceAccountsConfig) (*api.ListServiceAccountsResult, error)
+	ShowServiceAccount(string) (*api.ServiceAccountResult, error)
+	CreateServiceAccount(api.CreateServiceAccountConfig) (*api.ServiceAccountResult, error)
+	UpdateServiceAccount(api.UpdateServiceAccountConfig) (*api.ServiceAccountResult, error)
+	DeactivateServiceAccount(string) error
 	GetSkillContent() (string, error)
 	GetSkillSnapshot() (*api.SkillSnapshot, error)
 	GetSkillLatestVersion() (string, error)
@@ -75,6 +81,11 @@ type APIClient interface {
 	RunStatus(api.RunStatusConfig) (api.RunStatusResult, error)
 	GetRunDetails(api.RunDetailsConfig) (map[string]any, error)
 	ListRuns(api.ListRunsConfig) (*api.ListRunsResult, error)
+	ListGroups(api.ListGroupsConfig) (*api.ListGroupsResult, error)
+	ShowGroup(string) (*api.GroupResult, error)
+	CreateGroup(api.CreateGroupConfig) (*api.GroupResult, error)
+	UpdateGroup(string, api.UpdateGroupConfig) (*api.GroupResult, error)
+	DeleteGroup(string) error
 	ListConcurrencyPools(api.ListConcurrencyPoolsConfig) (*api.ListConcurrencyPoolsResult, error)
 	ShowConcurrencyPool(string) (*api.ConcurrencyPool, error)
 	ListConcurrencyPoolQueue(api.ListConcurrencyPoolQueueConfig) (*api.ListConcurrencyPoolQueueResult, error)
