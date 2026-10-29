@@ -2,6 +2,7 @@ package versions
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -94,7 +95,26 @@ func InstalledWithHomebrew() bool {
 		return false
 	}
 
-	return strings.Contains(strings.ToLower(fname), "/homebrew/")
+	// Homebrew links bin/rwx into its Cellar, which is the only part of the path
+	// that identifies it on Intel Macs (/usr/local/bin/rwx).
+	if resolved, err := filepath.EvalSymlinks(fname); err == nil {
+		fname = resolved
+	}
+
+	return IsHomebrewPath(fname)
+}
+
+// IsHomebrewPath reports whether the resolved executable path is managed by
+// Homebrew, including Intel Mac installs under /usr/local/Cellar and Linuxbrew
+// installs under /home/linuxbrew/.linuxbrew.
+func IsHomebrewPath(path string) bool {
+	path = strings.ToLower(path)
+	for _, marker := range []string{"/homebrew/", "/.linuxbrew/", "/cellar/", "/caskroom/"} {
+		if strings.Contains(path, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func LoadLatestVersionFromFile(backend Backend) {

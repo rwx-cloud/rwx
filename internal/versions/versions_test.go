@@ -455,3 +455,12 @@ func TestSaveLatestVersionToFile(t *testing.T) {
 		require.Equal(t, "5.0.0", string(contents))
 	})
 }
+
+func TestIsHomebrewPath(t *testing.T) {
+	require.True(t, IsHomebrewPath("/opt/homebrew/Cellar/rwx/3.1.0/bin/rwx"))
+	require.True(t, IsHomebrewPath("/usr/local/Cellar/rwx/3.1.0/bin/rwx"))
+	require.True(t, IsHomebrewPath("/usr/local/Caskroom/rwx/3.1.0/rwx"))
+	require.True(t, IsHomebrewPath("/home/linuxbrew/.linuxbrew/Cellar/rwx/3.1.0/bin/rwx"))
+	require.False(t, IsHomebrewPath("/usr/local/bin/rwx"))
+	require.False(t, IsHomebrewPath("/home/user/.local/bin/rwx"))
+}
