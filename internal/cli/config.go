@@ -8,6 +8,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/docs"
 	"github.com/rwx-cloud/rwx/internal/docstoken"
 	"github.com/rwx-cloud/rwx/internal/errors"
+	"github.com/rwx-cloud/rwx/internal/releases"
 	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
 	"github.com/rwx-cloud/rwx/internal/telemetry"
 	"github.com/rwx-cloud/rwx/internal/vcs"
@@ -22,16 +23,20 @@ type Config struct {
 	DockerCLI            docker.Client
 	DocsClient           docs.Client
 	DocsTokenBackend     docstoken.Backend
+	ReleasesClient       releases.Client
 	AccessTokenBackend   accesstoken.Backend
 	VersionsBackend      versions.Backend
 	SkillVersionsBackend versions.Backend
 	TelemetryCollector   *telemetry.Collector
 	ChoicePicker         ChoicePicker
 	Stdin                io.Reader
+	StdinIsTTY           bool
 	Stdout               io.Writer
 	StdoutIsTTY          bool
 	Stderr               io.Writer
 	StderrIsTTY          bool
+
+	HideLatestVersionMessage bool
 }
 
 func (c Config) Validate() error {
