@@ -1,6 +1,7 @@
 package mocks
 
 import (
+	"context"
 	"io"
 
 	"github.com/rwx-cloud/rwx/internal/api"
@@ -8,6 +9,7 @@ import (
 )
 
 type API struct {
+	MockImagePullConfiguration                  func(context.Context, string) (*api.ImageConfiguration, error)
 	MockDisableApp                              func(string) error
 	MockEnableApp                               func(string) error
 	MockBillingUsage                            func(string) (*api.BillingUsageResult, error)
@@ -184,6 +186,13 @@ func (c *API) AcquireToken(tokenUrl string) (*api.AcquireTokenResult, error) {
 	}
 
 	return nil, errors.New("MockAcquireToken was not configured")
+}
+
+func (c *API) ImagePullConfiguration(ctx context.Context, id string) (*api.ImageConfiguration, error) {
+	if c.MockImagePullConfiguration != nil {
+		return c.MockImagePullConfiguration(ctx, id)
+	}
+	return &api.ImageConfiguration{}, nil
 }
 
 func (c *API) Whoami() (*api.WhoamiResult, error) {

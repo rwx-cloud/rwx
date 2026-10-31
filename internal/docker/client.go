@@ -13,6 +13,7 @@ import (
 	"github.com/docker/cli/cli/flags"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/registry"
+	"github.com/docker/docker/client"
 	"github.com/moby/moby/pkg/jsonmessage"
 	"github.com/rwx-cloud/rwx/internal/accesstoken"
 	"github.com/rwx-cloud/rwx/internal/errors"
@@ -35,6 +36,7 @@ func (c Config) Validate() error {
 type Client interface {
 	GetAuthConfig(string) (cliTypes.AuthConfig, error)
 	Pull(ctx context.Context, imageRef string, authConfig cliTypes.AuthConfig, quiet bool) error
+	Load(context.Context, io.Reader, bool) error
 	Tag(context.Context, string, string) error
 	Registry() string
 	Password() string
@@ -74,6 +76,19 @@ func (r realDockerCLI) Pull(ctx context.Context, imageRef string, authConfig cli
 	isTerminal := term.IsTerminal(int(fd))
 
 	return jsonmessage.DisplayJSONMessagesStream(responseBody, r.Out(), fd, isTerminal, nil)
+}
+
+func (r realDockerCLI) Load(ctx context.Context, input io.Reader, quiet bool) error {
+	response, err := r.Client().ImageLoad(ctx, input, client.ImageLoadWithQuiet(quiet))
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	output := io.Writer(r.Out())
+	if quiet {
+		output = io.Discard
+	}
+	return jsonmessage.DisplayJSONMessagesStream(response.Body, output, os.Stdout.Fd(), false, nil)
 }
 
 func (r realDockerCLI) Tag(ctx context.Context, source, target string) error {

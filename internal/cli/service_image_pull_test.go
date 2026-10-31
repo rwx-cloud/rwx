@@ -1,8 +1,11 @@
 package cli_test
 
 import (
+	"archive/tar"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -13,6 +16,76 @@ import (
 )
 
 func TestService_ImagePull(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		wantPull bool
+	}{
+		{"older Cloud without configuration endpoint", api.ErrNotFound, true},
+		{"configuration permission denied", fmt.Errorf("forbidden"), false},
+		{"configuration retention expired", fmt.Errorf("retention expired"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := setupTest(t)
+			s.mockAPI.MockWhoami = func() (*api.WhoamiResult, error) { return &api.WhoamiResult{OrganizationSlug: "org"}, nil }
+			s.mockAPI.MockImagePullConfiguration = func(context.Context, string) (*api.ImageConfiguration, error) { return nil, tc.err }
+			pulled := false
+			s.mockDocker.PullFunc = func(context.Context, string, types.AuthConfig, bool) error { pulled = true; return nil }
+			_, err := s.service.ImagePull(cli.ImagePullConfig{TaskID: "task", Timeout: time.Second})
+			if tc.wantPull {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tc.err)
+			}
+			require.Equal(t, tc.wantPull, pulled)
+		})
+	}
+
+	t.Run("loads manifest-only whiteouts locally and applies tags", func(t *testing.T) {
+		s := setupTest(t)
+		s.mockDocker.RegistryValue = "cloud.rwx.com"
+		s.mockAPI.MockWhoami = func() (*api.WhoamiResult, error) { return &api.WhoamiResult{OrganizationSlug: "org"}, nil }
+		s.mockAPI.MockImagePullConfiguration = func(ctx context.Context, id string) (*api.ImageConfiguration, error) {
+			require.Equal(t, "task", id)
+			return &api.ImageConfiguration{Architecture: "amd64", OS: "linux", Layers: []api.ImageLayer{{ID: "whiteout", Kind: "whiteout", Entries: []api.WhiteoutEntry{{FullPath: "/gone", Type: 3}}}}}, nil
+		}
+		s.mockDocker.PullFunc = func(context.Context, string, types.AuthConfig, bool) error {
+			t.Fatal("must not use registry for manifest-only layers")
+			return nil
+		}
+		loaded := false
+		s.mockDocker.LoadFunc = func(ctx context.Context, input io.Reader, quiet bool) error {
+			require.True(t, quiet)
+			tr := tar.NewReader(input)
+			for {
+				h, err := tr.Next()
+				if err == io.EOF {
+					break
+				}
+				require.NoError(t, err)
+				if h.Name == "manifest.json" {
+					var manifest []struct{ RepoTags []string }
+					require.NoError(t, json.NewDecoder(tr).Decode(&manifest))
+					require.Equal(t, []string{"cloud.rwx.com/org:task"}, manifest[0].RepoTags)
+					loaded = true
+				}
+			}
+			return nil
+		}
+		s.mockDocker.TagFunc = func(ctx context.Context, source, target string) error {
+			require.Equal(t, "cloud.rwx.com/org:task", source)
+			require.Equal(t, "local:test", target)
+			return nil
+		}
+		result, err := s.service.ImagePull(cli.ImagePullConfig{TaskID: "task", Tags: []string{"local:test"}, Timeout: time.Second, OutputJSON: true})
+		require.NoError(t, err)
+		require.True(t, loaded)
+		require.Equal(t, []string{"local:test"}, result.Tags)
+		var output cli.ImagePullResult
+		require.NoError(t, json.Unmarshal([]byte(s.mockStdout.String()), &output))
+		require.Equal(t, result, &output)
+	})
+
 	t.Run("successful pull with no tags", func(t *testing.T) {
 		s := setupTest(t)
 		s.mockDocker.RegistryValue = "cloud.rwx.com"

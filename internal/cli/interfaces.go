@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"io"
 
 	"github.com/rwx-cloud/rwx/internal/api"
@@ -24,6 +25,7 @@ type APIClient interface {
 	ObtainAuthCode(api.ObtainAuthCodeConfig) (*api.ObtainAuthCodeResult, error)
 	AcquireToken(tokenUrl string) (*api.AcquireTokenResult, error)
 	Whoami() (*api.WhoamiResult, error)
+	ImagePullConfiguration(context.Context, string) (*api.ImageConfiguration, error)
 	CreateDocsToken() (*api.DocsTokenResult, error)
 	SetSecretsInVault(api.SetSecretsInVaultConfig) (*api.SetSecretsInVaultResult, error)
 	CreateVault(api.CreateVaultConfig) (*api.CreateVaultResult, error)

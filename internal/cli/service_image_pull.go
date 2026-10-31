@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	cliTypes "github.com/docker/cli/cli/config/types"
+	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
+	"github.com/rwx-cloud/rwx/internal/imagearchive"
 )
 
 type ImagePullConfig struct {
@@ -63,7 +66,24 @@ func (s Service) ImagePull(config ImagePullConfig) (pullResult *ImagePullResult,
 		ServerAddress: registry,
 	}
 
-	if err := s.DockerCLI.Pull(ctx, imageRef, authConfig, config.OutputJSON); err != nil {
+	imageConfig, err := s.APIClient.ImagePullConfiguration(ctx, config.TaskID)
+	if err != nil && !errors.Is(err, api.ErrNotFound) {
+		return nil, fmt.Errorf("failed to get image configuration: %w", err)
+	}
+	local := false
+	if imageConfig != nil {
+		for _, layer := range imageConfig.Layers {
+			if layer.Kind == "whiteout" && layer.SHA256 == "" {
+				local = true
+			}
+		}
+	}
+	if local {
+		err = s.loadTaskImage(ctx, imageConfig, imageRef, config.OutputJSON)
+	} else {
+		err = s.DockerCLI.Pull(ctx, imageRef, authConfig, config.OutputJSON)
+	}
+	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("timeout while pulling image after %s\n\nThe image may still be available at: %s", config.Timeout, imageRef)
 		}
@@ -99,4 +119,20 @@ func (s Service) ImagePull(config ImagePullConfig) (pullResult *ImagePullResult,
 	}
 
 	return result, nil
+}
+
+func (s Service) loadTaskImage(ctx context.Context, config *api.ImageConfiguration, imageRef string, quiet bool) error {
+	f, err := os.CreateTemp("", "rwx-image-*.tar")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	if err := imagearchive.Write(ctx, f, config, imageRef); err != nil {
+		return err
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return err
+	}
+	return s.DockerCLI.Load(ctx, f, quiet)
 }
