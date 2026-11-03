@@ -910,6 +910,50 @@ func TestService_DownloadAllArtifacts(t *testing.T) {
 		require.Contains(t, output, "Downloaded 2 artifact(s)")
 	})
 
+	t.Run("keeps artifacts with colliding directory names separate", func(t *testing.T) {
+		s := setupTest(t)
+		keys := []string{"report.", "report", "report-2"}
+		contents := map[string]string{
+			"report.":  "first",
+			"report":   "second",
+			"report-2": "third",
+		}
+		archives := make(map[string][]byte, len(keys))
+		for _, key := range keys {
+			archives[key] = createTestTar(t, map[string][]byte{"output.txt": []byte(contents[key])})
+		}
+
+		s.mockAPI.MockGetAllArtifactDownloadRequests = func(taskID string) ([]api.ArtifactDownloadRequestResult, error) {
+			require.Equal(t, "task-123", taskID)
+			requests := make([]api.ArtifactDownloadRequestResult, len(keys))
+			for i, key := range keys {
+				requests[i] = api.ArtifactDownloadRequestResult{Key: key, Kind: "directory"}
+			}
+			return requests, nil
+		}
+		s.mockAPI.MockDownloadArtifact = func(request api.ArtifactDownloadRequestResult) ([]byte, error) {
+			return archives[request.Key], nil
+		}
+
+		result, err := s.service.DownloadAllArtifacts(cli.DownloadAllArtifactsConfig{
+			TaskID:      "task-123",
+			Output:      s.tmp,
+			AutoExtract: true,
+		})
+		require.NoError(t, err)
+		require.Len(t, result.OutputFiles, len(keys))
+		require.NotEqual(t, result.OutputFiles[1], result.OutputFiles[2], "distinct artifact keys must not share an output path")
+
+		collectionDir := filepath.Join(s.tmp, "task-123-artifacts")
+		for i, name := range []string{"report", "report-3", "report-2"} {
+			path := filepath.Join(collectionDir, name, "output.txt")
+			require.Equal(t, path, result.OutputFiles[i])
+			actual, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, contents[keys[i]], string(actual))
+		}
+	})
+
 	t.Run("downloads directory artifact without auto-extract saves tar", func(t *testing.T) {
 		s := setupTest(t)
 
