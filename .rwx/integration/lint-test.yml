@@ -16,30 +16,24 @@ tasks:
       repository: https://github.com/rwx-cloud/rwx.git
       ref: ${{ init.ref }}
 
-  - key: tool-versions
+  - key: setup
     use: code
+    call: ${{ run.dir }}/packages/setup.yml
+
+  - key: lsp-build-def
+    use: [code, setup.lsp-code]
     run: |
-      while read -r tool version _; do
-        printf "%s" "$version" > "$RWX_VALUES/$tool"
-      done < .tool-versions
-      cp language-server-ref $RWX_VALUES
-    filter:
-      - .tool-versions
-      - language-server-ref
+      cp language-server/.rwx/build.yml "$RWX_ARTIFACTS/build-run-def"
+      cp language-server-ref "$RWX_VALUES"
 
-  - key: go-installation
-    call: golang/install 1.3.1
-    with:
-      go-version: ${{ tasks.tool-versions.values.golang }}
+  - key: lsp-build
+    call: ${{ tasks.lsp-build-def.artifacts.build-run-def }}
+    init:
+      ref: ${{ tasks.lsp-build-def.values.language-server-ref }}
 
-  - key: go
-    use: go-installation
-    run: echo "$(go env GOPATH)/bin" > "${RWX_ENV}/PATH"
-
-  - key: node
-    call: nodejs/install 1.2.1
-    with:
-      node-version: ${{ tasks.tool-versions.values.nodejs }}
+  - key: lsp-server
+    use: code
+    run: cp ${{ tasks.lsp-build.tasks.build.artifacts.bundle }} internal/lsp/bundle/server.js
 
   - key: min-supported-node
     call: nodejs/install 1.2.1
@@ -51,41 +45,14 @@ tasks:
     with:
       node-version: 17.0.0
 
-  - key: lsp-code
-    call: git/clone 2.3.1
-    with:
-      repository: https://github.com/rwx-cloud/language-server.git
-      ref: ${{ tasks.tool-versions.values.language-server-ref }}
-      path: language-server
-
-  - key: lsp-build-def
-    use: lsp-code
-    run: cp language-server/.rwx/build.yml $RWX_ARTIFACTS/build-run-def
-
-  - key: lsp-build
-    call: ${{ tasks.lsp-build-def.artifacts.build-run-def }}
-    init:
-      ref: ${{ tasks.tool-versions.values.language-server-ref }}
-
-  - key: lsp-server
-    use: code
-    run: cp ${{ tasks.lsp-build.tasks.build.artifacts.bundle }} internal/lsp/bundle/server.js
-
-  - key: go-deps
-    use: [go, code]
-    call: golang/mod-download 1.1.0
-    filter: [go.mod, go.sum]
-    with:
-      tool-cache: cli-go-deps
-
   - key: rwx-cli
-    use: [go-deps, lsp-server]
+    use: [setup.go-deps, lsp-server]
     run: |
       go build -a -ldflags "-w -s -X github.com/rwx-cloud/rwx/cmd/rwx/config.Version=testing-${{ init.ref }}" ./cmd/rwx
       sudo install ./rwx /usr/local/bin/rwx
 
   - key: test-lint-valid
-    use: [rwx-cli, node]
+    use: [rwx-cli, setup.node]
     run: |
       set -euo pipefail
 
@@ -108,7 +75,7 @@ tasks:
       fi
 
   - key: test-lint-invalid
-    use: [rwx-cli, node]
+    use: [rwx-cli, setup.node]
     run: |
       set -euo pipefail
 
@@ -125,7 +92,7 @@ tasks:
       fi
 
   - key: test-lint-fix-outdated-version
-    use: [rwx-cli, node]
+    use: [rwx-cli, setup.node]
     run: |
       set -euo pipefail
 
@@ -150,7 +117,7 @@ tasks:
       fi
 
   - key: test-lint-file-argument
-    use: [rwx-cli, node]
+    use: [rwx-cli, setup.node]
     run: |
       set -euo pipefail
 
@@ -244,6 +211,7 @@ tasks:
          .rwx/release.yml \
          .rwx/language-server-update.yml \
          "$tmpdir/.rwx/"
+      cp -r .rwx/packages "$tmpdir/.rwx/"
 
       set +e
       output=$(rwx lint -d "$tmpdir" --warnings-as-errors 2>&1)

@@ -42,21 +42,24 @@ tasks:
         echo "${{ init.version }}" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || (echo "Version number is not formatted as vX.X.X" && false)
       fi
 
-  - key: tool-versions
+  - key: setup
     use: code
-    run: |
-      while read -r tool version _; do
-        printf "%s" "$version" > "$RWX_VALUES/$tool"
-      done < .tool-versions
-      cp language-server-ref $RWX_VALUES
-    filter:
-      - .tool-versions
-      - language-server-ref
+    call: ${{ run.dir }}/packages/setup.yml
 
-  - key: go
-    call: golang/install 1.3.1
-    with:
-      go-version: ${{ tasks.tool-versions.values.golang }}
+  - key: lsp-build-def
+    use: [code, setup.lsp-code]
+    run: |
+      cp language-server/.rwx/build.yml "$RWX_ARTIFACTS/build-run-def"
+      cp language-server-ref "$RWX_VALUES"
+
+  - key: lsp-build
+    call: ${{ tasks.lsp-build-def.artifacts.build-run-def }}
+    init:
+      ref: ${{ tasks.lsp-build-def.values.language-server-ref }}
+
+  - key: lsp-server
+    use: code
+    run: cp ${{ tasks.lsp-build.tasks.build.artifacts.bundle }} internal/lsp/bundle/server.js
 
   - key: extract-version-details
     after: verify-inputs
@@ -89,13 +92,6 @@ tasks:
       repository: https://github.com/rwx-cloud/rwx.git
       ref: ${{ init.commit }}
       github-token: ${{ github-apps.rwx-cloud-bot.token }}
-
-  - key: go-deps
-    use: [go, code]
-    call: golang/mod-download 1.1.0
-    filter: [go.mod, go.sum]
-    with:
-      tool-cache: cli-go-deps
 
   - key: gh-cli
     run: |
@@ -138,26 +134,6 @@ tasks:
       GITHUB_TOKEN: ${{ github-apps.rwx-cloud-bot.token }}
       GH_TOKEN: ${{ github-apps.rwx-cloud-bot.token }}
 
-  - key: lsp-code
-    call: git/clone 2.4.0
-    with:
-      repository: https://github.com/rwx-cloud/language-server.git
-      ref: ${{ tasks.tool-versions.values.language-server-ref }}
-      path: language-server
-
-  - key: lsp-build-def
-    use: lsp-code
-    run: cp language-server/.rwx/build.yml $RWX_ARTIFACTS/build-run-def
-
-  - key: lsp-build
-    call: ${{ tasks.lsp-build-def.artifacts.build-run-def }}
-    init:
-      ref: ${{ tasks.tool-versions.values.language-server-ref }}
-
-  - key: lsp-server
-    use: code
-    run: cp ${{ tasks.lsp-build.tasks.build.artifacts.bundle }} internal/lsp/bundle/server.js
-
   - key: codesigning
     run: |
       curl -fsSLO https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.22.0/apple-codesign-0.22.0-x86_64-unknown-linux-musl.tar.gz
@@ -176,7 +152,7 @@ tasks:
       sudo apt-get clean
 
   - key: build-and-upload-binaries
-    use: [gh-cli, codesigning, zip, musl, code, go-deps, lsp-server]
+    use: [gh-cli, codesigning, zip, musl, code, setup.go-deps, lsp-server]
     after: [draft-full-version-release, extract-version-details]
     parallel:
       key: build-and-upload-${{ parallel.os }}-${{ parallel.arch }}-${{ parallel.link }}-binaries
