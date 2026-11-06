@@ -580,8 +580,6 @@ func (s Service) DownloadAllArtifacts(cfg DownloadAllArtifactsConfig) (_ *Downlo
 	return result, nil
 }
 
-// --- Artifact output and extraction helpers ---
-
 func artifactOutputDirs(collectionDir string, requests []api.ArtifactDownloadRequestResult) ([]string, error) {
 	dirs := make([]string, len(requests))
 	baseNames := make([]string, len(requests))
@@ -722,5 +720,3 @@ func extractSingleFileTar(data []byte, outputPath string, artifactKey string) ([
 
 	return []string{outputPath}, nil
 }
-
-// --- End artifact output and extraction helpers ---
