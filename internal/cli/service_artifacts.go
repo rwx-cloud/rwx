@@ -582,16 +582,35 @@ func (s Service) DownloadAllArtifacts(cfg DownloadAllArtifactsConfig) (_ *Downlo
 
 func artifactOutputDirs(collectionDir string, requests []api.ArtifactDownloadRequestResult) ([]string, error) {
 	dirs := make([]string, len(requests))
-	usedNames := map[string]int{}
-
+	baseNames := make([]string, len(requests))
+	reservedNames := make(map[string]struct{}, len(requests))
 	for i, req := range requests {
-		baseName := safePathComponent(req.Key, fmt.Sprintf("artifact-%d", i+1))
-		usedNames[baseName]++
+		baseNames[i] = safePathComponent(req.Key, fmt.Sprintf("artifact-%d", i+1))
+		reservedNames[baseNames[i]] = struct{}{}
+	}
 
+	usedNames := make(map[string]struct{}, len(requests))
+	nextSuffix := make(map[string]int)
+
+	for i, baseName := range baseNames {
 		name := baseName
-		if usedNames[baseName] > 1 {
-			name = fmt.Sprintf("%s-%d", baseName, usedNames[baseName])
+		if _, used := usedNames[name]; used {
+			suffix := nextSuffix[baseName]
+			if suffix == 0 {
+				suffix = 2
+			}
+			for {
+				name = fmt.Sprintf("%s-%d", baseName, suffix)
+				suffix++
+				_, reserved := reservedNames[name]
+				_, used := usedNames[name]
+				if !reserved && !used {
+					break
+				}
+			}
+			nextSuffix[baseName] = suffix
 		}
+		usedNames[name] = struct{}{}
 
 		dir := filepath.Join(collectionDir, name)
 		if err := prepareDirectoryOutput(dir); err != nil {
