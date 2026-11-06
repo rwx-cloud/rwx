@@ -16,81 +16,27 @@ tasks:
       ref: ${{ init.commit-sha }}
       github-token: ${{ github['rwx-cloud'].token }}
 
-  - key: tool-versions
+  - key: setup
     use: code
-    run: |
-      while read -r tool version _; do
-        printf "%s" "$version" > "$RWX_VALUES/$tool"
-      done < .tool-versions
-      cp language-server-ref $RWX_VALUES
-    filter:
-      - .tool-versions
-      - language-server-ref
-
-  - key: go-installation
-    call: golang/install 1.3.1
-    with:
-      go-version: ${{ tasks.tool-versions.values.golang }}
-
-  - key: go
-    use: go-installation
-    run: echo "$(go env GOPATH)/bin" > "${RWX_ENV}/PATH"
-
-  - key: golangci-lint
-    use: go
-    run: |
-      curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/main/install.sh | sudo sh -s -- -b /usr/local/bin v${{ tasks.tool-versions.values.golangci-lint }}
-
-  - key: go-deps
-    use: [go, code]
-    call: golang/mod-download 1.1.0
-    filter: [go.mod, go.sum]
-    with:
-      tool-cache: cli-go-deps
-
-  - key: gotestsum
-    use: go
-    run: go install gotest.tools/gotestsum@latest
-
-  - key: git
-    run: |
-      sudo apt-get update
-      sudo apt-get install git git-lfs
-      sudo apt-get clean
-
-      git config --global user.name "Testing"
-      git config --global user.email "git@example.com"
-      git config --global init.defaultBranch main
-
-      git lfs install --skip-repo
-
-  - key: jj
-    call: jj/install 1.0.1
-    with:
-      version: ${{ tasks.tool-versions.values.jj }}
-
-  - key: lsp-code
-    call: git/clone 2.4.0
-    with:
-      repository: https://github.com/rwx-cloud/language-server.git
-      ref: ${{ tasks.tool-versions.values.language-server-ref }}
-      path: language-server
+    call: ${{ run.dir }}/packages/setup.yml
 
   - key: lsp-build-def
-    use: lsp-code
-    run: cp language-server/.rwx/build.yml $RWX_ARTIFACTS/build-run-def
+    use: [code, setup.lsp-code]
+    run: |
+      cp language-server/.rwx/build.yml "$RWX_ARTIFACTS/build-run-def"
+      cp language-server-ref "$RWX_VALUES"
 
   - key: lsp-build
     call: ${{ tasks.lsp-build-def.artifacts.build-run-def }}
     init:
-      ref: ${{ tasks.tool-versions.values.language-server-ref }}
+      ref: ${{ tasks.lsp-build-def.values.language-server-ref }}
 
   - key: lsp-server
     use: code
     run: cp ${{ tasks.lsp-build.tasks.build.artifacts.bundle }} internal/lsp/bundle/server.js
 
   - key: unit-tests
-    use: [go-deps, rwx-cli, gotestsum, git, jj]
+    use: [rwx-cli, setup.gotestsum, setup.git, setup.jj]
     run: |
       gotestsum \
         --jsonfile tmp/go-test.json \
@@ -103,16 +49,16 @@ tasks:
         - path: tmp/go-test.json
 
   - key: rwx-cli
-    use: [go-deps, lsp-server]
+    use: [setup.go-deps, lsp-server]
     run: |
       go build -a -ldflags "-w -s -X github.com/rwx-cloud/rwx/cmd/rwx/config.Version=testing-${{ init.commit-sha }}" ./cmd/rwx
 
   - key: lint
-    use: [golangci-lint, go-deps, lsp-server]
+    use: [setup.golangci-lint, setup.go-deps, lsp-server]
     run: golangci-lint run ./...
 
   - key: go-mod-tidy
-    use: go-deps
+    use: setup.go-deps
     run: |
       before=$(git diff)
       go mod tidy
@@ -123,7 +69,7 @@ tasks:
       fi
 
   - key: go-fmt
-    use: go-deps
+    use: setup.go-deps
     run: |
       before=$(git diff)
       go fmt ./...

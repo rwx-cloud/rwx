@@ -15,45 +15,23 @@ tasks:
       repository: https://github.com/rwx-cloud/rwx.git
       ref: ${{ init.ref }}
 
-  - key: tool-versions
+  - key: setup
     use: code
-    run: |
-      while read -r tool version _; do
-        printf "%s" "$version" > "$RWX_VALUES/$tool"
-      done < .tool-versions
-      cp language-server-ref $RWX_VALUES
-    filter:
-      - .tool-versions
-      - language-server-ref
-
-  - key: lsp-code
-    call: git/clone 2.4.0
-    with:
-      repository: https://github.com/rwx-cloud/language-server.git
-      ref: ${{ tasks.tool-versions.values.language-server-ref }}
-      path: language-server
+    call: ${{ run.dir }}/packages/setup.yml
 
   - key: lsp-build-def
-    use: lsp-code
-    run: cp language-server/.rwx/build.yml $RWX_ARTIFACTS/build-run-def
+    use: [code, setup.lsp-code]
+    run: |
+      cp language-server/.rwx/build.yml "$RWX_ARTIFACTS/build-run-def"
+      cp language-server-ref "$RWX_VALUES"
 
   - key: lsp-build
     call: ${{ tasks.lsp-build-def.artifacts.build-run-def }}
     init:
-      ref: ${{ tasks.tool-versions.values.language-server-ref }}
-
-  - key: go
-    call: golang/install 1.3.1
-    with:
-      go-version: ${{ tasks.tool-versions.values.golang }}
-
-  - key: go-deps
-    use: [go, code]
-    call: golang/mod-download 1.1.0
-    filter: [go.mod, go.sum]
+      ref: ${{ tasks.lsp-build-def.values.language-server-ref }}
 
   - key: build
-    use: [go-deps]
+    use: setup.go-deps
     run: |
       cp ${{ tasks.lsp-build.tasks.build.artifacts.bundle }} internal/lsp/bundle/server.js
       go build -a -ldflags "-w -s -X github.com/rwx-cloud/rwx/cmd/rwx/config.Version=${{ init.ref }}" ./cmd/rwx
