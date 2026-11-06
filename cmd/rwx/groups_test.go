@@ -16,7 +16,7 @@ import (
 
 func TestGroupsCommands(t *testing.T) {
 	require.Same(t, groupsCmd, findSubcommand(rootCmd, "groups"))
-	for _, name := range []string{"list", "create", "permissions"} {
+	for _, name := range []string{"list", "create", "relationships", "permissions"} {
 		require.NotNil(t, findSubcommand(groupsCmd, name))
 	}
 	for _, name := range []string{"show", "update", "delete"} {
