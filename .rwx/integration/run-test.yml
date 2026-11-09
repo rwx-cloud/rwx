@@ -9,7 +9,7 @@ base:
 
 tasks:
   - key: rwx-cli-code
-    call: git/clone 2.3.1
+    call: git/clone 2.4.0
     with:
       repository: https://github.com/rwx-cloud/rwx.git
       ref: ${{ init.cli }}
