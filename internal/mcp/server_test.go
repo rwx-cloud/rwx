@@ -84,6 +84,19 @@ func TestNewServer(t *testing.T) {
 	})
 }
 
+func TestServer_ListTools(t *testing.T) {
+	setup := setupMCPTest(t, &mocks.API{})
+	defer setup.cleanup()
+
+	result, err := setup.session.ListTools(setup.ctx, &gomcp.ListToolsParams{})
+	require.NoError(t, err)
+	require.Len(t, result.Tools, 1)
+	require.Equal(t, "get_run_test_failures", result.Tools[0].Name)
+	require.Contains(t, result.Tools[0].Description, "The local RWX MCP server (rwx mcp serve) is deprecated and continues to work during migration.")
+	require.Contains(t, result.Tools[0].Description, "https://www.rwx.com/docs/mcp")
+	require.Contains(t, result.Tools[0].Description, "Get the list of failed tests for the given run(s).")
+}
+
 func TestServer_GetRunTestFailures(t *testing.T) {
 	t.Run("successfully retrieves test failures", func(t *testing.T) {
 		expectedText := "Failed tests:\n- spec/models/user_spec.rb:42\n- spec/controllers/home_controller_spec.rb:15"
