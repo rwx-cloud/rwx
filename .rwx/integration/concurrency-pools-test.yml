@@ -9,7 +9,7 @@ base:
 
 tasks:
   - key: code
-    call: git/clone 2.4.0
+    call: git/clone 2.4.1
     with:
       repository: https://github.com/rwx-cloud/rwx.git
       ref: ${{ init.ref }}
