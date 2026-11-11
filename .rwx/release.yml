@@ -85,7 +85,7 @@ tasks:
       printf "$aliasedVersion" > "$RWX_VALUES/aliased-version"
 
   - key: code
-    call: git/clone 2.4.0
+    call: git/clone 2.4.1
     after: verify-inputs
     with:
       preserve-git-dir: true
