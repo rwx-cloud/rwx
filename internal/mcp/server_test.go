@@ -92,7 +92,7 @@ func TestServer_ListTools(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Tools, 1)
 	require.Equal(t, "get_run_test_failures", result.Tools[0].Name)
-	require.Contains(t, result.Tools[0].Description, "The local RWX MCP server (rwx mcp serve) is deprecated and continues to work during migration.")
+	require.Contains(t, result.Tools[0].Description, "The local RWX MCP server (rwx mcp serve) is deprecated. Hosted MCP setup: https://www.rwx.com/docs/mcp.")
 	require.Contains(t, result.Tools[0].Description, "https://www.rwx.com/docs/mcp")
 	require.Contains(t, result.Tools[0].Description, "Get the list of failed tests for the given run(s).")
 }
