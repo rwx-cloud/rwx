@@ -64,7 +64,7 @@ tasks:
       version: ${{ tasks.tool-versions.values.jj }}
 
   - key: lsp-code
-    call: git/clone 2.4.0
+    call: git/clone 2.4.1
     with:
       repository: https://github.com/rwx-cloud/language-server.git
       ref: ${{ tasks.tool-versions.values.language-server-ref }}
