@@ -90,6 +90,9 @@ type APIClient interface {
 	CreateGroup(api.CreateGroupConfig) (*api.GroupResult, error)
 	UpdateGroup(string, api.UpdateGroupConfig) (*api.GroupResult, error)
 	DeleteGroup(string) error
+	ShowGroupRelationship(api.GroupRelationship) (*api.GroupRelationshipResult, error)
+	AddGroupRelationship(api.GroupRelationship) (*api.GroupRelationshipResult, error)
+	RemoveGroupRelationship(api.GroupRelationship) error
 	ListConcurrencyPools(api.ListConcurrencyPoolsConfig) (*api.ListConcurrencyPoolsResult, error)
 	ShowConcurrencyPool(string) (*api.ConcurrencyPool, error)
 	ListConcurrencyPoolQueue(api.ListConcurrencyPoolQueueConfig) (*api.ListConcurrencyPoolQueueResult, error)
