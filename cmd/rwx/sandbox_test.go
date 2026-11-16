@@ -234,6 +234,94 @@ func TestSandboxBackgroundRejectsInvalidArguments(t *testing.T) {
 	}
 }
 
+func TestSandboxTransportRequiresExperimentalOptIn(t *testing.T) {
+	originalTransport := sandboxTransport
+	originalToken := AccessToken
+	originalService := service
+	originalBackend := accessTokenBackend
+
+	t.Cleanup(func() {
+		sandboxTransport = originalTransport
+		AccessToken = originalToken
+		service = originalService
+		accessTokenBackend = originalBackend
+	})
+
+	t.Setenv("HOME", t.TempDir())
+	AccessToken = "test-token"
+
+	t.Run("WSS requires opt-in", func(t *testing.T) {
+		t.Setenv("RWX_EXPERIMENTAL", "")
+		sandboxTransport = "wss"
+
+		require.EqualError(t, rootCmd.PersistentPreRunE(sandboxExecCmd, nil), "--transport wss is experimental; set RWX_EXPERIMENTAL=true to use it")
+	})
+
+	t.Run("false does not enable WSS", func(t *testing.T) {
+		t.Setenv("RWX_EXPERIMENTAL", "false")
+		sandboxTransport = "wss"
+
+		require.EqualError(t, rootCmd.PersistentPreRunE(sandboxExecCmd, nil), "--transport wss is experimental; set RWX_EXPERIMENTAL=true to use it")
+	})
+
+	t.Run("SSH does not require opt-in", func(t *testing.T) {
+		t.Setenv("RWX_EXPERIMENTAL", "")
+		sandboxTransport = "ssh"
+
+		require.NoError(t, rootCmd.PersistentPreRunE(sandboxExecCmd, nil))
+		require.Equal(t, "ssh", service.SandboxTransport)
+	})
+
+	t.Run("true enables WSS", func(t *testing.T) {
+		t.Setenv("RWX_EXPERIMENTAL", "true")
+		sandboxTransport = "wss"
+
+		require.NoError(t, rootCmd.PersistentPreRunE(sandboxExecCmd, nil))
+		require.Equal(t, "wss", service.SandboxTransport)
+	})
+
+	checkLifecycleTransport := func(t *testing.T, command *cobra.Command) {
+		t.Helper()
+		require.NoError(t, command.ParseFlags([]string{"--transport", "wss"}))
+		flag := command.Flags().Lookup("transport")
+		t.Cleanup(func() { flag.Changed = false })
+
+		require.True(t, flag.Hidden)
+		require.Equal(t, "ssh", flag.DefValue)
+
+		t.Setenv("RWX_EXPERIMENTAL", "")
+		require.ErrorContains(t, rootCmd.PersistentPreRunE(command, nil), "set RWX_EXPERIMENTAL=true")
+
+		t.Setenv("RWX_EXPERIMENTAL", "true")
+		require.NoError(t, rootCmd.PersistentPreRunE(command, nil))
+		require.Equal(t, "wss", service.SandboxTransport)
+	}
+
+	t.Run("stop accepts WSS with opt-in", func(t *testing.T) {
+		checkLifecycleTransport(t, sandboxStopCmd)
+	})
+
+	t.Run("reset accepts WSS with opt-in", func(t *testing.T) {
+		checkLifecycleTransport(t, sandboxResetCmd)
+	})
+
+	t.Run("start accepts WSS with opt-in", func(t *testing.T) {
+		checkLifecycleTransport(t, sandboxStartCmd)
+	})
+}
+
+func TestSandboxWSSProxyRequiresExperimentalOptIn(t *testing.T) {
+	command, _, err := rootCmd.Find([]string{"sandbox-wss-proxy"})
+	require.NoError(t, err)
+	require.Equal(t, "sandbox-wss-proxy", command.Name())
+
+	t.Setenv("RWX_EXPERIMENTAL", "")
+	require.ErrorContains(t, command.PersistentPreRunE(command, nil), "set RWX_EXPERIMENTAL=true")
+
+	t.Setenv("RWX_EXPERIMENTAL", "true")
+	require.NoError(t, command.PersistentPreRunE(command, nil))
+}
+
 func TestRequireExperimentalSandboxAccess(t *testing.T) {
 	for _, value := range []string{"", "false", "TRUE", "1"} {
 		t.Run("RWX_EXPERIMENTAL="+value, func(t *testing.T) {

@@ -2972,7 +2972,29 @@ func (s Service) printSandboxRunPrompt(runID string) {
 }
 
 func (s Service) sandboxTransport(connInfo *api.SandboxConnectionInfo) (rwxssh.Transport, error) {
-	return rwxssh.TCPTransport{Address: connInfo.Address}, nil
+	if s.SandboxTransport != "wss" {
+		return rwxssh.TCPTransport{Address: connInfo.Address}, nil
+	}
+
+	if connInfo.WebSocketURL == "" {
+		return nil, fmt.Errorf("WSS transport is not available for this sandbox")
+	}
+	if !strings.HasPrefix(connInfo.WebSocketURL, "wss://") {
+		return nil, fmt.Errorf("sandbox WebSocket endpoint must use wss://")
+	}
+
+	accessToken, err := s.APIClient.AccessToken()
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to retrieve access token for WSS transport")
+	}
+	if accessToken == "" {
+		return nil, fmt.Errorf("RWX access token required for WSS transport")
+	}
+
+	return rwxssh.WebSocketTransport{
+		Endpoint:    connInfo.WebSocketURL,
+		AccessToken: accessToken,
+	}, nil
 }
 
 func (s Service) connectSSH(connInfo *api.SandboxConnectionInfo) error {
