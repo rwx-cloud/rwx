@@ -26,6 +26,7 @@ func TestTunnelManagerOpenRefreshesAndReusesLocalPort(t *testing.T) {
 		Key:            "web",
 		RunID:          "run-1",
 		Address:        "192.0.2.10:22",
+		Transport:      TCPTransport{},
 		PrivateUserKey: "private key",
 		PublicHostKey:  "ssh-ed25519 public-key",
 		TargetPort:     3000,
@@ -78,10 +79,16 @@ func TestTunnelManagerDoesNotReuseLocalPortAcrossRuns(t *testing.T) {
 	require.NoError(t, os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700))
 	manager := tunnelManager{binary: binary}
 	config := TunnelConfig{
-		Key: "web", RunID: "run-1", Address: "192.0.2.10:22",
-		PrivateUserKey: "private key", PublicHostKey: "ssh-ed25519 public-key",
-		TargetPort: 3000, StateDirectory: filepath.Join(tmp, "state"),
+		Key:            "web",
+		RunID:          "run-1",
+		Address:        "192.0.2.10:22",
+		Transport:      TCPTransport{},
+		PrivateUserKey: "private key",
+		PublicHostKey:  "ssh-ed25519 public-key",
+		TargetPort:     3000,
+		StateDirectory: filepath.Join(tmp, "state"),
 	}
+
 	first, err := manager.Open(config)
 	require.NoError(t, err)
 	require.Equal(t, "http", first.Scheme)
@@ -104,10 +111,16 @@ func TestTunnelManagerCloseMatchesRun(t *testing.T) {
 	require.NoError(t, os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700))
 	manager := tunnelManager{binary: binary}
 	config := TunnelConfig{
-		Key: "web", RunID: "run-1", Address: "192.0.2.10:22",
-		PrivateUserKey: "private key", PublicHostKey: "ssh-ed25519 public-key",
-		TargetPort: 3000, StateDirectory: filepath.Join(tmp, "state"),
+		Key:            "web",
+		RunID:          "run-1",
+		Address:        "192.0.2.10:22",
+		Transport:      TCPTransport{},
+		PrivateUserKey: "private key",
+		PublicHostKey:  "ssh-ed25519 public-key",
+		TargetPort:     3000,
+		StateDirectory: filepath.Join(tmp, "state"),
 	}
+
 	_, err := manager.Open(config)
 	require.NoError(t, err)
 
@@ -152,10 +165,16 @@ func openTunnelWithFailingShutdown(t *testing.T) (tunnelManager, TunnelConfig, s
 	require.NoError(t, os.WriteFile(binary, []byte(script), 0o700))
 	manager := tunnelManager{binary: binary}
 	config := TunnelConfig{
-		Key: "web", RunID: "run-1", Address: "192.0.2.10:22",
-		PrivateUserKey: "private key", PublicHostKey: "ssh-ed25519 public-key",
-		TargetPort: 3000, StateDirectory: filepath.Join(tmp, "state"),
+		Key:            "web",
+		RunID:          "run-1",
+		Address:        "192.0.2.10:22",
+		Transport:      TCPTransport{},
+		PrivateUserKey: "private key",
+		PublicHostKey:  "ssh-ed25519 public-key",
+		TargetPort:     3000,
+		StateDirectory: filepath.Join(tmp, "state"),
 	}
+
 	_, err := manager.Open(config)
 	require.NoError(t, err)
 

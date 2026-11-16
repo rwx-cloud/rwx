@@ -713,10 +713,22 @@ func (s Service) TunnelSandbox(cfg TunnelSandboxConfig) (*SandboxTunnelResult, e
 	if err != nil {
 		return nil, err
 	}
+	transport, err := s.sandboxTransport(&sandbox.connectionInfo)
+	if err != nil {
+		return nil, err
+	}
+
 	tunnel, err := s.SSHTunnelManager.Open(rwxssh.TunnelConfig{
-		Key: cfg.Key, RunID: sandbox.runID, Address: sandbox.connectionInfo.Address,
-		PrivateUserKey: sandbox.connectionInfo.PrivateUserKey, PublicHostKey: sandbox.connectionInfo.PublicHostKey,
-		LocalPort: cfg.LocalPort, TargetPort: cfg.TargetPort, Scheme: cfg.Scheme, StateDirectory: stateDirectory,
+		Key:            cfg.Key,
+		RunID:          sandbox.runID,
+		Address:        sandbox.connectionInfo.Address,
+		Transport:      transport,
+		PrivateUserKey: sandbox.connectionInfo.PrivateUserKey,
+		PublicHostKey:  sandbox.connectionInfo.PublicHostKey,
+		LocalPort:      cfg.LocalPort,
+		TargetPort:     cfg.TargetPort,
+		Scheme:         cfg.Scheme,
+		StateDirectory: stateDirectory,
 	})
 	if err != nil {
 		return nil, err
@@ -1009,10 +1021,22 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 			return nil, errors.Wrap(err, "failed to close local tunnel")
 		}
 	} else {
+		transport, err := s.sandboxTransport(&sandbox.connectionInfo)
+		if err != nil {
+			return nil, err
+		}
+
 		tunnel, err := s.SSHTunnelManager.Open(rwxssh.TunnelConfig{
-			Key: process.Key, RunID: sandbox.runID, Address: sandbox.connectionInfo.Address,
-			PrivateUserKey: sandbox.connectionInfo.PrivateUserKey, PublicHostKey: sandbox.connectionInfo.PublicHostKey,
-			LocalPort: localPort, TargetPort: process.TargetPort, Scheme: scheme, StateDirectory: stateDirectory,
+			Key:            process.Key,
+			RunID:          sandbox.runID,
+			Address:        sandbox.connectionInfo.Address,
+			Transport:      transport,
+			PrivateUserKey: sandbox.connectionInfo.PrivateUserKey,
+			PublicHostKey:  sandbox.connectionInfo.PublicHostKey,
+			LocalPort:      localPort,
+			TargetPort:     process.TargetPort,
+			Scheme:         scheme,
+			StateDirectory: stateDirectory,
 		})
 		if err != nil {
 			return nil, err
@@ -2336,7 +2360,12 @@ func (s Service) pushLocalHeadToSandbox(localHead string, connInfo *api.SandboxC
 		return fmt.Errorf("sandbox connection info is required to push local commits")
 	}
 
-	opts, cleanup, err := sandboxGitPushOptions(localHead, connInfo)
+	transport, err := s.sandboxTransport(connInfo)
+	if err != nil {
+		return err
+	}
+
+	opts, cleanup, err := sandboxGitPushOptions(localHead, connInfo, transport)
 	defer cleanup()
 	if err != nil {
 		return err
@@ -2477,7 +2506,7 @@ func sandboxWorktreeRootCommand(script string) string {
 	return "/bin/sh -c " + quoteShellArg("repo_root=$(git rev-parse --show-toplevel) || exit 1; cd \"$repo_root\" || exit 1; "+script)
 }
 
-func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo) (vcs.PushRefOptions, func(), error) {
+func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo, transport rwxssh.Transport) (vcs.PushRefOptions, func(), error) {
 	paths := []string{}
 	cleanup := func() {
 		for _, path := range paths {
@@ -2519,7 +2548,7 @@ func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo
 		return vcs.PushRefOptions{}, cleanup, err
 	}
 
-	sshCommand := shellescape.QuoteCommand([]string{
+	sshArgs := []string{
 		"ssh",
 		"-F", "/dev/null",
 		"-i", keyPath,
@@ -2530,12 +2559,19 @@ func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo
 		"-o", "HostKeyAlias=" + alias,
 		"-o", "HostName=" + host,
 		"-p", port,
-	})
+	}
+	transportArgs, transportEnv, err := transport.OpenSSHOptions()
+	if err != nil {
+		return vcs.PushRefOptions{}, cleanup, err
+	}
+
+	sshArgs = append(sshArgs, transportArgs...)
+	sshCommand := shellescape.QuoteCommand(sshArgs)
 
 	return vcs.PushRefOptions{
 		Remote:  fmt.Sprintf("%s@%s:.", rwxCLISSHUser, alias),
 		Refspec: fmt.Sprintf("+%s:%s", localHead, sandboxPushRef),
-		Env:     []string{"GIT_SSH_COMMAND=" + sshCommand, "GIT_LFS_SKIP_PUSH=1"},
+		Env:     append([]string{"GIT_SSH_COMMAND=" + sshCommand, "GIT_LFS_SKIP_PUSH=1"}, transportEnv...),
 	}, cleanup, nil
 }
 
@@ -2935,7 +2971,16 @@ func (s Service) printSandboxRunPrompt(runID string) {
 	}
 }
 
+func (s Service) sandboxTransport(connInfo *api.SandboxConnectionInfo) (rwxssh.Transport, error) {
+	return rwxssh.TCPTransport{Address: connInfo.Address}, nil
+}
+
 func (s Service) connectSSH(connInfo *api.SandboxConnectionInfo) error {
+	transport, err := s.sandboxTransport(connInfo)
+	if err != nil {
+		return err
+	}
+
 	privateUserKey, err := ssh.ParsePrivateKey([]byte(connInfo.PrivateUserKey))
 	if err != nil {
 		return errors.Wrap(err, "unable to parse key material retrieved from Cloud API")
@@ -2958,7 +3003,7 @@ func (s Service) connectSSH(connInfo *api.SandboxConnectionInfo) error {
 	}
 
 	connectStart := time.Now()
-	if err = s.SSHClient.Connect(connInfo.Address, sshConfig); err != nil {
+	if err = s.SSHClient.Connect(connInfo.Address, sshConfig, transport); err != nil {
 		s.recordTelemetry("ssh.connect", map[string]any{
 			"duration_ms": time.Since(connectStart).Milliseconds(),
 			"success":     false,

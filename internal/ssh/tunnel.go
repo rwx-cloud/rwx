@@ -18,6 +18,7 @@ type TunnelConfig struct {
 	Key               string
 	RunID             string
 	Address           string
+	Transport         Transport
 	PrivateUserKey    string
 	PublicHostKey     string
 	LocalPort         int
@@ -192,9 +193,18 @@ func (m tunnelManager) Open(cfg TunnelConfig) (TunnelResult, error) {
 		"-o", "HostName=" + host,
 		"-p", port,
 		"-L", forward,
-		"rwx-cli@" + alias,
 	}
-	if output, err := exec.Command(m.binary, args...).CombinedOutput(); err != nil {
+	transportArgs, transportEnv, err := cfg.Transport.OpenSSHOptions()
+	if err != nil {
+		return TunnelResult{}, err
+	}
+
+	args = append(args, transportArgs...)
+	args = append(args, "rwx-cli@"+alias)
+
+	command := exec.Command(m.binary, args...)
+	command.Env = append(os.Environ(), transportEnv...)
+	if output, err := command.CombinedOutput(); err != nil {
 		message := strings.TrimSpace(string(output))
 		if message != "" {
 			return TunnelResult{}, fmt.Errorf("unable to open SSH background process tunnel: %s", message)
