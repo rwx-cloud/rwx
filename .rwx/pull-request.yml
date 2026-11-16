@@ -37,11 +37,6 @@ tasks:
       commit-sha: ${{ init.commit-sha }}
       definition: .rwx/integration-sandbox.yml
 
-  - key: integration-sandbox-wss
-    call: ${{ run.dir }}/integration-sandbox-wss.yml
-    init:
-      commit-sha: ${{ init.commit-sha }}
-
   - key: integration-dispatch
     call: ${{ run.dir }}/integration/dispatch-test.yml
     init:

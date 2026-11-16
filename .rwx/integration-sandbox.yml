@@ -44,7 +44,7 @@ tasks:
     run: |
       for script in test/integration/sandbox-*.sh; do
         key=$(basename "$script" .sh)
-        if [ "$key" = "sandbox-helpers" ] || [ "$key" = "sandbox-wss" ]; then
+        if [ "$key" = "sandbox-helpers" ]; then
           continue
         fi
         printf '%s\n' \
