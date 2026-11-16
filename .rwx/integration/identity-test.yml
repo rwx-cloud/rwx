@@ -1,0 +1,159 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.2.0
+
+tasks:
+  - key: code
+    call: git/clone 2.2.0
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml $RWX_ARTIFACTS/build-yml
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: test-groups
+    use: rwx-cli
+    cache: false
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
+    run: |
+      set -euo pipefail
+      rwx whoami --json | jq -e '.organization_slug == "rwx-integration-testing" and .token_kind == "service_account" and .service_account_name == "rwx-cli-ci"' >/dev/null
+      name="cli-group-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      group=""
+      cleanup() {
+        status=$?
+        trap - EXIT
+        if [ -n "$group" ]; then
+          rwx groups delete "$group" --yes >/dev/null || status=1
+        fi
+        exit "$status"
+      }
+      trap cleanup EXIT
+
+      created=$(rwx groups create --name "$name" --description original --json)
+      group="$name"
+      group=$(echo "$created" | jq -er '.ID | select(length > 0)')
+      echo "$created" | jq -e --arg name "$name" '.Name == $name and .Description == "original"' >/dev/null
+      rwx groups show "$name" --format json | jq -e --arg id "$group" '.ID == $id' >/dev/null
+
+      cursor=""
+      found=false
+      while :; do
+        page=$(rwx groups list --limit 1 --cursor "$cursor" --json)
+        echo "$page" | jq -e '.Pagination.Limit == 1 and (.Groups | type == "array")' >/dev/null
+        if echo "$page" | jq -e --arg id "$group" 'any(.Groups[]; .ID == $id)' >/dev/null; then
+          found=true
+        fi
+        cursor=$(echo "$page" | jq -r '.Pagination.NextCursor // empty')
+        [ -n "$cursor" ] || break
+      done
+      [ "$found" = true ]
+      rwx groups update "$group" --name "$name-renamed" --json | jq -e '.Description == "original"' >/dev/null
+      rwx groups update "$name-renamed" --description "" --json | jq -e --arg name "$name-renamed" '.Name == $name and (.Description == "" or .Description == null)' >/dev/null
+      if rwx groups delete "$group" </dev/null; then
+        echo "Deletion without confirmation succeeded" >&2
+        exit 1
+      fi
+      rwx groups show "$group" --json | jq -e --arg id "$group" '.ID == $id' >/dev/null
+      rwx groups delete "$group" --yes --json | jq -e --arg id "$group" '.ID == $id' >/dev/null
+      deleted="$group"
+      group=""
+      if rwx groups show "$deleted" --json; then
+        echo "Deleted group is still visible" >&2
+        exit 1
+      fi
+
+  - key: test-service-accounts
+    use: rwx-cli
+    cache: false
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
+    run: |
+      set -euo pipefail
+      rwx whoami --json | jq -e '.organization_slug == "rwx-integration-testing" and .token_kind == "service_account" and .service_account_name == "rwx-cli-ci"' >/dev/null
+      name="cli-sa-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      account=""
+      created=false
+      cleanup() {
+        status=$?
+        trap - EXIT
+        if [ "$created" = true ]; then
+          if [ -n "$account" ]; then
+            rwx service-accounts deactivate "$account" --yes >/dev/null || status=1
+          else
+            rwx service-accounts deactivate --display-name "$name" --yes >/dev/null || status=1
+          fi
+        fi
+        exit "$status"
+      }
+      trap cleanup EXIT
+
+      output=$(rwx service-accounts create --display-name "$name" --description original --json)
+      created=true
+      account=$(echo "$output" | jq -er '.ID | select(length > 0)')
+      immutable_name=$(echo "$output" | jq -er '.Name | select(length > 0)')
+      echo "$output" | jq -e --arg name "$name" '.DisplayName == $name and .Description == "original" and (.IdentityID | length > 0) and (has("Token") | not)' >/dev/null
+      rwx service-accounts show "$immutable_name" --format json | jq -e --arg id "$account" '.ID == $id' >/dev/null
+      rwx service-accounts show --display-name "$name" --json | jq -e --arg id "$account" '.ID == $id' >/dev/null
+
+      cursor=""
+      found=false
+      while :; do
+        page=$(rwx service-accounts list --limit 1 --cursor "$cursor" --json)
+        echo "$page" | jq -e '.Pagination.Limit == 1 and (.ServiceAccounts | type == "array")' >/dev/null
+        if echo "$page" | jq -e --arg id "$account" 'any(.ServiceAccounts[]; .ID == $id)' >/dev/null; then
+          found=true
+        fi
+        cursor=$(echo "$page" | jq -r '.Pagination.NextCursor // empty')
+        [ -n "$cursor" ] || break
+      done
+      [ "$found" = true ]
+      rwx service-accounts update "$account" --new-display-name "$name-renamed" --json | jq -e --arg name "$immutable_name" '.Name == $name and .Description == "original"' >/dev/null
+      rwx service-accounts update --display-name "$name-renamed" --description "" --json | jq -e --arg name "$name-renamed" '.DisplayName == $name and (.Description == "" or .Description == null)' >/dev/null
+      if rwx service-accounts deactivate "$account" </dev/null; then
+        echo "Deactivation without confirmation succeeded" >&2
+        exit 1
+      fi
+      rwx service-accounts show "$account" --json | jq -e --arg id "$account" '.ID == $id' >/dev/null
+      rwx service-accounts deactivate "$account" --yes --json | jq -e --arg id "$account" '.ID == $id' >/dev/null
+      created=false
+      if rwx service-accounts show "$account" --json; then
+        echo "Deactivated account is still visible" >&2
+        exit 1
+      fi
+
+  - key: test-permission-catalog
+    use: rwx-cli
+    cache: false
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}
+    run: |
+      set -euo pipefail
+      rwx whoami --json | jq -e '.organization_slug == "rwx-integration-testing" and .token_kind == "service_account" and .service_account_name == "rwx-cli-ci"' >/dev/null
+      rwx permissions list --json | jq -e '
+        (.UnremovablePermissions | type == "array") and
+        any(.Permissions[]; .Key == "run:read") and
+        any(.Permissions[]; .Key == "vault:manage" and .SupportsResourceScope) and
+        all(.Permissions[];
+          (.Grantable.Unscoped | type == "boolean") and
+          (.Grantable.ResourceIDs | type == "array"))
+      ' >/dev/null
+      rwx permissions list | grep -F 'CALLER CAN GRANT UNSCOPED'
