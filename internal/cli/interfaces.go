@@ -10,6 +10,7 @@ import (
 )
 
 type APIClient interface {
+	AccessToken() (string, error)
 	GetSkillContent() (string, error)
 	GetSkillSnapshot() (*api.SkillSnapshot, error)
 	GetSkillLatestVersion() (string, error)
