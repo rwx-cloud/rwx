@@ -219,7 +219,7 @@ tasks:
       set -e
 
       if [ "$exit_code" -ne 0 ]; then
-        echo "Lint failed on the cli repo's own top-level .rwx configs with Node 18.0.0"
+        echo "Lint failed on the cli repo's own top-level .rwx configs with Node 18.0.0. Fix the reported errors before proceeding."
         echo "Output:"
         echo "$output"
         exit 1
