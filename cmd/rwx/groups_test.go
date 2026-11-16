@@ -16,7 +16,9 @@ import (
 
 func TestGroupsCommands(t *testing.T) {
 	require.Same(t, groupsCmd, findSubcommand(rootCmd, "groups"))
-	require.Len(t, groupsCmd.Commands(), 5)
+	for _, name := range []string{"list", "create", "permissions"} {
+		require.NotNil(t, findSubcommand(groupsCmd, name))
+	}
 	for _, name := range []string{"show", "update", "delete"} {
 		cmd := findSubcommand(groupsCmd, name)
 		require.Error(t, cmd.Args(cmd, nil))
