@@ -620,16 +620,8 @@ var (
 	sandboxTransport           string
 )
 
-func requireExperimentalSandboxAccess() error {
-	if os.Getenv("RWX_EXPERIMENTAL") != "true" {
-		return fmt.Errorf("this command is experimental; set RWX_EXPERIMENTAL=true to use it")
-	}
-	return nil
-}
-
 func init() {
 	sandboxCmd.PersistentFlags().StringVar(&sandboxTransport, "transport", "ssh", "Sandbox transport: ssh or wss")
-	_ = sandboxCmd.PersistentFlags().MarkHidden("transport")
 
 	sandboxCmd.AddCommand(sandboxInitCmd)
 	sandboxCmd.AddCommand(sandboxStartCmd)
