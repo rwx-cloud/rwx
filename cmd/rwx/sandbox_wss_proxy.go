@@ -13,9 +13,10 @@ func init() {
 		Use:    "sandbox-wss-proxy <wss-url>",
 		Hidden: true,
 		Args:   cobra.ExactArgs(1),
-		// OpenSSH needs a clean byte stream, not normal CLI initialization/output.
+		// Override the root command's pre-run hook so the OpenSSH proxy skips
+		// normal CLI initialization and output, preserving its byte stream.
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
-			return requireExperimentalSandboxAccess()
+			return nil
 		},
 		RunE: func(_ *cobra.Command, args []string) error {
 			transport := ssh.WebSocketTransport{

@@ -48,11 +48,11 @@ var (
 				return errors.New("--format and --json cannot be used together")
 			}
 
-			if sandboxTransport != "" && sandboxTransport != "ssh" && sandboxTransport != "wss" {
-				return errors.New("--transport must be ssh or wss")
+			if sandboxTransport != "" && sandboxTransport != "auto" && sandboxTransport != "ssh" && sandboxTransport != "wss" {
+				return errors.New("--transport must be auto, ssh or wss")
 			}
-			if sandboxTransport == "wss" && os.Getenv("RWX_EXPERIMENTAL") != "true" {
-				return errors.New("--transport wss is experimental; set RWX_EXPERIMENTAL=true to use it")
+			if sandboxResetTransport && sandboxTransport != "" && sandboxTransport != "auto" {
+				return errors.New("--reset-transport requires --transport auto")
 			}
 
 			fileBackend, err := internalconfig.NewFileBackend([]string{
@@ -93,23 +93,25 @@ var (
 			}
 
 			service, err = cli.NewService(cli.Config{
-				APIClient:            c,
-				NewSSHClient:         func() cli.SSHClient { return new(ssh.Client) },
-				SandboxTransport:     sandboxTransport,
-				SSHTunnelManager:     ssh.NewTunnelManager(),
-				VCSClient:            vcs.New(dir),
-				DockerCLI:            dockerCli,
-				DocsClient:           docs.Client{Host: docsHost, Scheme: docsScheme},
-				DocsTokenBackend:     docsTokenBackend,
-				AccessTokenBackend:   accessTokenBackend,
-				VersionsBackend:      versionsBackend,
-				SkillVersionsBackend: skillVersionsBackend,
-				TelemetryCollector:   telemetryCollector,
-				Stdin:                os.Stdin,
-				Stdout:               os.Stdout,
-				StdoutIsTTY:          term.IsTerminal(int(os.Stdout.Fd())),
-				Stderr:               os.Stderr,
-				StderrIsTTY:          term.IsTerminal(int(os.Stderr.Fd())),
+				APIClient:             c,
+				NewSSHClient:          func() cli.SSHClient { return new(ssh.Client) },
+				SandboxTransport:      sandboxTransport,
+				TransportPreferences:  fileBackend,
+				ResetSandboxTransport: sandboxResetTransport,
+				SSHTunnelManager:      ssh.NewTunnelManager(),
+				VCSClient:             vcs.New(dir),
+				DockerCLI:             dockerCli,
+				DocsClient:            docs.Client{Host: docsHost, Scheme: docsScheme},
+				DocsTokenBackend:      docsTokenBackend,
+				AccessTokenBackend:    accessTokenBackend,
+				VersionsBackend:       versionsBackend,
+				SkillVersionsBackend:  skillVersionsBackend,
+				TelemetryCollector:    telemetryCollector,
+				Stdin:                 os.Stdin,
+				Stdout:                os.Stdout,
+				StdoutIsTTY:           term.IsTerminal(int(os.Stdout.Fd())),
+				Stderr:                os.Stderr,
+				StderrIsTTY:           term.IsTerminal(int(os.Stderr.Fd())),
 			})
 			if err != nil {
 				return errors.Wrap(err, "unable to initialize CLI")
