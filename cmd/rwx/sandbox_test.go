@@ -267,7 +267,23 @@ func TestSandboxTransportSelection(t *testing.T) {
 	t.Run("invalid transport is rejected", func(t *testing.T) {
 		sandboxTransport = "invalid"
 
-		require.EqualError(t, rootCmd.PersistentPreRunE(sandboxExecCmd, nil), "--transport must be ssh or wss")
+		require.EqualError(t, rootCmd.PersistentPreRunE(sandboxExecCmd, nil), "--transport must be auto, ssh or wss")
+	})
+
+	t.Run("auto accepts reset", func(t *testing.T) {
+		sandboxTransport = "auto"
+		sandboxResetTransport = true
+		t.Cleanup(func() { sandboxResetTransport = false })
+		require.NoError(t, rootCmd.PersistentPreRunE(sandboxExecCmd, nil))
+		require.Equal(t, "auto", service.SandboxTransport)
+		require.True(t, service.ResetSandboxTransport)
+	})
+
+	t.Run("explicit transport rejects reset", func(t *testing.T) {
+		sandboxTransport = "ssh"
+		sandboxResetTransport = true
+		t.Cleanup(func() { sandboxResetTransport = false })
+		require.EqualError(t, rootCmd.PersistentPreRunE(sandboxExecCmd, nil), "--reset-transport requires --transport auto")
 	})
 
 	checkLifecycleTransport := func(t *testing.T, command *cobra.Command) {
@@ -277,7 +293,7 @@ func TestSandboxTransportSelection(t *testing.T) {
 		t.Cleanup(func() { flag.Changed = false })
 
 		require.False(t, flag.Hidden)
-		require.Equal(t, "ssh", flag.DefValue)
+		require.Equal(t, "auto", flag.DefValue)
 
 		require.NoError(t, rootCmd.PersistentPreRunE(command, nil))
 		require.Equal(t, "wss", service.SandboxTransport)

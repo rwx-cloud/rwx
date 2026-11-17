@@ -909,7 +909,7 @@ func (s Service) LogsSandboxBackground(cfg SandboxBackgroundLogsConfig) (*Sandbo
 	}
 
 	sandbox.close()
-	connection, err := s.connectSSH(&sandbox.connectionInfo)
+	connection, err := s.reconnectSSH(sandbox.sandboxConnection)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to reconnect for sandbox process logs")
 	}

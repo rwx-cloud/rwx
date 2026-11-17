@@ -4,6 +4,7 @@ import (
 	"io"
 
 	"github.com/rwx-cloud/rwx/internal/accesstoken"
+	"github.com/rwx-cloud/rwx/internal/config"
 	"github.com/rwx-cloud/rwx/internal/docker"
 	"github.com/rwx-cloud/rwx/internal/docs"
 	"github.com/rwx-cloud/rwx/internal/docstoken"
@@ -15,24 +16,26 @@ import (
 )
 
 type Config struct {
-	APIClient            APIClient
-	NewSSHClient         func() SSHClient
-	SandboxTransport     string
-	SSHTunnelManager     rwxssh.TunnelManager
-	VCSClient            vcs.Client
-	DockerCLI            docker.Client
-	DocsClient           docs.Client
-	DocsTokenBackend     docstoken.Backend
-	AccessTokenBackend   accesstoken.Backend
-	VersionsBackend      versions.Backend
-	SkillVersionsBackend versions.Backend
-	TelemetryCollector   *telemetry.Collector
-	ChoicePicker         ChoicePicker
-	Stdin                io.Reader
-	Stdout               io.Writer
-	StdoutIsTTY          bool
-	Stderr               io.Writer
-	StderrIsTTY          bool
+	APIClient             APIClient
+	NewSSHClient          func() SSHClient
+	SandboxTransport      string
+	TransportPreferences  config.Backend
+	ResetSandboxTransport bool
+	SSHTunnelManager      rwxssh.TunnelManager
+	VCSClient             vcs.Client
+	DockerCLI             docker.Client
+	DocsClient            docs.Client
+	DocsTokenBackend      docstoken.Backend
+	AccessTokenBackend    accesstoken.Backend
+	VersionsBackend       versions.Backend
+	SkillVersionsBackend  versions.Backend
+	TelemetryCollector    *telemetry.Collector
+	ChoicePicker          ChoicePicker
+	Stdin                 io.Reader
+	Stdout                io.Writer
+	StdoutIsTTY           bool
+	Stderr                io.Writer
+	StderrIsTTY           bool
 }
 
 func (c Config) Validate() error {

@@ -618,10 +618,12 @@ var (
 	sandboxTunnelScheme        string
 	sandboxInitParams          []string
 	sandboxTransport           string
+	sandboxResetTransport      bool
 )
 
 func init() {
-	sandboxCmd.PersistentFlags().StringVar(&sandboxTransport, "transport", "ssh", "Sandbox transport: ssh or wss")
+	sandboxCmd.PersistentFlags().StringVar(&sandboxTransport, "transport", "auto", "Sandbox transport: auto, ssh or wss")
+	sandboxCmd.PersistentFlags().BoolVar(&sandboxResetTransport, "reset-transport", false, "Forget the saved transport preference when connecting and retry SSH")
 
 	sandboxCmd.AddCommand(sandboxInitCmd)
 	sandboxCmd.AddCommand(sandboxStartCmd)
