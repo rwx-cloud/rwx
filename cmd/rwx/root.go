@@ -48,6 +48,13 @@ var (
 				return errors.New("--format and --json cannot be used together")
 			}
 
+			if sandboxTransport != "" && sandboxTransport != "ssh" && sandboxTransport != "wss" {
+				return errors.New("--transport must be ssh or wss")
+			}
+			if sandboxTransport == "wss" && os.Getenv("RWX_EXPERIMENTAL") != "true" {
+				return errors.New("--transport wss is experimental; set RWX_EXPERIMENTAL=true to use it")
+			}
+
 			fileBackend, err := internalconfig.NewFileBackend([]string{
 				filepath.Join("~", ".config", "rwx"),
 				filepath.Join("~", ".mint"),
@@ -88,6 +95,7 @@ var (
 			service, err = cli.NewService(cli.Config{
 				APIClient:            c,
 				SSHClient:            new(ssh.Client),
+				SandboxTransport:     sandboxTransport,
 				SSHTunnelManager:     ssh.NewTunnelManager(),
 				VCSClient:            vcs.New(dir),
 				DockerCLI:            dockerCli,

@@ -16,9 +16,21 @@ type Client struct {
 	*ssh.Client
 }
 
-func (c *Client) Connect(address string, config ssh.ClientConfig) (err error) {
-	c.Client, err = ssh.Dial("tcp", address, &config)
-	return
+func (c *Client) Connect(address string, config ssh.ClientConfig, transport Transport) error {
+	stream, err := transport.Dial()
+	if err != nil {
+		return err
+	}
+
+	conn, channels, requests, err := ssh.NewClientConn(stream, address, &config)
+	if err != nil {
+		_ = stream.Close()
+		return err
+	}
+
+	c.Client = ssh.NewClient(conn, channels, requests)
+
+	return nil
 }
 
 func (c *Client) Close() error {

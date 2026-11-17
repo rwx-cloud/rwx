@@ -7,6 +7,7 @@ import (
 
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
+	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -70,7 +71,8 @@ func (s Service) connectDebugSession(connectionInfo api.DebugConnectionInfo) err
 	}
 
 	connectStart := time.Now()
-	if err = s.SSHClient.Connect(connectionInfo.Address, sshConfig); err != nil {
+	transport := rwxssh.TCPTransport{Address: connectionInfo.Address}
+	if err = s.SSHClient.Connect(connectionInfo.Address, sshConfig, transport); err != nil {
 		s.recordTelemetry("ssh.connect", map[string]any{
 			"duration_ms": time.Since(connectStart).Milliseconds(),
 			"success":     false,

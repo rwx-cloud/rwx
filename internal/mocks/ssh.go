@@ -4,6 +4,7 @@ import (
 	"io"
 
 	"github.com/rwx-cloud/rwx/internal/errors"
+	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -22,7 +23,7 @@ func (s *SSH) Close() error {
 	return nil
 }
 
-func (s *SSH) Connect(addr string, cfg ssh.ClientConfig) error {
+func (s *SSH) Connect(addr string, cfg ssh.ClientConfig, _ rwxssh.Transport) error {
 	if s.MockConnect != nil {
 		return s.MockConnect(addr, cfg)
 	}

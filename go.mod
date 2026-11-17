@@ -9,6 +9,7 @@ require (
 	charm.land/bubbletea/v2 v2.1.1
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/briandowns/spinner v1.23.2
+	github.com/coder/websocket v1.8.15
 	github.com/distribution/reference v0.6.0
 	github.com/docker/cli v28.5.2+incompatible
 	github.com/docker/docker v28.5.2+incompatible

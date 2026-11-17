@@ -17,6 +17,7 @@ import (
 type Config struct {
 	APIClient            APIClient
 	SSHClient            SSHClient
+	SandboxTransport     string
 	SSHTunnelManager     rwxssh.TunnelManager
 	VCSClient            vcs.Client
 	DockerCLI            docker.Client

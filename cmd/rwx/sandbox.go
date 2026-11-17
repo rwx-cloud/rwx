@@ -617,6 +617,7 @@ var (
 	sandboxTunnelLocalPort     int
 	sandboxTunnelScheme        string
 	sandboxInitParams          []string
+	sandboxTransport           string
 )
 
 func requireExperimentalSandboxAccess() error {
@@ -627,6 +628,9 @@ func requireExperimentalSandboxAccess() error {
 }
 
 func init() {
+	sandboxCmd.PersistentFlags().StringVar(&sandboxTransport, "transport", "ssh", "Sandbox transport: ssh or wss")
+	_ = sandboxCmd.PersistentFlags().MarkHidden("transport")
+
 	sandboxCmd.AddCommand(sandboxInitCmd)
 	sandboxCmd.AddCommand(sandboxStartCmd)
 	sandboxCmd.AddCommand(sandboxExecCmd)

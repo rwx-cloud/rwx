@@ -1055,6 +1055,23 @@ func TestService_ExecSandbox(t *testing.T) {
 }
 
 func TestService_SyncSandbox(t *testing.T) {
+	t.Run("explicit WSS does not fall back when discovery has no endpoint", func(t *testing.T) {
+		setup := setupTest(t)
+		setup.service.SandboxTransport = "wss"
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(string, string) (api.SandboxConnectionInfo, error) {
+			return api.SandboxConnectionInfo{
+				Sandboxable:    true,
+				Address:        "192.168.1.1:43215",
+				PrivateUserKey: sandboxPrivateTestKey,
+				PublicHostKey:  sandboxPublicTestKey,
+			}, nil
+		}
+
+		_, err := setup.service.SyncSandbox(cli.SyncSandboxConfig{RunID: "run-without-wss"})
+
+		require.ErrorContains(t, err, "WSS transport is not available for this sandbox")
+	})
+
 	t.Run("requires an already-running sandbox", func(t *testing.T) {
 		setup := setupTest(t)
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {

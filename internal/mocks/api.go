@@ -8,6 +8,7 @@ import (
 )
 
 type API struct {
+	MockAccessToken                             func() (string, error)
 	MockDisableApp                              func(string) error
 	MockEnableApp                               func(string) error
 	MockBillingUsage                            func(string) (*api.BillingUsageResult, error)
@@ -96,6 +97,14 @@ type API struct {
 	MockGetSandboxInitTemplate                        func() (api.SandboxInitTemplateResult, error)
 	MockListSandboxRuns                               func() (*api.ListSandboxRunsResult, error)
 	MockCancelRun                                     func(runID, scopedToken string) error
+}
+
+func (c *API) AccessToken() (string, error) {
+	if c.MockAccessToken != nil {
+		return c.MockAccessToken()
+	}
+
+	return "", errors.New("MockAccessToken was not configured")
 }
 
 func (c *API) GetSkillContent() (string, error) {

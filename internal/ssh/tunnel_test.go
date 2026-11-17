@@ -26,6 +26,7 @@ func TestTunnelManagerOpenRefreshesAndReusesLocalPort(t *testing.T) {
 		Key:            "web",
 		RunID:          "run-1",
 		Address:        "192.0.2.10:22",
+		Transport:      TCPTransport{},
 		PrivateUserKey: "private key",
 		PublicHostKey:  "ssh-ed25519 public-key",
 		TargetPort:     3000,
@@ -54,6 +55,53 @@ func TestTunnelManagerOpenRefreshesAndReusesLocalPort(t *testing.T) {
 	require.Contains(t, invocations[2], ":127.0.0.1:3000")
 }
 
+func TestTunnelManagerWSSDoesNotPersistOrExposeCredentialsInArguments(t *testing.T) {
+	tmp := t.TempDir()
+	logPath := filepath.Join(tmp, "ssh.log")
+	binary := filepath.Join(tmp, "ssh")
+	script := `#!/bin/sh
+test "$RWX_SANDBOX_ACCESS_TOKEN" = test-wss-secret || exit 41
+printf '%s\n' "$*" > "$RWX_TEST_SSH_LOG"
+`
+	require.NoError(t, os.WriteFile(binary, []byte(script), 0o700))
+	t.Setenv("RWX_TEST_SSH_LOG", logPath)
+
+	manager := tunnelManager{binary: binary}
+	transport := WebSocketTransport{
+		Endpoint:    "wss://sandbox.r2.rwx.run/fedcba98765432100123456789abcdef/ssh",
+		AccessToken: "test-wss-secret",
+	}
+	config := TunnelConfig{
+		Key:            "web",
+		RunID:          "run-1",
+		Address:        "192.0.2.10:43215",
+		Transport:      transport,
+		PrivateUserKey: "private key",
+		PublicHostKey:  "ssh-ed25519 public-key",
+		TargetPort:     3000,
+		StateDirectory: filepath.Join(tmp, "state"),
+	}
+
+	result, err := manager.Open(config)
+	require.NoError(t, err)
+	require.Greater(t, result.LocalPort, 0)
+
+	arguments, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	require.Contains(t, string(arguments), "sandbox-wss-proxy")
+	require.Contains(t, string(arguments), transport.Endpoint)
+	require.NotContains(t, string(arguments), transport.AccessToken)
+
+	entries, err := os.ReadDir(config.StateDirectory)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+
+	state, err := os.ReadFile(filepath.Join(config.StateDirectory, entries[0].Name(), "state.json"))
+	require.NoError(t, err)
+	require.NotContains(t, string(state), transport.AccessToken)
+	require.NotContains(t, string(state), config.PrivateUserKey)
+}
+
 func TestTunnelManagerValidatesPorts(t *testing.T) {
 	manager := tunnelManager{binary: "ssh"}
 
@@ -78,10 +126,16 @@ func TestTunnelManagerDoesNotReuseLocalPortAcrossRuns(t *testing.T) {
 	require.NoError(t, os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700))
 	manager := tunnelManager{binary: binary}
 	config := TunnelConfig{
-		Key: "web", RunID: "run-1", Address: "192.0.2.10:22",
-		PrivateUserKey: "private key", PublicHostKey: "ssh-ed25519 public-key",
-		TargetPort: 3000, StateDirectory: filepath.Join(tmp, "state"),
+		Key:            "web",
+		RunID:          "run-1",
+		Address:        "192.0.2.10:22",
+		Transport:      TCPTransport{},
+		PrivateUserKey: "private key",
+		PublicHostKey:  "ssh-ed25519 public-key",
+		TargetPort:     3000,
+		StateDirectory: filepath.Join(tmp, "state"),
 	}
+
 	first, err := manager.Open(config)
 	require.NoError(t, err)
 	require.Equal(t, "http", first.Scheme)
@@ -104,10 +158,16 @@ func TestTunnelManagerCloseMatchesRun(t *testing.T) {
 	require.NoError(t, os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700))
 	manager := tunnelManager{binary: binary}
 	config := TunnelConfig{
-		Key: "web", RunID: "run-1", Address: "192.0.2.10:22",
-		PrivateUserKey: "private key", PublicHostKey: "ssh-ed25519 public-key",
-		TargetPort: 3000, StateDirectory: filepath.Join(tmp, "state"),
+		Key:            "web",
+		RunID:          "run-1",
+		Address:        "192.0.2.10:22",
+		Transport:      TCPTransport{},
+		PrivateUserKey: "private key",
+		PublicHostKey:  "ssh-ed25519 public-key",
+		TargetPort:     3000,
+		StateDirectory: filepath.Join(tmp, "state"),
 	}
+
 	_, err := manager.Open(config)
 	require.NoError(t, err)
 
@@ -152,10 +212,16 @@ func openTunnelWithFailingShutdown(t *testing.T) (tunnelManager, TunnelConfig, s
 	require.NoError(t, os.WriteFile(binary, []byte(script), 0o700))
 	manager := tunnelManager{binary: binary}
 	config := TunnelConfig{
-		Key: "web", RunID: "run-1", Address: "192.0.2.10:22",
-		PrivateUserKey: "private key", PublicHostKey: "ssh-ed25519 public-key",
-		TargetPort: 3000, StateDirectory: filepath.Join(tmp, "state"),
+		Key:            "web",
+		RunID:          "run-1",
+		Address:        "192.0.2.10:22",
+		Transport:      TCPTransport{},
+		PrivateUserKey: "private key",
+		PublicHostKey:  "ssh-ed25519 public-key",
+		TargetPort:     3000,
+		StateDirectory: filepath.Join(tmp, "state"),
 	}
+
 	_, err := manager.Open(config)
 	require.NoError(t, err)
 

@@ -43,11 +43,23 @@ func (rtf roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 // Client is an API Client for Mint
 type Client struct {
 	http.RoundTripper
+
+	accessToken        string
+	accessTokenBackend accesstoken.Backend
+}
+
+func (c Client) AccessToken() (string, error) {
+	return accesstoken.Get(c.accessTokenBackend, c.accessToken)
 }
 
 func NewClient(cfg Config) (Client, error) {
 	if err := cfg.Validate(); err != nil {
 		return Client{}, errors.Wrap(err, "validation failed")
+	}
+
+	client := Client{
+		accessToken:        cfg.AccessToken,
+		accessTokenBackend: cfg.AccessTokenBackend,
 	}
 
 	roundTrip := func(req *http.Request) (*http.Response, error) {
@@ -59,7 +71,7 @@ func NewClient(cfg Config) (Client, error) {
 		}
 		req.Header.Set("User-Agent", fmt.Sprintf("rwx-cli/%s", config.Version))
 
-		token, err := accesstoken.Get(cfg.AccessTokenBackend, cfg.AccessToken)
+		token, err := client.AccessToken()
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to retrieve access token")
 		}
@@ -70,12 +82,13 @@ func NewClient(cfg Config) (Client, error) {
 		return httpClient.Do(req)
 	}
 
-	roundTripper := versions.NewRoundTripper(roundTripFunc(roundTrip), cfg.VersionsBackend, cfg.SkillVersionsBackend)
-	return Client{roundTripper}, nil
+	client.RoundTripper = versions.NewRoundTripper(roundTripFunc(roundTrip), cfg.VersionsBackend, cfg.SkillVersionsBackend)
+
+	return client, nil
 }
 
 func NewClientWithRoundTrip(rt func(*http.Request) (*http.Response, error)) Client {
-	return Client{roundTripFunc(rt)}
+	return Client{RoundTripper: roundTripFunc(rt)}
 }
 
 // RoundTrip retries explicit Cloud unavailability responses, including writes:
