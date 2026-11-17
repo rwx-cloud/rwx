@@ -1,0 +1,52 @@
+on:
+  cli:
+    init:
+      commit-sha: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:26.04
+  config: rwx/base 1.2.1
+
+tasks:
+  - key: code
+    call: git/clone 2.4.1
+    with:
+      preserve-git-dir: true
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.commit-sha }}
+
+  - key: setup
+    use: code
+    call: ${{ run.dir }}/packages/setup.yml
+
+  - key: lsp-build-def
+    use: [code, setup.lsp-code]
+    run: |
+      cp language-server/.rwx/build.yml "$RWX_ARTIFACTS/build-run-def"
+      cp language-server-ref "$RWX_VALUES"
+
+  - key: lsp-build
+    call: ${{ tasks.lsp-build-def.artifacts.build-run-def }}
+    init:
+      ref: ${{ tasks.lsp-build-def.values.language-server-ref }}
+
+  - key: lsp-server
+    use: code
+    run: cp ${{ tasks.lsp-build.tasks.build.artifacts.bundle }} internal/lsp/bundle/server.js
+
+  - key: rwx-cli
+    use: [setup.go-deps, lsp-server]
+    run: |
+      go build -a -ldflags "-w -s -X github.com/rwx-cloud/rwx/cmd/rwx/config.Version=testing-${{ init.commit-sha }}" ./cmd/rwx
+
+  - key: sandbox-wss
+    use: [rwx-cli, setup.git, setup.jj]
+    timeout: 15m
+    run: |
+      set -euo pipefail
+      ./rwx whoami --json | jq -e '.organization_slug == "rwx"' >/dev/null
+      git switch -c "sandbox-test-${RWX_TASK_ID}"
+      ./test/integration/sandbox-wss.sh
+    env:
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx_cli_development.service-accounts.rwx-cli-ci.token }}
+      COMMIT_SHA: ${{ init.commit-sha }}

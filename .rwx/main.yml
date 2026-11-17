@@ -31,6 +31,11 @@ tasks:
       commit-sha: ${{ init.commit-sha }}
       definition: .rwx/integration-sandbox.yml
 
+  - key: integration-sandbox-wss
+    call: ${{ run.dir }}/integration-sandbox-wss.yml
+    init:
+      commit-sha: ${{ init.commit-sha }}
+
   - key: integration-dispatch
     call: ${{ run.dir }}/integration/dispatch-test.yml
     init:
@@ -42,7 +47,7 @@ tasks:
       cli: ${{ init.commit-sha }}
 
   - key: release-unstable
-    after: [ci, integration, integration-sandbox, integration-dispatch, integration-rwx-testing]
+    after: [ci, integration, integration-sandbox, integration-sandbox-wss, integration-dispatch, integration-rwx-testing]
     call: ${{ run.dir }}/release.yml
     init:
       kind: unstable
