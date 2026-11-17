@@ -72,7 +72,8 @@ func (s Service) connectDebugSession(connectionInfo api.DebugConnectionInfo) err
 
 	connectStart := time.Now()
 	transport := rwxssh.TCPTransport{Address: connectionInfo.Address}
-	if err = s.SSHClient.Connect(connectionInfo.Address, sshConfig, transport); err != nil {
+	client := s.NewSSHClient()
+	if err = client.Connect(connectionInfo.Address, sshConfig, transport); err != nil {
 		s.recordTelemetry("ssh.connect", map[string]any{
 			"duration_ms": time.Since(connectStart).Milliseconds(),
 			"success":     false,
@@ -83,10 +84,10 @@ func (s Service) connectDebugSession(connectionInfo api.DebugConnectionInfo) err
 		"duration_ms": time.Since(connectStart).Milliseconds(),
 		"success":     true,
 	})
-	defer s.SSHClient.Close()
+	defer client.Close()
 
 	cmdStart := time.Now()
-	if err := s.SSHClient.InteractiveSession(); err != nil {
+	if err := client.InteractiveSession(); err != nil {
 		exitCode := -1
 		var exitErr *ssh.ExitError
 		if errors.As(err, &exitErr) {

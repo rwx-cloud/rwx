@@ -1054,6 +1054,51 @@ func TestService_ExecSandbox(t *testing.T) {
 	})
 }
 
+func TestService_ExecSandbox_ConnectionOwnership(t *testing.T) {
+	setup := setupTest(t)
+	setup.recordSSHClients()
+	setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		return api.SandboxConnectionInfo{
+			Sandboxable: true, Address: id + ".example:22",
+			PrivateUserKey: sandboxPrivateTestKey, PublicHostKey: sandboxPublicTestKey,
+		}, nil
+	}
+	setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
+	setup.mockVCS.MockGenerateDirtyPatches = func() (vcs.DirtyPatches, error) {
+		return vcs.DirtyPatches{}, nil
+	}
+	setup.mockSSH.MockExecuteCommand = func(command string) (int, error) {
+		if command == "outer" {
+			_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+				RunID: "inner-run", Command: []string{"inner"}, Json: true,
+			})
+			require.NoError(t, err)
+			require.Len(t, setup.sshClients, 2)
+			require.Zero(t, setup.sshClients[0].closeCount, "the outer operation must remain connected")
+			require.Equal(t, 1, setup.sshClients[1].closeCount)
+		}
+		return 0, nil
+	}
+
+	_, err := setup.service.ExecSandbox(cli.ExecSandboxConfig{
+		RunID: "outer-run", Command: []string{"outer"}, Json: true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, setup.sshClients, 2)
+	outer, inner := setup.sshClients[0], setup.sshClients[1]
+	require.Equal(t, 1, outer.connectCount)
+	require.Equal(t, 1, inner.connectCount)
+	require.Equal(t, 1, outer.closeCount)
+	require.Equal(t, 1, inner.closeCount)
+	require.Contains(t, outer.commands, "outer")
+	require.NotContains(t, outer.commands, "inner")
+	require.Contains(t, inner.commands, "inner")
+	require.NotContains(t, inner.commands, "outer")
+	require.Equal(t, "__rwx_sandbox_lock_released__", outer.commands[len(outer.commands)-1])
+	require.Equal(t, "__rwx_sandbox_lock_released__", inner.commands[len(inner.commands)-1])
+}
+
 func TestService_SyncSandbox(t *testing.T) {
 	t.Run("explicit WSS does not fall back when discovery has no endpoint", func(t *testing.T) {
 		setup := setupTest(t)
@@ -1326,10 +1371,40 @@ func TestService_BackgroundSandbox(t *testing.T) {
 
 	t.Run("syncs, starts a background process, and opens a local tunnel", func(t *testing.T) {
 		setup, commands := setupBackground(t)
+		setup.recordSSHClients()
+		setup.service.SandboxTransport = "wss"
+		discover := setup.mockAPI.MockGetSandboxConnectionInfo
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+			info, err := discover(id, token)
+			info.WebSocketURL = "wss://sandbox.example/ssh"
+			return info, err
+		}
+		tokenReads := 0
+		setup.mockAPI.MockAccessToken = func() (string, error) {
+			tokenReads++
+			return fmt.Sprintf("token-%d", tokenReads), nil
+		}
+		pushed := false
+		execute := setup.mockSSH.MockExecuteCommand
+		setup.mockSSH.MockExecuteCommand = func(command string) (int, error) {
+			if strings.Contains(command, "git cat-file") && !pushed {
+				return 1, nil
+			}
+			return execute(command)
+		}
+		setup.mockVCS.MockPushRef = func(opts vcs.PushRefOptions) error {
+			require.Contains(t, opts.Env, "RWX_SANDBOX_ACCESS_TOKEN=token-1")
+			pushed = true
+			return nil
+		}
 		var tunnelConfig rwxssh.TunnelConfig
 		setup.mockTunnel.MockOpen = func(cfg rwxssh.TunnelConfig) (rwxssh.TunnelResult, error) {
 			tunnelConfig = cfg
 			return rwxssh.TunnelResult{LocalPort: 8310, Scheme: cfg.Scheme}, nil
+		}
+		setup.mockTunnel.MockClose = func(rwxssh.TunnelCloseConfig) error {
+			t.Fatal("operation cleanup must not close the detached tunnel")
+			return nil
 		}
 
 		result, err := setup.service.BackgroundSandbox(cli.BackgroundSandboxConfig{
@@ -1357,6 +1432,13 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		require.Equal(t, 3100, tunnelConfig.TargetPort)
 		require.Equal(t, "http", tunnelConfig.Scheme)
 		require.Equal(t, "http", result.Scheme)
+		require.True(t, pushed)
+		require.Len(t, setup.sshClients, 1)
+		require.Equal(t, rwxssh.WebSocketTransport{
+			Endpoint: "wss://sandbox.example/ssh", AccessToken: "token-1",
+		}, setup.sshClients[0].transport)
+		require.Equal(t, setup.sshClients[0].transport, tunnelConfig.Transport)
+		require.Equal(t, 1, setup.sshClients[0].closeCount)
 
 		processIndex := slices.IndexFunc(*commands, func(command string) bool {
 			return strings.HasPrefix(command, "__rwx_sandbox_process_start__ ")
@@ -2228,6 +2310,16 @@ func TestService_LogsSandboxBackground(t *testing.T) {
 			"stderrPath":"/tmp/web.stderr",
 			"logPath":"/tmp/web.log"
 		}`)
+		setup.recordSSHClients()
+		execute := setup.mockSSH.MockExecuteCommand
+		setup.mockSSH.MockExecuteCommand = func(command string) (int, error) {
+			if strings.HasPrefix(command, "tail ") {
+				require.Len(t, setup.sshClients, 2)
+				require.Equal(t, 1, setup.sshClients[0].closeCount, "release the locked connection before streaming")
+				require.Zero(t, setup.sshClients[1].closeCount)
+			}
+			return execute(command)
+		}
 
 		_, err := setup.service.LogsSandboxBackground(cli.SandboxBackgroundLogsConfig{
 			Name: "web", RunID: "run-background", Follow: true,
@@ -2235,6 +2327,12 @@ func TestService_LogsSandboxBackground(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, 2, *connectCount, "follow should resume on a fresh SSH connection")
+		require.Len(t, setup.sshClients, 2)
+		require.Equal(t, 1, setup.sshClients[0].connectCount)
+		require.Equal(t, 1, setup.sshClients[1].connectCount)
+		require.Equal(t, 1, setup.sshClients[0].closeCount)
+		require.Equal(t, 1, setup.sshClients[1].closeCount)
+		require.Equal(t, []string{"tail -n +1 -F -- '/tmp/web.log'"}, setup.sshClients[1].commands)
 		require.Equal(t, "tail -n +1 -F -- '/tmp/web.log'", (*commands)[len(*commands)-1])
 		require.NotContains(t, (*commands)[len(*commands)-1], "/tmp/web.stdout")
 		require.NotContains(t, (*commands)[len(*commands)-1], "/tmp/web.stderr")
@@ -4745,7 +4843,7 @@ func TestService_ExecSandbox_ConcurrentAutoCreate(t *testing.T) {
 		stderr2 := &strings.Builder{}
 		service2, err := cli.NewService(cli.Config{
 			APIClient:        setup.mockAPI,
-			SSHClient:        setup.mockSSH,
+			NewSSHClient:     func() cli.SSHClient { return setup.mockSSH },
 			SSHTunnelManager: setup.mockTunnel,
 			VCSClient:        setup.mockVCS,
 			DockerCLI:        setup.mockDocker,
@@ -5879,6 +5977,7 @@ func TestService_StartSandbox_RunURL(t *testing.T) {
 func TestService_ExecSandbox_Lock(t *testing.T) {
 	t.Run("lock_requested precedes sync and exec, lock_released is last", func(t *testing.T) {
 		setup := setupTest(t)
+		setup.recordSSHClients()
 
 		runID := "run-lock-order"
 		address := "192.168.1.1:22"
@@ -5922,10 +6021,13 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 		require.Greater(t, len(commandOrder), 2)
 		require.Equal(t, "__rwx_sandbox_lock_requested__", commandOrder[0])
 		require.Equal(t, "__rwx_sandbox_lock_released__", commandOrder[len(commandOrder)-1])
+		require.Len(t, setup.sshClients, 1)
+		require.Equal(t, 1, setup.sshClients[0].closeCount)
 	})
 
 	t.Run("lock_released is sent when sync fails", func(t *testing.T) {
 		setup := setupTest(t)
+		setup.recordSSHClients()
 
 		runID := "run-lock-sync-fail"
 		address := "192.168.1.1:22"
@@ -5972,10 +6074,13 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 		require.Contains(t, err.Error(), "git apply failed")
 		require.Equal(t, "__rwx_sandbox_lock_requested__", commandOrder[0])
 		require.Equal(t, "__rwx_sandbox_lock_released__", commandOrder[len(commandOrder)-1])
+		require.Len(t, setup.sshClients, 1)
+		require.Equal(t, 1, setup.sshClients[0].closeCount)
 	})
 
 	t.Run("lock_released is not sent when lock_requested fails", func(t *testing.T) {
 		setup := setupTest(t)
+		setup.recordSSHClients()
 
 		runID := "run-lock-fail"
 		address := "192.168.1.1:22"
@@ -6014,6 +6119,8 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 		for _, cmd := range commandOrder {
 			require.NotEqual(t, "__rwx_sandbox_lock_released__", cmd)
 		}
+		require.Len(t, setup.sshClients, 1)
+		require.Equal(t, 1, setup.sshClients[0].closeCount)
 	})
 
 	t.Run("pre-exec cleanup runs between lock and sync", func(t *testing.T) {

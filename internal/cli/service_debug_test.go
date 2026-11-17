@@ -8,6 +8,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/cli"
 	internalErrors "github.com/rwx-cloud/rwx/internal/errors"
+	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
@@ -26,6 +27,8 @@ AAAEC6442PQKevgYgeT0SIu9zwlnEMl6MF59ZgM+i0ByMv4eLJPqG3xnZcEQmktHj/GY2i
 
 	t.Run("when the task is debuggable", func(t *testing.T) {
 		s := setupTest(t)
+		s.recordSSHClients()
+		s.service.SandboxTransport = "wss"
 
 		agentAddress := fmt.Sprintf("%d.example.org:1234", 123456)
 		connectedViaSSH := false
@@ -62,6 +65,16 @@ AAAEC6442PQKevgYgeT0SIu9zwlnEMl6MF59ZgM+i0ByMv4eLJPqG3xnZcEQmktHj/GY2i
 
 		err := s.service.DebugTask(debugConfig)
 		require.NoError(t, err)
+		require.Len(t, s.sshClients, 1)
+		require.Equal(t, 1, s.sshClients[0].closeCount)
+		require.Equal(t, rwxssh.TCPTransport{Address: agentAddress}, s.sshClients[0].transport)
+
+		require.NoError(t, s.service.DebugTask(debugConfig))
+		require.Len(t, s.sshClients, 2)
+		require.Equal(t, 1, s.sshClients[0].connectCount)
+		require.Equal(t, 1, s.sshClients[1].connectCount)
+		require.Equal(t, 1, s.sshClients[0].closeCount)
+		require.Equal(t, 1, s.sshClients[1].closeCount)
 
 		require.True(t, fetchedConnectionInfo)
 

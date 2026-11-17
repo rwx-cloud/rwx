@@ -94,7 +94,7 @@ var (
 
 			service, err = cli.NewService(cli.Config{
 				APIClient:            c,
-				SSHClient:            new(ssh.Client),
+				NewSSHClient:         func() cli.SSHClient { return new(ssh.Client) },
 				SandboxTransport:     sandboxTransport,
 				SSHTunnelManager:     ssh.NewTunnelManager(),
 				VCSClient:            vcs.New(dir),
