@@ -54,7 +54,7 @@ func setupSkillTest(t *testing.T) *testSetup {
 
 	setup.config = cli.Config{
 		APIClient:          setup.mockAPI,
-		SSHClient:          setup.mockSSH,
+		NewSSHClient:       func() cli.SSHClient { return setup.mockSSH },
 		SSHTunnelManager:   setup.mockTunnel,
 		VCSClient:          setup.mockVCS,
 		DockerCLI:          setup.mockDocker,

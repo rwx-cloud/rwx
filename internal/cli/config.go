@@ -16,7 +16,7 @@ import (
 
 type Config struct {
 	APIClient            APIClient
-	SSHClient            SSHClient
+	NewSSHClient         func() SSHClient
 	SandboxTransport     string
 	SSHTunnelManager     rwxssh.TunnelManager
 	VCSClient            vcs.Client
@@ -40,7 +40,7 @@ func (c Config) Validate() error {
 		return errors.New("missing RWX client")
 	}
 
-	if c.SSHClient == nil {
+	if c.NewSSHClient == nil {
 		return errors.New("missing SSH client constructor")
 	}
 

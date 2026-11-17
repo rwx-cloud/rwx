@@ -198,6 +198,7 @@ type sandboxOperationConfig struct {
 }
 
 type syncedSandbox struct {
+	*sandboxConnection
 	cwd                string
 	branch             string
 	runID              string
@@ -205,8 +206,13 @@ type syncedSandbox struct {
 	runURL             string
 	syncPushMs         int64
 	syncPushPatchBytes int
-	connectionInfo     api.SandboxConnectionInfo
 	release            func()
+}
+
+type sandboxConnection struct {
+	client         SSHClient
+	transport      rwxssh.Transport
+	connectionInfo api.SandboxConnectionInfo
 }
 
 type sandboxResolutionMetrics struct {
@@ -651,7 +657,7 @@ func (s Service) BackgroundSandbox(cfg BackgroundSandboxConfig) (*SandboxBackgro
 	}
 	defer sandbox.close()
 
-	process, err := s.executeSandboxProcessDirective(sandboxDirectiveProcessStart, struct {
+	process, err := sandbox.executeSandboxProcessDirective(sandboxDirectiveProcessStart, struct {
 		Key        string `json:"key"`
 		Command    string `json:"command"`
 		TargetPort int    `json:"targetPort,omitempty"`
@@ -695,7 +701,7 @@ func (s Service) TunnelSandbox(cfg TunnelSandboxConfig) (*SandboxTunnelResult, e
 
 	selection := sandboxSelectionHint(cfg.ConfigFile, cfg.RunID)
 	startCommand := fmt.Sprintf("rwx sandbox background%s --key %s -- <command>", selection, shellescape.Quote(cfg.Key))
-	process, err := s.executeSandboxProcessDirective(sandboxDirectiveProcessStatus, struct {
+	process, err := sandbox.executeSandboxProcessDirective(sandboxDirectiveProcessStatus, struct {
 		Key string `json:"key"`
 	}{Key: cfg.Key}, "get status for")
 	if err != nil {
@@ -713,16 +719,12 @@ func (s Service) TunnelSandbox(cfg TunnelSandboxConfig) (*SandboxTunnelResult, e
 	if err != nil {
 		return nil, err
 	}
-	transport, err := s.sandboxTransport(&sandbox.connectionInfo)
-	if err != nil {
-		return nil, err
-	}
 
 	tunnel, err := s.SSHTunnelManager.Open(rwxssh.TunnelConfig{
 		Key:            cfg.Key,
 		RunID:          sandbox.runID,
 		Address:        sandbox.connectionInfo.Address,
-		Transport:      transport,
+		Transport:      sandbox.transport,
 		PrivateUserKey: sandbox.connectionInfo.PrivateUserKey,
 		PublicHostKey:  sandbox.connectionInfo.PublicHostKey,
 		LocalPort:      cfg.LocalPort,
@@ -745,7 +747,7 @@ func (s Service) TunnelSandbox(cfg TunnelSandboxConfig) (*SandboxTunnelResult, e
 	deadline := time.Now().Add(30 * time.Second)
 	portReadyDirectiveSupported := process.SupportsPortReadyCheck
 	for {
-		ready, directiveSupported, readyErr := s.sandboxPortReady(cfg.TargetPort, tunnel.LocalPort, portReadyDirectiveSupported)
+		ready, directiveSupported, readyErr := s.sandboxPortReady(sandbox.sandboxConnection, cfg.TargetPort, tunnel.LocalPort, portReadyDirectiveSupported)
 		if readyErr != nil {
 			return nil, readyErr
 		}
@@ -781,7 +783,7 @@ func (s Service) RestartSandboxBackground(cfg SandboxBackgroundConfig) (*Sandbox
 	}
 	defer sandbox.close()
 
-	process, err := s.executeSandboxProcessDirective(sandboxDirectiveProcessRestart, struct {
+	process, err := sandbox.executeSandboxProcessDirective(sandboxDirectiveProcessRestart, struct {
 		Key string `json:"key"`
 	}{Key: cfg.Name}, "restart")
 	if err != nil {
@@ -814,7 +816,7 @@ func (s Service) StopSandboxBackground(cfg SandboxBackgroundConfig) (*SandboxBac
 			Key: cfg.Name, RunID: sandbox.runID, StateDirectory: stateDirectory,
 		})
 	}
-	process, processErr := s.executeSandboxProcessDirective(sandboxDirectiveProcessStop, struct {
+	process, processErr := sandbox.executeSandboxProcessDirective(sandboxDirectiveProcessStop, struct {
 		Key string `json:"key"`
 	}{Key: cfg.Name}, "stop")
 	if processErr != nil && stateErr != nil {
@@ -851,7 +853,7 @@ func (s Service) LogsSandboxBackground(cfg SandboxBackgroundLogsConfig) (*Sandbo
 	}
 	defer sandbox.close()
 
-	process, err := s.executeSandboxProcessDirective(sandboxDirectiveProcessLogs, struct {
+	process, err := sandbox.executeSandboxProcessDirective(sandboxDirectiveProcessLogs, struct {
 		Key string `json:"key"`
 	}{Key: cfg.Name}, "get logs for")
 	if err != nil {
@@ -916,10 +918,11 @@ func (s Service) LogsSandboxBackground(cfg SandboxBackgroundLogsConfig) (*Sandbo
 	}
 
 	sandbox.close()
-	if err := s.connectSSH(&sandbox.connectionInfo); err != nil {
+	connection, err := s.connectSSH(&sandbox.connectionInfo)
+	if err != nil {
 		return nil, errors.Wrap(err, "failed to reconnect for sandbox process logs")
 	}
-	defer s.SSHClient.Close()
+	defer connection.client.Close()
 	if cfg.Follow {
 		var command string
 		if process.LogPath != "" {
@@ -927,7 +930,7 @@ func (s Service) LogsSandboxBackground(cfg SandboxBackgroundLogsConfig) (*Sandbo
 		} else {
 			command = fmt.Sprintf("tail -n +1 -F -- %s %s", quoteShellArg(process.StdoutPath), quoteShellArg(process.StderrPath))
 		}
-		exitCode, err := s.SSHClient.ExecuteCommand(command)
+		exitCode, err := connection.client.ExecuteCommand(command)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to follow sandbox process logs")
 		}
@@ -945,7 +948,7 @@ func (s Service) LogsSandboxBackground(cfg SandboxBackgroundLogsConfig) (*Sandbo
 			quoteShellArg(process.StdoutPath), quoteShellArg(process.StderrPath),
 		)
 	}
-	exitCode, err := s.SSHClient.ExecuteCommand(command)
+	exitCode, err := connection.client.ExecuteCommand(command)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read sandbox process logs")
 	}
@@ -972,12 +975,12 @@ type sandboxProcessResponse struct {
 	LogsID                 string `json:"logsId,omitempty"`
 }
 
-func (s Service) executeSandboxProcessDirective(directive string, request any, action string) (sandboxProcessResponse, error) {
+func (connection *sandboxConnection) executeSandboxProcessDirective(directive string, request any, action string) (sandboxProcessResponse, error) {
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return sandboxProcessResponse{}, errors.Wrap(err, "unable to encode sandbox process request")
 	}
-	exitCode, output, stderr, err := s.SSHClient.ExecuteCommandWithSeparateOutput(directive + " " + string(payload))
+	exitCode, output, stderr, err := connection.client.ExecuteCommandWithSeparateOutput(directive + " " + string(payload))
 	if err != nil {
 		return sandboxProcessResponse{}, errors.Wrapf(err, "failed to %s sandbox background process", action)
 	}
@@ -1021,16 +1024,11 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 			return nil, errors.Wrap(err, "failed to close local tunnel")
 		}
 	} else {
-		transport, err := s.sandboxTransport(&sandbox.connectionInfo)
-		if err != nil {
-			return nil, err
-		}
-
 		tunnel, err := s.SSHTunnelManager.Open(rwxssh.TunnelConfig{
 			Key:            process.Key,
 			RunID:          sandbox.runID,
 			Address:        sandbox.connectionInfo.Address,
-			Transport:      transport,
+			Transport:      sandbox.transport,
 			PrivateUserKey: sandbox.connectionInfo.PrivateUserKey,
 			PublicHostKey:  sandbox.connectionInfo.PublicHostKey,
 			LocalPort:      localPort,
@@ -1048,7 +1046,7 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 		deadline := time.Now().Add(30 * time.Second)
 		portReadyDirectiveSupported := process.SupportsPortReadyCheck
 		for {
-			ready, directiveSupported, readyErr := s.sandboxPortReady(process.TargetPort, tunnel.LocalPort, portReadyDirectiveSupported)
+			ready, directiveSupported, readyErr := s.sandboxPortReady(sandbox.sandboxConnection, process.TargetPort, tunnel.LocalPort, portReadyDirectiveSupported)
 			if readyErr != nil {
 				return nil, readyErr
 			}
@@ -1057,7 +1055,7 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 				break
 			}
 
-			status, statusErr := s.executeSandboxProcessDirective(sandboxDirectiveProcessStatus, struct {
+			status, statusErr := sandbox.executeSandboxProcessDirective(sandboxDirectiveProcessStatus, struct {
 				Key string `json:"key"`
 			}{Key: process.Key}, "get status for")
 			if statusErr != nil {
@@ -1099,9 +1097,9 @@ func (s Service) finishSandboxBackground(sandbox *syncedSandbox, process sandbox
 	return result, nil
 }
 
-func (s Service) sandboxPortReady(targetPort, localPort int, directiveSupported bool) (bool, bool, error) {
+func (s Service) sandboxPortReady(connection *sandboxConnection, targetPort, localPort int, directiveSupported bool) (bool, bool, error) {
 	if directiveSupported {
-		exitCode, _, _, err := s.SSHClient.ExecuteCommandWithSeparateOutput(fmt.Sprintf("%s %d", sandboxDirectivePortReady, targetPort))
+		exitCode, _, _, err := connection.client.ExecuteCommandWithSeparateOutput(fmt.Sprintf("%s %d", sandboxDirectivePortReady, targetPort))
 		if err != nil {
 			return false, directiveSupported, errors.Wrap(err, "failed to check sandbox port readiness")
 		}
@@ -1389,9 +1387,9 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 		if found && cfg.Reset {
 			connInfo, connErr := resolution.getConnectionInfo(s.APIClient, runID, scopedToken)
 			if connErr == nil && connInfo.Sandboxable {
-				if sshErr := s.connectSSH(&connInfo); sshErr == nil {
-					_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_end__")
-					s.SSHClient.Close()
+				if connection, sshErr := s.connectSSH(&connInfo); sshErr == nil {
+					_, _ = connection.client.ExecuteCommand("__rwx_sandbox_end__")
+					connection.client.Close()
 				} else {
 					if cancelErr := s.APIClient.CancelRun(runID, scopedToken); cancelErr != nil {
 						fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", runID, cancelErr)
@@ -1494,7 +1492,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 	// Connect via SSH
 	resolution.resolutionToSSHMs = time.Since(resolution.selectionCompletedAt).Milliseconds()
 	resolution.durationMs = time.Since(resolution.start).Milliseconds()
-	err = s.connectSSH(connInfo)
+	connection, err := s.connectSSH(connInfo)
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
@@ -1525,23 +1523,23 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 			}
 		}()
 	}
-	_, lockErr := s.SSHClient.ExecuteCommand(sandboxDirectiveLockRequested)
+	_, lockErr := connection.client.ExecuteCommand(sandboxDirectiveLockRequested)
 	close(lockDone)
 	if lockErr != nil {
-		s.SSHClient.Close()
+		connection.client.Close()
 		return nil, errors.Wrap(lockErr, "failed to acquire sandbox lock")
 	}
 
 	result = &syncedSandbox{
-		cwd:            cwd,
-		branch:         branch,
-		runID:          runID,
-		configFile:     configFile,
-		runURL:         s.sandboxRunURL(&SandboxSession{RunURL: sessionRunURL}),
-		connectionInfo: *connInfo,
+		sandboxConnection: connection,
+		cwd:               cwd,
+		branch:            branch,
+		runID:             runID,
+		configFile:        configFile,
+		runURL:            s.sandboxRunURL(&SandboxSession{RunURL: sessionRunURL}),
 		release: func() {
-			_, _ = s.SSHClient.ExecuteCommand(sandboxDirectiveLockReleased)
-			s.SSHClient.Close()
+			_, _ = connection.client.ExecuteCommand(sandboxDirectiveLockReleased)
+			connection.client.Close()
 		},
 	}
 
@@ -1551,13 +1549,13 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 
 	// Sync local changes to sandbox.
 	syncPushStart := time.Now()
-	patchBytes, err := s.syncLocalChangesToSandbox(cfg.Json, isNewSandbox, connInfo)
+	patchBytes, err := s.syncLocalChangesToSandbox(connection, cfg.Json, isNewSandbox)
 	result.syncPushMs = time.Since(syncPushStart).Milliseconds()
 	result.syncPushPatchBytes = patchBytes
 	if err != nil {
 		if errors.Is(err, errors.ErrSandboxNoGitDir) {
 			// Stop the sandbox so the user gets a fresh one on retry
-			if _, endErr := s.SSHClient.ExecuteCommand("__rwx_sandbox_end__"); endErr != nil {
+			if _, endErr := connection.client.ExecuteCommand("__rwx_sandbox_end__"); endErr != nil {
 				fmt.Fprintf(s.Stderr, "Warning: failed to stop sandbox: %v\n", endErr)
 			}
 			storageLockStart := time.Now()
@@ -1608,7 +1606,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	// preserves the original grouping (e.g. bash -c "cat README.md").
 	command := shellescape.QuoteCommand(cfg.Command)
 	cmdStart := time.Now()
-	exitCode, err := s.SSHClient.ExecuteCommand(command)
+	exitCode, err := sandbox.client.ExecuteCommand(command)
 	cmdDuration := time.Since(cmdStart).Milliseconds()
 	s.recordTelemetry("ssh.command", map[string]any{
 		"duration_ms": cmdDuration,
@@ -1626,7 +1624,7 @@ func (s Service) ExecSandbox(cfg ExecSandboxConfig) (*ExecSandboxResult, error) 
 	var syncPullSuccess bool
 	var syncPullRejCount int
 	pullStart := time.Now()
-	pulled, pullPatchBytes, pullErr := s.pullChangesFromSandbox(sandbox.cwd, cfg.Json)
+	pulled, pullPatchBytes, pullErr := s.pullChangesFromSandbox(sandbox.sandboxConnection, sandbox.cwd, cfg.Json)
 	syncPullMs = time.Since(pullStart).Milliseconds()
 	syncPullPatchBytes = pullPatchBytes
 	if pullErr != nil {
@@ -1866,9 +1864,9 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 		// Check if sandbox is still active and send stop command (use scoped token if available)
 		connInfo, err := s.APIClient.GetSandboxConnectionInfo(session.RunID, session.ScopedToken)
 		if err == nil && connInfo.Sandboxable {
-			if err := s.connectSSH(&connInfo); err == nil {
-				_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_end__")
-				s.SSHClient.Close()
+			if connection, err := s.connectSSH(&connInfo); err == nil {
+				_, _ = connection.client.ExecuteCommand("__rwx_sandbox_end__")
+				connection.client.Close()
 				wasRunning = true
 				cancelMethod = "ssh"
 			} else {
@@ -1999,9 +1997,9 @@ func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, erro
 			// Check if still running and stop it (use scoped token if available)
 			connInfo, err := s.APIClient.GetSandboxConnectionInfo(session.RunID, session.ScopedToken)
 			if err == nil && connInfo.Sandboxable {
-				if err := s.connectSSH(&connInfo); err == nil {
-					_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_end__")
-					s.SSHClient.Close()
+				if connection, err := s.connectSSH(&connInfo); err == nil {
+					_, _ = connection.client.ExecuteCommand("__rwx_sandbox_end__")
+					connection.client.Close()
 					cancelMethod = "ssh"
 				} else {
 					// SSH connection failed — cancel via API to avoid orphaned runs
@@ -2065,19 +2063,19 @@ func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, erro
 
 // pullChangesFromSandbox pulls changes from the sandbox back to the local working directory.
 // It assumes the SSH connection is already established.
-func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, int, error) {
+func (s Service) pullChangesFromSandbox(connection *sandboxConnection, cwd string, jsonMode bool) ([]string, int, error) {
 	// Mark start of sync operations (Mint filters these from logs)
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_start__")
 
 	// Include untracked files in the diff by adding them with intent-to-add
 	// Get untracked files, add with -N, get diff, then reset
-	lsExitCode, untrackedOutput, lsErr := s.SSHClient.ExecuteCommandWithOutput(sandboxWorktreeRootCommand("git ls-files -z --others --exclude-standard"))
+	lsExitCode, untrackedOutput, lsErr := connection.client.ExecuteCommandWithOutput(sandboxWorktreeRootCommand("git ls-files -z --others --exclude-standard"))
 	if lsErr != nil {
-		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+		_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 		return nil, 0, errors.Wrap(lsErr, "failed to list untracked files in sandbox")
 	}
 	if lsExitCode != 0 {
-		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+		_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 		return nil, 0, fmt.Errorf("failed to list untracked files in sandbox: git ls-files failed with exit code %d", lsExitCode)
 	}
 
@@ -2090,20 +2088,20 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 			quotedFiles[i] = quoteShellArg(f)
 		}
 		addCmd := sandboxWorktreeRootCommand(fmt.Sprintf("git add -N -- %s", strings.Join(quotedFiles, " ")))
-		addExitCode, _, addErr := s.SSHClient.ExecuteCommandWithOutput(addCmd)
+		addExitCode, _, addErr := connection.client.ExecuteCommandWithOutput(addCmd)
 		if addErr != nil {
-			_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+			_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 			return nil, 0, errors.Wrap(addErr, "failed to stage untracked files in sandbox")
 		}
 		if addExitCode != 0 {
-			_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+			_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 			return nil, 0, fmt.Errorf("failed to stage untracked files in sandbox: git add failed with exit code %d", addExitCode)
 		}
 	}
 
 	// Get patch from sandbox (stdout only to avoid output capture issues after sync markers).
 	// Binary diffs need full indexes so local git apply can recreate new binary files.
-	exitCode, patch, err := s.SSHClient.ExecuteCommandWithOutput(sandboxWorktreeRootCommand(vcstypes.PatchDiffCommand("git", "--binary", "--full-index", "--no-renames", "refs/rwx-sync")))
+	exitCode, patch, err := connection.client.ExecuteCommandWithOutput(sandboxWorktreeRootCommand(vcstypes.PatchDiffCommand("git", "--binary", "--full-index", "--no-renames", "refs/rwx-sync")))
 	patchBytes := len(patch)
 
 	// Reset the intent-to-add for untracked files
@@ -2113,7 +2111,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 			quotedFiles[i] = quoteShellArg(f)
 		}
 		resetCmd := sandboxWorktreeRootCommand(fmt.Sprintf("git reset HEAD -- %s", strings.Join(quotedFiles, " ")))
-		resetExitCode, _, resetErr := s.SSHClient.ExecuteCommandWithOutput(resetCmd)
+		resetExitCode, _, resetErr := connection.client.ExecuteCommandWithOutput(resetCmd)
 		if resetErr != nil {
 			fmt.Fprintf(s.Stderr, "Warning: failed to reset staged files in sandbox: %v\n", resetErr)
 		} else if resetExitCode != 0 {
@@ -2122,7 +2120,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 	}
 
 	// Mark end of sync operations
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if err != nil {
 		return nil, patchBytes, errors.Wrap(err, "failed to get diff from sandbox")
 	}
@@ -2189,7 +2187,7 @@ func (s Service) pullChangesFromSandbox(cwd string, jsonMode bool) ([]string, in
 	return files, patchBytes, nil
 }
 
-func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, connInfo *api.SandboxConnectionInfo) (int, error) {
+func (s Service) syncLocalChangesToSandbox(connection *sandboxConnection, jsonMode bool, isNewSandbox bool) (int, error) {
 	// Booting a sandbox or waiting on its lock can take minutes, and under jj
 	// every edit in that window rewrites @, so resolve the head now rather than
 	// pinning the sandbox to a working copy the user has moved past.
@@ -2220,12 +2218,12 @@ func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, con
 		s.recordTelemetry("sandbox.sync_push", props)
 	}()
 
-	if err := s.ensureSandboxHasCommit(localHead, connInfo); err != nil {
+	if err := s.ensureSandboxHasCommit(connection, localHead); err != nil {
 		syncPushErr = err
 		return patchBytes, syncPushErr
 	}
 
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_start__")
 	head := quoteShellArg(localHead)
 	branch := s.VCSClient.GetBranch()
 	gitCommand := "GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false git"
@@ -2235,7 +2233,7 @@ func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, con
 	} else {
 		checkoutCommand = fmt.Sprintf("%s checkout -f -B %s %s >/dev/null 2>&1 && %s reset --hard %s >/dev/null 2>&1", gitCommand, quoteShellArg(branch), head, gitCommand, head)
 	}
-	checkoutExitCode, checkoutErr := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand(checkoutCommand))
+	checkoutExitCode, checkoutErr := connection.client.ExecuteCommand(sandboxWorktreeRootCommand(checkoutCommand))
 	if checkoutErr != nil {
 		checkoutErr = errors.Wrap(checkoutErr, "failed to reset sandbox to local git state")
 	} else if checkoutExitCode != 0 {
@@ -2244,8 +2242,8 @@ func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, con
 	if checkoutErr != nil {
 		// Prefer the more actionable "missing LFS objects" error, but ignore a
 		// failure of the check itself so it can't mask the checkout error.
-		lfsMissing, _ := s.checkSandboxLFSObjects(localHead)
-		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+		lfsMissing, _ := connection.checkSandboxLFSObjects(localHead)
+		_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 		if lfsMissing != nil {
 			syncPushErr = lfsMissing
 			return patchBytes, syncPushErr
@@ -2253,8 +2251,8 @@ func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, con
 		syncPushErr = checkoutErr
 		return patchBytes, syncPushErr
 	}
-	if err := s.verifySandboxLFSObjects(localHead); err != nil {
-		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+	if err := connection.verifySandboxLFSObjects(localHead); err != nil {
+		_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 		syncPushErr = err
 		return patchBytes, syncPushErr
 	}
@@ -2263,19 +2261,19 @@ func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, con
 	// the same known baseline. A new sandbox may contain setup-created files, so
 	// preserve those on its first operation.
 	if !isNewSandbox {
-		exitCode, cleanErr := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand("git clean -fd >/dev/null 2>&1"))
+		exitCode, cleanErr := connection.client.ExecuteCommand(sandboxWorktreeRootCommand("git clean -fd >/dev/null 2>&1"))
 		if cleanErr != nil {
-			_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+			_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 			syncPushErr = errors.Wrap(cleanErr, "failed to clean sandbox before sync")
 			return patchBytes, syncPushErr
 		}
 		if exitCode != 0 {
-			_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+			_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 			syncPushErr = fmt.Errorf("failed to clean sandbox before sync (exit code %d)", exitCode)
 			return patchBytes, syncPushErr
 		}
 	}
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 
 	patches, err := s.VCSClient.GenerateDirtyPatches()
 	if err != nil {
@@ -2290,17 +2288,17 @@ func (s Service) syncLocalChangesToSandbox(jsonMode bool, isNewSandbox bool, con
 		return patchBytes, syncPushErr
 	}
 
-	if err := s.removePreAppliedNewFilesFromSandbox(patches); err != nil {
+	if err := connection.removePreAppliedNewFilesFromSandbox(patches); err != nil {
 		syncPushErr = err
 		return patchBytes, syncPushErr
 	}
 
-	if err := s.applyDirtyPatchesToSandbox(patches); err != nil {
+	if err := connection.applyDirtyPatchesToSandbox(patches); err != nil {
 		syncPushErr = err
 		return patchBytes, syncPushErr
 	}
 
-	if err := s.snapshotSandboxSyncRef(isNewSandbox, patches.Files); err != nil {
+	if err := connection.snapshotSandboxSyncRef(isNewSandbox, patches.Files); err != nil {
 		syncPushErr = err
 		return patchBytes, syncPushErr
 	}
@@ -2329,52 +2327,43 @@ func (s Service) warnUnresolvedRejectFiles() {
 	fmt.Fprintln(s.Stderr, "These will be synced to the sandbox and may cause issues. Resolve and delete them when possible.")
 }
 
-func (s Service) ensureSandboxHasCommit(localHead string, connInfo *api.SandboxConnectionInfo) error {
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	gitDirExitCode, gitDirErr := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand("test -d .git || test -f .git"))
+func (s Service) ensureSandboxHasCommit(connection *sandboxConnection, localHead string) error {
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_start__")
+	gitDirExitCode, gitDirErr := connection.client.ExecuteCommand(sandboxWorktreeRootCommand("test -d .git || test -f .git"))
 	if gitDirErr != nil {
-		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+		_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 		return errors.Wrap(gitDirErr, "failed to check sandbox git directory")
 	}
 	if gitDirExitCode != 0 {
-		_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+		_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 		return errors.ErrSandboxNoGitDir
 	}
 
-	hasCommit := s.sandboxHasCommit(localHead)
+	hasCommit := connection.sandboxHasCommit(localHead)
 	if !hasCommit {
-		_, _ = s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand("git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1"))
-		hasCommit = s.sandboxHasCommit(localHead)
+		_, _ = connection.client.ExecuteCommand(sandboxWorktreeRootCommand("git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1"))
+		hasCommit = connection.sandboxHasCommit(localHead)
 	}
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 
 	if hasCommit {
 		return nil
 	}
 
-	return s.pushLocalHeadToSandbox(localHead, connInfo)
+	return s.pushLocalHeadToSandbox(connection, localHead)
 }
 
-func (s Service) pushLocalHeadToSandbox(localHead string, connInfo *api.SandboxConnectionInfo) error {
-	if connInfo == nil {
-		return fmt.Errorf("sandbox connection info is required to push local commits")
-	}
-
-	transport, err := s.sandboxTransport(connInfo)
-	if err != nil {
-		return err
-	}
-
-	opts, cleanup, err := sandboxGitPushOptions(localHead, connInfo, transport)
+func (s Service) pushLocalHeadToSandbox(connection *sandboxConnection, localHead string) error {
+	opts, cleanup, err := sandboxGitPushOptions(localHead, &connection.connectionInfo, connection.transport)
 	defer cleanup()
 	if err != nil {
 		return err
 	}
 
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_start__")
 	pushErr := s.VCSClient.PushRef(opts)
-	hasCommit := pushErr == nil && s.sandboxHasCommit(localHead)
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+	hasCommit := pushErr == nil && connection.sandboxHasCommit(localHead)
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if pushErr != nil {
 		if isShallowUpdateRejection(pushErr) {
 			return errors.WrapSentinel(errors.New(sandboxShallowSyncMessage), errors.ErrShallowClone)
@@ -2424,8 +2413,8 @@ func sandboxSyncFailureReason(err error) string {
 	}
 }
 
-func (s Service) verifySandboxLFSObjects(localHead string) error {
-	missing, checkErr := s.checkSandboxLFSObjects(localHead)
+func (connection *sandboxConnection) verifySandboxLFSObjects(localHead string) error {
+	missing, checkErr := connection.checkSandboxLFSObjects(localHead)
 	if checkErr != nil {
 		return checkErr
 	}
@@ -2435,8 +2424,8 @@ func (s Service) verifySandboxLFSObjects(localHead string) error {
 // checkSandboxLFSObjects separates a detected missing-object problem (missing)
 // from a failure to run the check (checkErr), so callers can ignore the latter
 // when they already have a more specific error.
-func (s Service) checkSandboxLFSObjects(localHead string) (missing error, checkErr error) {
-	exitCode, output, err := s.SSHClient.ExecuteCommandWithOutput(sandboxLFSFsckCommand(localHead))
+func (connection *sandboxConnection) checkSandboxLFSObjects(localHead string) (missing error, checkErr error) {
+	exitCode, output, err := connection.client.ExecuteCommandWithOutput(sandboxLFSFsckCommand(localHead))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to check sandbox Git LFS objects")
 	}
@@ -2575,20 +2564,20 @@ func sandboxGitPushOptions(localHead string, connInfo *api.SandboxConnectionInfo
 	}, cleanup, nil
 }
 
-func (s Service) sandboxHasCommit(sha string) bool {
-	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand(fmt.Sprintf("git cat-file -e %s^{commit} >/dev/null 2>&1", quoteShellArg(sha))))
+func (connection *sandboxConnection) sandboxHasCommit(sha string) bool {
+	exitCode, err := connection.client.ExecuteCommand(sandboxWorktreeRootCommand(fmt.Sprintf("git cat-file -e %s^{commit} >/dev/null 2>&1", quoteShellArg(sha))))
 	return err == nil && exitCode == 0
 }
 
-func (s Service) applyDirtyPatchesToSandbox(patches vcs.DirtyPatches) error {
+func (connection *sandboxConnection) applyDirtyPatchesToSandbox(patches vcs.DirtyPatches) error {
 	if len(patches.Staged) > 0 {
-		if err := s.applyPatchToSandbox("git apply --index --allow-empty -", patches.Staged); err != nil {
+		if err := connection.applyPatchToSandbox("git apply --index --allow-empty -", patches.Staged); err != nil {
 			return err
 		}
 	}
 
 	if len(patches.Unstaged) > 0 {
-		if err := s.applyPatchToSandbox("git apply --allow-empty -", patches.Unstaged); err != nil {
+		if err := connection.applyPatchToSandbox("git apply --allow-empty -", patches.Unstaged); err != nil {
 			return err
 		}
 	}
@@ -2596,7 +2585,7 @@ func (s Service) applyDirtyPatchesToSandbox(patches vcs.DirtyPatches) error {
 	return nil
 }
 
-func (s Service) removePreAppliedNewFilesFromSandbox(patches vcs.DirtyPatches) error {
+func (connection *sandboxConnection) removePreAppliedNewFilesFromSandbox(patches vcs.DirtyPatches) error {
 	paths := newFilePathsForDirtyPatches(patches)
 	if len(paths) == 0 {
 		return nil
@@ -2609,9 +2598,9 @@ func (s Service) removePreAppliedNewFilesFromSandbox(patches vcs.DirtyPatches) e
 	// -x: the pre-applied file the patch re-creates may be gitignored, which a plain git clean skips.
 	script := fmt.Sprintf("git clean -fdx -- %s >/dev/null 2>&1", strings.Join(quoted, " "))
 
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand(script))
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_start__")
+	exitCode, err := connection.client.ExecuteCommand(sandboxWorktreeRootCommand(script))
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if err != nil {
 		return errors.Wrap(err, "failed to prepare new sandbox files for sync")
 	}
@@ -2621,10 +2610,10 @@ func (s Service) removePreAppliedNewFilesFromSandbox(patches vcs.DirtyPatches) e
 	return nil
 }
 
-func (s Service) applyPatchToSandbox(command string, patch []byte) error {
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	exitCode, output, err := s.SSHClient.ExecuteCommandWithStdinAndCombinedOutput(sandboxWorktreeRootCommand(command), bytes.NewReader(patch))
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+func (connection *sandboxConnection) applyPatchToSandbox(command string, patch []byte) error {
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_start__")
+	exitCode, output, err := connection.client.ExecuteCommandWithStdinAndCombinedOutput(sandboxWorktreeRootCommand(command), bytes.NewReader(patch))
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if err != nil {
 		return errors.WrapSentinel(errors.Wrap(err, "failed to apply patch on sandbox"), errors.ErrPatch)
 	}
@@ -2645,7 +2634,7 @@ func (s Service) applyPatchToSandbox(command string, patch []byte) error {
 // reused sandbox already matches local state. A new sandbox may hold files its
 // setup tasks created, so only the local dirty paths are staged; with none,
 // which is always the case under jj, the baseline is the checked-out tree.
-func (s Service) snapshotSandboxSyncRef(isNewSandbox bool, localPaths []string) error {
+func (connection *sandboxConnection) snapshotSandboxSyncRef(isNewSandbox bool, localPaths []string) error {
 	stage := "git add -A && "
 	if isNewSandbox {
 		stage = ""
@@ -2662,9 +2651,9 @@ func (s Service) snapshotSandboxSyncRef(isNewSandbox bool, localPaths []string) 
 	script += stage
 	script += `git -c user.name=rwx -c user.email=rwx -c core.hooksPath=/dev/null commit --allow-empty --no-verify -m rwx-sync >/dev/null 2>&1 && git update-ref refs/rwx-sync HEAD && git reset --mixed HEAD~1 >/dev/null 2>&1 && git read-tree "$index_tree"`
 
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_start__")
-	exitCode, err := s.SSHClient.ExecuteCommand(sandboxWorktreeRootCommand(script))
-	_, _ = s.SSHClient.ExecuteCommand("__rwx_sandbox_sync_end__")
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_start__")
+	exitCode, err := connection.client.ExecuteCommand(sandboxWorktreeRootCommand(script))
+	_, _ = connection.client.ExecuteCommand("__rwx_sandbox_sync_end__")
 	if err != nil {
 		return errors.Wrap(err, "failed to create sync snapshot ref")
 	}
@@ -2997,25 +2986,25 @@ func (s Service) sandboxTransport(connInfo *api.SandboxConnectionInfo) (rwxssh.T
 	}, nil
 }
 
-func (s Service) connectSSH(connInfo *api.SandboxConnectionInfo) error {
+func (s Service) connectSSH(connInfo *api.SandboxConnectionInfo) (*sandboxConnection, error) {
 	transport, err := s.sandboxTransport(connInfo)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	privateUserKey, err := ssh.ParsePrivateKey([]byte(connInfo.PrivateUserKey))
 	if err != nil {
-		return errors.Wrap(err, "unable to parse key material retrieved from Cloud API")
+		return nil, errors.Wrap(err, "unable to parse key material retrieved from Cloud API")
 	}
 
 	rawPublicHostKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(connInfo.PublicHostKey))
 	if err != nil {
-		return errors.Wrap(err, "unable to parse host key retrieved from Cloud API")
+		return nil, errors.Wrap(err, "unable to parse host key retrieved from Cloud API")
 	}
 
 	publicHostKey, err := ssh.ParsePublicKey(rawPublicHostKey.Marshal())
 	if err != nil {
-		return errors.Wrap(err, "unable to parse host key retrieved from Cloud API")
+		return nil, errors.Wrap(err, "unable to parse host key retrieved from Cloud API")
 	}
 
 	sshConfig := ssh.ClientConfig{
@@ -3025,12 +3014,13 @@ func (s Service) connectSSH(connInfo *api.SandboxConnectionInfo) error {
 	}
 
 	connectStart := time.Now()
-	if err = s.SSHClient.Connect(connInfo.Address, sshConfig, transport); err != nil {
+	client := s.NewSSHClient()
+	if err = client.Connect(connInfo.Address, sshConfig, transport); err != nil {
 		s.recordTelemetry("ssh.connect", map[string]any{
 			"duration_ms": time.Since(connectStart).Milliseconds(),
 			"success":     false,
 		})
-		return errors.WrapSentinel(fmt.Errorf("unable to establish SSH connection to remote host: %w", err), errors.ErrSSH)
+		return nil, errors.WrapSentinel(fmt.Errorf("unable to establish SSH connection to remote host: %w", err), errors.ErrSSH)
 	}
 
 	s.recordTelemetry("ssh.connect", map[string]any{
@@ -3038,7 +3028,7 @@ func (s Service) connectSSH(connInfo *api.SandboxConnectionInfo) error {
 		"success":     true,
 	})
 
-	return nil
+	return &sandboxConnection{client: client, transport: transport, connectionInfo: *connInfo}, nil
 }
 
 // SandboxTitle constructs a descriptive title for sandbox runs using the
