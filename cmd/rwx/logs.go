@@ -9,11 +9,12 @@ import (
 )
 
 var (
-	LogsOutput      string
-	LogsAutoExtract bool
-	LogsZip         bool
-	LogsOpen        bool
-	LogsTaskKey     string
+	LogsOutput       string
+	LogsAutoExtract  bool
+	LogsZip          bool
+	LogsOpen         bool
+	LogsTaskKey      string
+	LogsOrganization string
 
 	logsCmd = &cobra.Command{
 		GroupID: "outputs",
@@ -58,7 +59,7 @@ var (
 				if len(args) > 0 {
 					runID = args[0]
 				} else {
-					runID, err = service.ResolveRunIDFromGitContext()
+					runID, err = service.ResolveRunIDFromGitContext(cli.ResolveRunIDConfig{OrganizationSlug: LogsOrganization})
 					if err != nil {
 						return err
 					}
@@ -83,6 +84,7 @@ var (
 )
 
 func init() {
+	logsCmd.Flags().StringVar(&LogsOrganization, "organization", "", "RWX organization slug for run discovery (requires a Git origin with an owner/repo path)")
 	logsCmd.Flags().StringVar(&LogsOutput, "output", "", "output path for the downloaded logs")
 	logsCmd.Flags().StringVar(&LogsOutput, "output-dir", "", "output path for the downloaded logs")
 	if err := logsCmd.Flags().MarkDeprecated("output-dir", "use --output instead"); err != nil {

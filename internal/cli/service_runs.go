@@ -8,6 +8,7 @@ import (
 )
 
 type ListRunsConfig struct {
+	OrganizationSlug  string
 	RepositoryNames   []string
 	Branches          []string
 	CommitShas        []string
@@ -25,7 +26,23 @@ type ListRunsConfig struct {
 }
 
 func (s Service) ListRuns(cfg ListRunsConfig) (*api.ListRunsResult, error) {
+	if cfg.OrganizationSlug != "" {
+		repositories := cfg.RepositoryNames
+		if len(repositories) == 0 {
+			repositories = []string{""}
+		}
+		cfg.RepositoryNames = make([]string, len(repositories))
+		for i, repository := range repositories {
+			name, err := s.discoveryRepository(repository)
+			if err != nil {
+				return nil, err
+			}
+			cfg.RepositoryNames[i] = name
+		}
+	}
+
 	return s.APIClient.ListRuns(api.ListRunsConfig{
+		OrganizationSlug:  cfg.OrganizationSlug,
 		RepositoryNames:   cfg.RepositoryNames,
 		Branches:          cfg.Branches,
 		CommitShas:        cfg.CommitShas,

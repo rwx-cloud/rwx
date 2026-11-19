@@ -8,13 +8,14 @@ import (
 )
 
 type GetRunStatusConfig struct {
-	RunID          string
-	TaskKey        string
-	BranchName     string
-	RepositoryName string
-	Wait           bool
-	FailFast       bool
-	Json           bool
+	OrganizationSlug string
+	RunID            string
+	TaskKey          string
+	BranchName       string
+	RepositoryName   string
+	Wait             bool
+	FailFast         bool
+	Json             bool
 }
 
 type GetRunStatusResult struct {
@@ -36,11 +37,12 @@ func (s Service) GetRunStatus(cfg GetRunStatusConfig) (*GetRunStatusResult, erro
 
 	for {
 		statusResult, err := s.APIClient.RunStatus(api.RunStatusConfig{
-			RunID:          cfg.RunID,
-			TaskKey:        cfg.TaskKey,
-			BranchName:     cfg.BranchName,
-			RepositoryName: cfg.RepositoryName,
-			FailFast:       cfg.FailFast,
+			OrganizationSlug: cfg.OrganizationSlug,
+			RunID:            cfg.RunID,
+			TaskKey:          cfg.TaskKey,
+			BranchName:       cfg.BranchName,
+			RepositoryName:   cfg.RepositoryName,
+			FailFast:         cfg.FailFast,
 		})
 		if err != nil {
 			if stopSpinner != nil {

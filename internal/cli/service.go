@@ -562,10 +562,11 @@ func (s Service) confirmDestruction(prompt string, yes bool) error {
 }
 
 type ResolveRunIDConfig struct {
-	BranchName     string
-	RepositoryName string
-	DefinitionPath string
-	CommitSha      string
+	OrganizationSlug string
+	BranchName       string
+	RepositoryName   string
+	DefinitionPath   string
+	CommitSha        string
 }
 
 // ResolveRunIDFromGitContext resolves the latest run ID by looking up the
@@ -586,15 +587,24 @@ func (s Service) ResolveRunIDFromGitContext(overrides ...ResolveRunIDConfig) (st
 		repositoryName = cfg.RepositoryName
 	}
 
+	if cfg.OrganizationSlug != "" {
+		var err error
+		repositoryName, err = s.discoveryRepository(cfg.RepositoryName)
+		if err != nil {
+			return "", err
+		}
+	}
+
 	if repositoryName == "" || (branchName == "" && cfg.CommitSha == "") {
 		return "", errors.New("unable to determine the current branch and repository from git; please provide a run ID")
 	}
 
 	result, err := s.APIClient.RunStatus(api.RunStatusConfig{
-		BranchName:     branchName,
-		RepositoryName: repositoryName,
-		DefinitionPath: cfg.DefinitionPath,
-		CommitSha:      cfg.CommitSha,
+		OrganizationSlug: cfg.OrganizationSlug,
+		BranchName:       branchName,
+		RepositoryName:   repositoryName,
+		DefinitionPath:   cfg.DefinitionPath,
+		CommitSha:        cfg.CommitSha,
 	})
 	notFoundMsg := fmt.Sprintf("no run found for %s repository", repositoryName)
 	if branchName != "" {
