@@ -455,6 +455,7 @@ func TestGetCommitDoesNotSnapshotTheWorkingCopy(t *testing.T) {
 func TestGeneratePatch(t *testing.T) {
 	t.Run("covers local commits and working copy changes", func(t *testing.T) {
 		eachLayout(t, "clone-local-work", func(t *testing.T, f fixture) {
+			require.Equal(t, vcstypes.Mixed, f.client.PatchSource(f.baseSHA, nil))
 			patch, lfs, err := f.client.GeneratePatch(nil)
 			require.NoError(t, err)
 			require.Nil(t, lfs)
@@ -471,6 +472,7 @@ func TestGeneratePatch(t *testing.T) {
 
 	t.Run("includes local commits with a clean working copy", func(t *testing.T) {
 		eachLayout(t, "clone-local-commit", func(t *testing.T, f fixture) {
+			require.Equal(t, vcstypes.Unpushed, f.client.PatchSource(f.baseSHA, nil))
 			patch, _, err := f.client.GeneratePatch(nil)
 			require.NoError(t, err)
 			require.Contains(t, string(patch), "+committed")
@@ -479,6 +481,7 @@ func TestGeneratePatch(t *testing.T) {
 
 	t.Run("includes files that only exist in the working copy", func(t *testing.T) {
 		eachLayout(t, "clone-new-file", func(t *testing.T, f fixture) {
+			require.Equal(t, vcstypes.Uncommitted, f.client.PatchSource(f.baseSHA, nil))
 			patch, _, err := f.client.GeneratePatch(nil)
 			require.NoError(t, err)
 			require.Contains(t, string(patch), "b/added.txt")

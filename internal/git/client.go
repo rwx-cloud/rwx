@@ -165,6 +165,18 @@ func (c *Client) GetRemoteUrl(remote string) string {
 	return strings.TrimSpace(string(url))
 }
 
+func (c *Client) PatchSource(base string, pathspec []string) vcstypes.PatchSource {
+	cmd := func(args []string) *exec.Cmd {
+		command := exec.Command(c.Binary, append(append(args, "--"), pathspec...)...)
+		command.Dir = c.Dir
+		return command
+	}
+	return vcstypes.ClassifyPatch(
+		cmd(vcstypes.PatchDiffArgs("--name-only", base, "HEAD")),
+		cmd([]string{"status", "--porcelain=v1", "--untracked-files=normal", "--ignore-submodules=dirty"}),
+	)
+}
+
 // generatePatchData generates patch data for working tree changes relative to the base commit on origin.
 // On a git command failure it returns a *vcstypes.PatchError identifying which command failed and why.
 func (c *Client) generatePatchData(pathspec []string) (vcstypes.PatchResult, *vcstypes.PatchError) {

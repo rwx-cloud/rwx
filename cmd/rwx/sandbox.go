@@ -27,10 +27,10 @@ var sandboxStartCmd = &cobra.Command{
 
 FILE PATCHING
   When starting a new sandbox, RWX launches a run from the sandbox config and
-  includes a git patch for local uncommitted changes when possible.
+  includes a git patch for unpushed commits and uncommitted changes when possible.
 
-  Git LFS changes cannot be included in the initial sandbox patch and will
-  produce an error. Commit and push those changes before starting the sandbox.
+  Git LFS changes cannot be included in the initial sandbox patch. They must
+  be on the remote before starting the sandbox.
 `,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

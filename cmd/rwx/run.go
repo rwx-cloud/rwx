@@ -210,11 +210,11 @@ var (
 		Long: `Launch a run from a local RWX definitions file.
 
 FILE PATCHING
-  When possible, RWX uploads a git patch for local uncommitted changes with
-  the run. This includes staged changes, unstaged changes, and untracked files.
+  When possible, RWX uploads a git patch for unpushed commits and uncommitted
+  changes, including staged changes, unstaged changes, and untracked files.
 
-  Git LFS changes cannot be included in the run patch and will produce an
-  error. Commit and push those changes before starting the run.
+  Git LFS changes cannot be included in the run patch. They must be on the
+  remote before starting the run.
 `,
 		Use: "run <file> [flags]",
 	}
