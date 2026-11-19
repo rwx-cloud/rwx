@@ -35,17 +35,9 @@ func (s Service) sandboxWebSocketTransport(connInfo *api.SandboxConnectionInfo) 
 		return nil, fmt.Errorf("sandbox WebSocket endpoint must use wss://")
 	}
 
-	accessToken, err := s.APIClient.AccessToken()
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to retrieve access token for WSS transport")
-	}
-	if accessToken == "" {
-		return nil, fmt.Errorf("RWX access token required for WSS transport")
-	}
-
 	return rwxssh.WebSocketTransport{
 		Endpoint:    connInfo.WebSocketURL,
-		AccessToken: accessToken,
+		AccessToken: connInfo.WebSocketAdmissionToken,
 	}, nil
 }
 

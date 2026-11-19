@@ -30,7 +30,7 @@ func (t WebSocketTransport) OpenSSHOptions() ([]string, []string, error) {
 	proxyCommand = strings.ReplaceAll(proxyCommand, "%", "%%")
 
 	args := []string{"-o", "ProxyCommand=" + proxyCommand, "-o", "ConnectTimeout=15"}
-	env := []string{"RWX_SANDBOX_ACCESS_TOKEN=" + t.AccessToken}
+	env := []string{"RWX_SANDBOX_ADMISSION_TOKEN=" + t.AccessToken}
 
 	return args, env, nil
 }
