@@ -219,9 +219,9 @@ type sandboxResolutionMetrics struct {
 	connectionInfoDurationsMs []int64
 }
 
-func (m *sandboxResolutionMetrics) getConnectionInfo(client APIClient, runID, scopedToken string) (api.SandboxConnectionInfo, error) {
+func (m *sandboxResolutionMetrics) getConnectionInfo(client APIClient, runID string) (api.SandboxConnectionInfo, error) {
 	start := time.Now()
-	result, err := client.GetSandboxConnectionInfo(runID, scopedToken)
+	result, err := client.GetSandboxConnectionInfo(runID)
 	m.connectionInfoDurationsMs = append(m.connectionInfoDurationsMs, time.Since(start).Milliseconds())
 	return result, err
 }
@@ -323,8 +323,7 @@ func (s Service) CheckExistingSandbox(configFile string) (*CheckExistingSandboxR
 		return &CheckExistingSandboxResult{Exists: false}, nil
 	}
 
-	// Check if the run is still active (use scoped token if available)
-	connInfo, err := s.APIClient.GetSandboxConnectionInfo(session.RunID, session.ScopedToken)
+	connInfo, err := s.APIClient.GetSandboxConnectionInfo(session.RunID)
 	if err != nil {
 		// Can't check status, treat as not active
 		return &CheckExistingSandboxResult{
@@ -368,16 +367,9 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 		if cfg.storageLock != nil {
 			UnlockSandboxStorage(cfg.storageLock)
 		}
-		// Check if we have an existing session with a scoped token
-		var existingScopedToken string
-		storage, err := LoadSandboxStorage()
-		if err == nil {
-			if existingSession, _, found := storage.FindByRunID(cfg.RunID); found {
-				existingScopedToken = existingSession.ScopedToken
-			}
-		}
+		storage, _ := LoadSandboxStorage()
 
-		connInfo, err := s.APIClient.GetSandboxConnectionInfo(cfg.RunID, existingScopedToken)
+		connInfo, err := s.APIClient.GetSandboxConnectionInfo(cfg.RunID)
 		if err != nil {
 			return nil, errors.Wrapf(err, "unable to get sandbox info for %s", cfg.RunID)
 		}
@@ -388,25 +380,13 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 
 		// Only wait for sandbox to be ready if --wait flag is set
 		if cfg.Wait && !connInfo.Sandboxable {
-			if _, err := s.waitForSandboxReadyWithToken(cfg.RunID, existingScopedToken, cfg.Json, nil); err != nil {
+			if _, err := s.waitForSandboxReady(cfg.RunID, cfg.Json, nil); err != nil {
 				return nil, err
 			}
 		}
 
-		// Store session if not already stored, creating a scoped token if needed
 		if storage != nil {
 			if _, _, found := storage.FindByRunID(cfg.RunID); !found {
-				// Create a scoped token for this reattached session
-				var scopedToken string
-				tokenResult, err := s.APIClient.CreateSandboxToken(api.CreateSandboxTokenConfig{
-					RunID: cfg.RunID,
-				})
-				if err != nil {
-					fmt.Fprintf(s.Stderr, "Warning: Unable to create scoped token: %v\n", err)
-				} else {
-					scopedToken = tokenResult.Token
-				}
-
 				storageLockStart := time.Now()
 				lockFile, lockErr := s.lockSandboxStorageWithInfo(cfg.Json)
 				storageLockWaitMs := time.Since(storageLockStart).Milliseconds()
@@ -421,10 +401,9 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 						fmt.Fprintf(s.Stderr, "Warning: Unable to load sandbox sessions: %v\n", err)
 					} else {
 						storage.SetSession(branch, cfg.ConfigFile, SandboxSession{
-							RunID:       cfg.RunID,
-							ConfigFile:  cfg.ConfigFile,
-							ScopedToken: scopedToken,
-							ConfigHash:  HashConfigFile(cfg.ConfigFile),
+							RunID:      cfg.RunID,
+							ConfigFile: cfg.ConfigFile,
+							ConfigHash: HashConfigFile(cfg.ConfigFile),
 						})
 						if err := s.saveSandboxStorageWithTelemetry(storage, "reattach", storageLockWaitMs, storageLoadMs, nil, false); err != nil {
 							fmt.Fprintf(s.Stderr, "Warning: Unable to save sandbox session: %v\n", err)
@@ -488,8 +467,6 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 		finishSpinner(fmt.Sprintf("Started sandbox: %s\n%s", runResult.RunID, runResult.RunURL))
 	}
 
-	// Persist session immediately so sandbox list can find this run even if the
-	// process crashes before we finish setup (e.g. during scoped token creation).
 	// Use the caller-provided lock if available to keep check-then-create atomic.
 	lockFile := cfg.storageLock
 	if lockFile == nil {
@@ -528,56 +505,6 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 
 	UnlockSandboxStorage(lockFile)
 
-	// Request a scoped token for this run
-	var scopedToken string
-	tokenResult, err := s.APIClient.CreateSandboxToken(api.CreateSandboxTokenConfig{
-		RunID: runResult.RunID,
-	})
-	if err != nil {
-		fmt.Fprintf(s.Stderr, "Warning: Unable to create scoped token: %v\n", err)
-	} else {
-		scopedToken = tokenResult.Token
-	}
-
-	// Update session with scoped token now that we have it
-	if storage != nil {
-		var lockErr error
-		storageLockStart := time.Now()
-		lockFile, lockErr = s.lockSandboxStorageWithInfo(cfg.Json)
-		storageLockWaitMs := time.Since(storageLockStart).Milliseconds()
-		if cfg.resolution != nil {
-			cfg.resolution.storageLockWaitMs += storageLockWaitMs
-		}
-		if lockErr != nil {
-			fmt.Fprintf(s.Stderr, "Warning: Unable to lock sandbox storage: %v\n", lockErr)
-		}
-
-		// Reload under lock to avoid overwriting concurrent writes
-		storageLoadStart := time.Now()
-		storage, err = LoadSandboxStorage()
-		storageLoadMs := time.Since(storageLoadStart).Milliseconds()
-		if cfg.resolution != nil {
-			cfg.resolution.storageLoadMs += storageLoadMs
-		}
-		if err != nil {
-			fmt.Fprintf(s.Stderr, "Warning: Unable to load sandbox sessions: %v\n", err)
-		} else {
-			storage.SetSession(branch, cfg.ConfigFile, SandboxSession{
-				RunID:       runResult.RunID,
-				ConfigFile:  cfg.ConfigFile,
-				ScopedToken: scopedToken,
-				RunURL:      runResult.RunURL,
-				ConfigHash:  HashConfigFile(cfg.ConfigFile),
-				CreatedAt:   &now,
-			})
-			if err := s.saveSandboxStorageWithTelemetry(storage, "scoped_token", storageLockWaitMs, storageLoadMs, cfg.resolution, false); err != nil {
-				fmt.Fprintf(s.Stderr, "Warning: Unable to save sandbox session: %v\n", err)
-			}
-		}
-
-		UnlockSandboxStorage(lockFile)
-	}
-
 	s.recordTelemetry("sandbox.start", map[string]any{
 		"reuse": false,
 	})
@@ -591,7 +518,7 @@ func (s Service) StartSandbox(cfg StartSandboxConfig) (*StartSandboxResult, erro
 
 	// Only wait for sandbox to be ready if --wait flag is set
 	if cfg.Wait {
-		_, err = s.waitForSandboxReadyWithToken(runResult.RunID, scopedToken, cfg.Json, nil)
+		_, err = s.waitForSandboxReady(runResult.RunID, cfg.Json, nil)
 		if err != nil {
 			// Return result WITH error so caller can still use the URL
 			return result, err
@@ -1213,7 +1140,6 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 
 	var runID string
 	var configFile string
-	var scopedToken string
 	var sessionRunURL string
 	var storedConfigHash string
 	var execCount int
@@ -1226,17 +1152,14 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 	// 3. Auto-create new sandbox
 
 	if cfg.RunID != "" {
-		// Use specified run ID directly - waitForSandboxReadyWithToken will check if it's valid
 		runID = cfg.RunID
 		configFile = cfg.ConfigFile
 
-		// Look up scoped token from storage if session exists
 		loadStart := time.Now()
 		storage, err := LoadSandboxStorage()
 		resolution.storageLoadMs += time.Since(loadStart).Milliseconds()
 		if err == nil {
 			if existingSession, _, found := storage.FindByRunID(cfg.RunID); found {
-				scopedToken = existingSession.ScopedToken
 				sessionRunURL = existingSession.RunURL
 				storedConfigHash = existingSession.ConfigHash
 				execCount = existingSession.ExecCount
@@ -1278,10 +1201,9 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 				}
 			}
 			if found {
-				// Check if session is still valid (use scoped token if available).
 				// Polling.Completed=true with Sandboxable=true is a ready sandbox,
 				// not an expired one; only prune when the run finished without becoming sandboxable.
-				connInfo, err := resolution.getConnectionInfo(s.APIClient, session.RunID, session.ScopedToken)
+				connInfo, err := resolution.getConnectionInfo(s.APIClient, session.RunID)
 				if err != nil || (connInfo.Polling.Completed && !connInfo.Sandboxable) {
 					s.closeSandboxTunnels(session.RunID)
 					storage.DeleteSession(branch, cfg.ConfigFile)
@@ -1290,7 +1212,6 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 				} else {
 					runID = session.RunID
 					configFile = session.ConfigFile
-					scopedToken = session.ScopedToken
 					sessionRunURL = session.RunURL
 					storedConfigHash = session.ConfigHash
 					execCount = session.ExecCount
@@ -1315,7 +1236,7 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 			// the run finished without becoming sandboxable.
 			expiredSessionDeleted := false
 			for _, sess := range sessions {
-				connInfo, err := resolution.getConnectionInfo(s.APIClient, sess.RunID, sess.ScopedToken)
+				connInfo, err := resolution.getConnectionInfo(s.APIClient, sess.RunID)
 				if err == nil && (connInfo.Sandboxable || !connInfo.Polling.Completed) {
 					activeSessions = append(activeSessions, sess)
 				} else {
@@ -1344,7 +1265,6 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 				if activeSession.ConfigFile == cfgFile {
 					runID = activeSession.RunID
 					configFile = activeSession.ConfigFile
-					scopedToken = activeSession.ScopedToken
 					sessionRunURL = activeSession.RunURL
 					storedConfigHash = activeSession.ConfigHash
 					execCount = activeSession.ExecCount
@@ -1376,22 +1296,22 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 		}
 
 		if found && cfg.Reset {
-			connInfo, connErr := resolution.getConnectionInfo(s.APIClient, runID, scopedToken)
+			connInfo, connErr := resolution.getConnectionInfo(s.APIClient, runID)
 			if connErr == nil && connInfo.Sandboxable {
 				if connection, sshErr := s.connectSSH(&connInfo); sshErr == nil {
 					_, _ = connection.client.ExecuteCommand("__rwx_sandbox_end__")
 					connection.client.Close()
 				} else {
-					if cancelErr := s.APIClient.CancelRun(runID, scopedToken); cancelErr != nil {
+					if cancelErr := s.APIClient.CancelRun(runID); cancelErr != nil {
 						fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", runID, cancelErr)
 					}
 				}
 			} else if connErr == nil && !connInfo.Polling.Completed {
-				if cancelErr := s.APIClient.CancelRun(runID, scopedToken); cancelErr != nil {
+				if cancelErr := s.APIClient.CancelRun(runID); cancelErr != nil {
 					fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", runID, cancelErr)
 				}
 			}
-			s.waitForSandboxCompletion(runID, scopedToken)
+			s.waitForSandboxCompletion(runID)
 			s.closeSandboxTunnels(runID)
 			storage.DeleteSession(branch, configFile)
 			if saveErr := s.saveSandboxStorageWithTelemetry(storage, "reset", resolution.storageLockWaitMs, resolution.storageLoadMs, resolution, false); saveErr != nil {
@@ -1400,7 +1320,6 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 			found = false
 			runID = ""
 			configFile = ""
-			scopedToken = ""
 			sessionRunURL = ""
 			storedConfigHash = ""
 		}
@@ -1429,14 +1348,6 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 			}
 			runID = startResult.RunID
 			configFile = startResult.ConfigFile
-
-			// Load the newly created session to get the scoped token
-			storage, err = LoadSandboxStorage()
-			if err == nil {
-				if newSession, ok := storage.GetSession(branch, cfgFile); ok {
-					scopedToken = newSession.ScopedToken
-				}
-			}
 		} else {
 			// Resolution complete — release the file lock so concurrent operations
 			// can proceed. The agent-side lock serializes from here.
@@ -1472,10 +1383,9 @@ func (s Service) prepareSandboxOperation(cfg sandboxOperationConfig) (result *sy
 		}
 	}
 
-	// Get connection info (use scoped token if available)
 	resolution.selectionCompletedAt = time.Now()
 	resolution.selectionDurationMs = time.Since(resolution.start).Milliseconds()
-	connInfo, err := s.waitForSandboxReadyWithToken(runID, scopedToken, cfg.Json, resolution)
+	connInfo, err := s.waitForSandboxReady(runID, cfg.Json, resolution)
 	if err != nil {
 		return nil, err
 	}
@@ -1736,7 +1646,7 @@ func (s Service) ListSandboxes(cfg ListSandboxesConfig) (*ListSandboxesResult, e
 			// confirms the run is still alive. A ready sandbox reports
 			// Polling.Completed=true with Sandboxable=true.
 			status := "expired"
-			connInfo, connErr := s.APIClient.GetSandboxConnectionInfo(session.RunID, session.ScopedToken)
+			connInfo, connErr := s.APIClient.GetSandboxConnectionInfo(session.RunID)
 			if connErr == nil && (connInfo.Sandboxable || !connInfo.Polling.Completed) {
 				status = "active"
 			}
@@ -1852,8 +1762,7 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 		wasRunning := false
 		cancelMethod := ""
 
-		// Check if sandbox is still active and send stop command (use scoped token if available)
-		connInfo, err := s.APIClient.GetSandboxConnectionInfo(session.RunID, session.ScopedToken)
+		connInfo, err := s.APIClient.GetSandboxConnectionInfo(session.RunID)
 		if err == nil && connInfo.Sandboxable {
 			if connection, err := s.connectSSH(&connInfo); err == nil {
 				_, _ = connection.client.ExecuteCommand("__rwx_sandbox_end__")
@@ -1862,7 +1771,7 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 				cancelMethod = "ssh"
 			} else {
 				// SSH connection failed — cancel via API to avoid orphaned runs
-				if cancelErr := s.APIClient.CancelRun(session.RunID, session.ScopedToken); cancelErr != nil {
+				if cancelErr := s.APIClient.CancelRun(session.RunID); cancelErr != nil {
 					fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", session.RunID, cancelErr)
 				}
 				wasRunning = true
@@ -1870,7 +1779,7 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 			}
 		} else if err == nil && !connInfo.Polling.Completed {
 			// Run is still active but not yet sandboxable — cancel it server-side
-			if cancelErr := s.APIClient.CancelRun(session.RunID, session.ScopedToken); cancelErr != nil {
+			if cancelErr := s.APIClient.CancelRun(session.RunID); cancelErr != nil {
 				fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", session.RunID, cancelErr)
 			}
 			wasRunning = true
@@ -1880,7 +1789,7 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 		// Wait for the server to confirm the run has completed so that
 		// immediately-following commands (exec, list, etc.) see consistent state.
 		if wasRunning {
-			s.waitForSandboxCompletion(session.RunID, session.ScopedToken)
+			s.waitForSandboxCompletion(session.RunID)
 		}
 		s.closeSandboxTunnels(session.RunID)
 
@@ -1922,7 +1831,7 @@ func (s Service) StopSandbox(cfg StopSandboxConfig) (*StopSandboxResult, error) 
 // completed. This prevents immediately-following commands from finding
 // a stale in-progress run during the window between stop signal and
 // server-side teardown.
-func (s Service) waitForSandboxCompletion(runID, scopedToken string) {
+func (s Service) waitForSandboxCompletion(runID string) {
 	const (
 		timeout         = 30 * time.Second
 		defaultInterval = 500 * time.Millisecond
@@ -1930,7 +1839,7 @@ func (s Service) waitForSandboxCompletion(runID, scopedToken string) {
 
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		connInfo, err := s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
+		connInfo, err := s.APIClient.GetSandboxConnectionInfo(runID)
 		if err != nil {
 			// Error (404, 410, etc.) means the run is no longer active
 			return
@@ -1985,8 +1894,7 @@ func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, erro
 		if found {
 			oldRunID = session.RunID
 
-			// Check if still running and stop it (use scoped token if available)
-			connInfo, err := s.APIClient.GetSandboxConnectionInfo(session.RunID, session.ScopedToken)
+			connInfo, err := s.APIClient.GetSandboxConnectionInfo(session.RunID)
 			if err == nil && connInfo.Sandboxable {
 				if connection, err := s.connectSSH(&connInfo); err == nil {
 					_, _ = connection.client.ExecuteCommand("__rwx_sandbox_end__")
@@ -1994,14 +1902,14 @@ func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, erro
 					cancelMethod = "ssh"
 				} else {
 					// SSH connection failed — cancel via API to avoid orphaned runs
-					if cancelErr := s.APIClient.CancelRun(session.RunID, session.ScopedToken); cancelErr != nil {
+					if cancelErr := s.APIClient.CancelRun(session.RunID); cancelErr != nil {
 						fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", session.RunID, cancelErr)
 					}
 					cancelMethod = "api"
 				}
 			} else if err == nil && !connInfo.Polling.Completed {
 				// Run is still active but not yet sandboxable — cancel it server-side
-				if cancelErr := s.APIClient.CancelRun(session.RunID, session.ScopedToken); cancelErr != nil {
+				if cancelErr := s.APIClient.CancelRun(session.RunID); cancelErr != nil {
 					fmt.Fprintf(s.Stderr, "Warning: failed to cancel run %s: %v\n", session.RunID, cancelErr)
 				}
 				cancelMethod = "api"
@@ -2011,7 +1919,7 @@ func (s Service) ResetSandbox(cfg ResetSandboxConfig) (*ResetSandboxResult, erro
 			// starting a new sandbox, avoiding a window where the old run is
 			// still in-progress and could conflict with the new one.
 			if cancelMethod != "" {
-				s.waitForSandboxCompletion(session.RunID, session.ScopedToken)
+				s.waitForSandboxCompletion(session.RunID)
 			}
 			s.closeSandboxTunnels(session.RunID)
 
@@ -2858,14 +2766,14 @@ func (s Service) saveSandboxStorageWithTelemetry(storage *SandboxStorage, reason
 
 // Helper methods
 
-func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMode bool, resolution *sandboxResolutionMetrics) (*api.SandboxConnectionInfo, error) {
+func (s Service) waitForSandboxReady(runID string, jsonMode bool, resolution *sandboxResolutionMetrics) (*api.SandboxConnectionInfo, error) {
 	// Check once before showing spinner - sandbox may already be ready
 	var connInfo api.SandboxConnectionInfo
 	var err error
 	if resolution == nil {
-		connInfo, err = s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
+		connInfo, err = s.APIClient.GetSandboxConnectionInfo(runID)
 	} else {
-		connInfo, err = resolution.getConnectionInfo(s.APIClient, runID, scopedToken)
+		connInfo, err = resolution.getConnectionInfo(s.APIClient, runID)
 	}
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get sandbox connection info")
@@ -2895,9 +2803,9 @@ func (s Service) waitForSandboxReadyWithToken(runID, scopedToken string, jsonMod
 		time.Sleep(time.Duration(backoffMs) * time.Millisecond)
 
 		if resolution == nil {
-			connInfo, err = s.APIClient.GetSandboxConnectionInfo(runID, scopedToken)
+			connInfo, err = s.APIClient.GetSandboxConnectionInfo(runID)
 		} else {
-			connInfo, err = resolution.getConnectionInfo(s.APIClient, runID, scopedToken)
+			connInfo, err = resolution.getConnectionInfo(s.APIClient, runID)
 		}
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to get sandbox connection info")

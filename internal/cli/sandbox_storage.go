@@ -43,7 +43,6 @@ func DecodeCliState(encoded string) (*CliState, error) {
 type SandboxSession struct {
 	RunID         string     `json:"runId"`
 	ConfigFile    string     `json:"configFile"`
-	ScopedToken   string     `json:"scopedToken,omitempty"`
 	RunURL        string     `json:"runUrl,omitempty"`
 	ConfigHash    string     `json:"configHash,omitempty"`
 	CreatedAt     *time.Time `json:"createdAt,omitempty"`

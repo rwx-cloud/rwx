@@ -450,10 +450,6 @@ func TestTelemetry_SandboxStart(t *testing.T) {
 			}, nil
 		}
 
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "token-123"}, nil
-		}
-
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{}, nil
 		}
@@ -481,15 +477,11 @@ func TestTelemetry_SandboxStart(t *testing.T) {
 
 		runID := "run-existing-456"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable: true,
 				Polling:     api.PollingResult{Completed: false},
 			}, nil
-		}
-
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "token-456"}, nil
 		}
 
 		result, err := setup.service.StartSandbox(cli.StartSandboxConfig{
@@ -525,9 +517,6 @@ func TestTelemetry_SessionCreatedAt(t *testing.T) {
 		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			return &api.InitiateRunResult{RunID: "run-new-ts", RunURL: "url"}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "t"}, nil
-		}
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{}, nil
 		}
@@ -558,7 +547,7 @@ func TestTelemetry_SSHConnect(t *testing.T) {
 
 		runID := "run-ssh-ok"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -607,7 +596,7 @@ func TestTelemetry_SSHConnect(t *testing.T) {
 
 		runID := "run-ssh-fail"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -677,7 +666,7 @@ func TestTelemetry_SandboxExec(t *testing.T) {
 	t.Run("records sandbox.exec with sync metrics", func(t *testing.T) {
 		setup := setupTest(t)
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -743,7 +732,7 @@ func TestTelemetry_SandboxExecNonZeroExitCode(t *testing.T) {
 	t.Run("records sandbox.exec even with non-zero exit code", func(t *testing.T) {
 		setup := setupTest(t)
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -795,7 +784,7 @@ func TestTelemetry_SandboxSyncPush(t *testing.T) {
 
 		patchData := []byte("diff --git a/file.go b/file.go\n+new line\n")
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -841,7 +830,7 @@ func TestTelemetry_SandboxSyncPull(t *testing.T) {
 	t.Run("records sandbox.sync_pull on successful pull", func(t *testing.T) {
 		setup := setupTest(t)
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -898,7 +887,7 @@ func TestTelemetry_SandboxStop(t *testing.T) {
 		})
 		require.NoError(t, storage.Save())
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable: false,
 				Polling:     api.PollingResult{Completed: true},
@@ -939,10 +928,6 @@ func TestTelemetry_SandboxReset(t *testing.T) {
 				RunID:  "run-reset-new",
 				RunURL: "https://cloud.rwx.com/runs/run-reset-new",
 			}, nil
-		}
-
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "token"}, nil
 		}
 
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
@@ -994,7 +979,7 @@ func TestTelemetry_SandboxList(t *testing.T) {
 			}, nil
 		}
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			if id == "run-list-expired" {
 				return api.SandboxConnectionInfo{
 					Polling: api.PollingResult{Completed: true},
