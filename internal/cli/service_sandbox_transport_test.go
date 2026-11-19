@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -68,7 +69,7 @@ func newTransportSandbox(t *testing.T) *transportSandbox {
 
 	sandbox.wssServer = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sandbox.wssRequests.Add(1)
-		if r.Header.Get("Authorization") != "Bearer test-token" || sandbox.rejectWSSAccess.Load() {
+		if r.Header.Get("Authorization") != "Bearer rwx_sandbox_test-token" || sandbox.rejectWSSAccess.Load() {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -89,11 +90,12 @@ func newTransportSandbox(t *testing.T) *transportSandbox {
 	t.Cleanup(func() { http.DefaultClient = previousHTTPClient })
 
 	sandbox.connectionInfo = api.SandboxConnectionInfo{
-		Sandboxable:    true,
-		Address:        sshAddress,
-		WebSocketURL:   strings.Replace(sandbox.wssServer.URL, "https://", "wss://", 1) + "/task/ssh",
-		PrivateUserKey: sandboxPrivateTestKey,
-		PublicHostKey:  sandboxPublicTestKey,
+		Sandboxable:             true,
+		Address:                 sshAddress,
+		WebSocketURL:            strings.Replace(sandbox.wssServer.URL, "https://", "wss://", 1) + "/task/ssh",
+		WebSocketAdmissionToken: "rwx_sandbox_test-token",
+		PrivateUserKey:          sandboxPrivateTestKey,
+		PublicHostKey:           sandboxPublicTestKey,
 	}
 	sandbox.setup.mockAPI.MockAccessToken = func() (string, error) {
 		return "test-token", nil
@@ -220,6 +222,25 @@ func TestSandboxFallsBackToWSSBeforeSync(t *testing.T) {
 	require.Equal(t, true, events[0].Props["success"])
 }
 
+func TestSandboxAdmissionWithoutLocalToken(t *testing.T) {
+	sandbox := newTransportSandbox(t)
+	sandbox.connectionInfo.WebSocketAdmissionToken = ""
+	require.NoError(t, json.Unmarshal([]byte(`{"websocket_admission_token":"rwx_sandbox_test-token"}`), &sandbox.connectionInfo))
+	sandbox.setup.mockAPI.MockAccessToken = func() (string, error) { return "", nil }
+
+	require.NoError(t, sandbox.syncWithNewService(t))
+	require.EqualValues(t, 1, sandbox.wssRequests.Load())
+}
+
+func TestSandboxInvalidAdmissionDoesNotDowngrade(t *testing.T) {
+	sandbox := newTransportSandbox(t)
+	sandbox.setup.service.SandboxTransport = "wss"
+	sandbox.connectionInfo.WebSocketAdmissionToken = "bad\x00token"
+
+	require.ErrorContains(t, sandbox.syncWithNewService(t), "invalid header")
+	require.Zero(t, sandbox.wssRequests.Load(), "invalid admission must not use the valid local bearer")
+}
+
 func TestSandboxRemembersWSSAcrossCommandsWithoutExpiry(t *testing.T) {
 	sandbox := newTransportSandbox(t)
 	require.NoError(t, sandbox.syncWithNewService(t))
@@ -258,10 +279,12 @@ func TestSandboxExplicitSSHLeavesSavedWSSUnchanged(t *testing.T) {
 	sandbox.listenSSH(t, sandbox.serveSSH)
 
 	sandbox.setup.service.SandboxTransport = "ssh"
+	sandbox.connectionInfo.WebSocketAdmissionToken = ""
 	require.NoError(t, sandbox.syncWithNewService(t))
 	require.EqualValues(t, 1, sandbox.sshConnections.Load())
 
 	sandbox.setup.service.SandboxTransport = "auto"
+	sandbox.connectionInfo.WebSocketAdmissionToken = "rwx_sandbox_test-token"
 	require.NoError(t, sandbox.syncWithNewService(t))
 	require.EqualValues(t, 1, sandbox.sshConnections.Load(), "explicit SSH must not overwrite the preference")
 	require.EqualValues(t, 2, sandbox.wssRequests.Load())
@@ -288,7 +311,7 @@ func TestSandboxPreferenceIsSharedAcrossCredentialsAndEndpoints(t *testing.T) {
 	require.NoError(t, sandbox.syncWithNewService(t))
 	sandbox.listenSSH(t, sandbox.serveSSH)
 
-	sandbox.setup.mockAPI.MockAccessToken = func() (string, error) { return "other-token", nil }
+	sandbox.connectionInfo.WebSocketAdmissionToken = "rwx_sandbox_other-token"
 	require.ErrorContains(t, sandbox.syncWithNewService(t), "401")
 	require.Zero(t, sandbox.sshConnections.Load(), "new credentials must still use WSS and authenticate")
 	require.EqualValues(t, 2, sandbox.wssRequests.Load())
@@ -438,9 +461,9 @@ func TestSandboxDoesNotRememberFailedWSSAuthentication(t *testing.T) {
 	require.EqualValues(t, 1, sandbox.wssRequests.Load())
 }
 
-func TestSandboxFallbackSetupFailureDoesNotRecordAnAttempt(t *testing.T) {
+func TestSandboxMissingAdmissionDoesNotDowngrade(t *testing.T) {
 	sandbox := newTransportSandbox(t)
-	sandbox.setup.mockAPI.MockAccessToken = func() (string, error) { return "", nil }
+	sandbox.connectionInfo.WebSocketAdmissionToken = ""
 
 	require.ErrorContains(t, sandbox.syncWithNewService(t), "access token required for WSS")
 	require.Zero(t, sandbox.wssRequests.Load())
@@ -448,8 +471,8 @@ func TestSandboxFallbackSetupFailureDoesNotRecordAnAttempt(t *testing.T) {
 	events := findEvents(sandbox.setup.drainEvents(), "ssh.connect")
 	require.Len(t, events, 1)
 	require.Equal(t, "ssh", events[0].Props["initial_transport"])
-	require.Equal(t, "ssh", events[0].Props["final_transport"])
-	require.Equal(t, false, events[0].Props["fallback_attempted"])
+	require.Equal(t, "wss", events[0].Props["final_transport"])
+	require.Equal(t, true, events[0].Props["fallback_attempted"])
 	require.Equal(t, false, events[0].Props["success"])
 }
 

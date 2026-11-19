@@ -21,7 +21,7 @@ func init() {
 		RunE: func(_ *cobra.Command, args []string) error {
 			transport := ssh.WebSocketTransport{
 				Endpoint:    args[0],
-				AccessToken: os.Getenv("RWX_SANDBOX_ACCESS_TOKEN"),
+				AccessToken: os.Getenv("RWX_SANDBOX_ADMISSION_TOKEN"),
 			}
 
 			conn, err := transport.Dial()

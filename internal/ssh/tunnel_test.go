@@ -60,7 +60,7 @@ func TestTunnelManagerWSSDoesNotPersistOrExposeCredentialsInArguments(t *testing
 	logPath := filepath.Join(tmp, "ssh.log")
 	binary := filepath.Join(tmp, "ssh")
 	script := `#!/bin/sh
-test "$RWX_SANDBOX_ACCESS_TOKEN" = test-wss-secret || exit 41
+test "$RWX_SANDBOX_ADMISSION_TOKEN" = test-wss-secret || exit 41
 printf '%s\n' "$*" > "$RWX_TEST_SSH_LOG"
 `
 	require.NoError(t, os.WriteFile(binary, []byte(script), 0o700))

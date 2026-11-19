@@ -1377,12 +1377,8 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
 			info, err := discover(id, token)
 			info.WebSocketURL = "wss://sandbox.example/ssh"
+			info.WebSocketAdmissionToken = "rwx_sandbox_test-token"
 			return info, err
-		}
-		tokenReads := 0
-		setup.mockAPI.MockAccessToken = func() (string, error) {
-			tokenReads++
-			return fmt.Sprintf("token-%d", tokenReads), nil
 		}
 		pushed := false
 		execute := setup.mockSSH.MockExecuteCommand
@@ -1393,7 +1389,7 @@ func TestService_BackgroundSandbox(t *testing.T) {
 			return execute(command)
 		}
 		setup.mockVCS.MockPushRef = func(opts vcs.PushRefOptions) error {
-			require.Contains(t, opts.Env, "RWX_SANDBOX_ACCESS_TOKEN=token-1")
+			require.Contains(t, opts.Env, "RWX_SANDBOX_ADMISSION_TOKEN=rwx_sandbox_test-token")
 			pushed = true
 			return nil
 		}
@@ -1435,7 +1431,7 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		require.True(t, pushed)
 		require.Len(t, setup.sshClients, 1)
 		require.Equal(t, rwxssh.WebSocketTransport{
-			Endpoint: "wss://sandbox.example/ssh", AccessToken: "token-1",
+			Endpoint: "wss://sandbox.example/ssh", AccessToken: "rwx_sandbox_test-token",
 		}, setup.sshClients[0].transport)
 		require.Equal(t, setup.sshClients[0].transport, tunnelConfig.Transport)
 		require.Equal(t, 1, setup.sshClients[0].closeCount)
