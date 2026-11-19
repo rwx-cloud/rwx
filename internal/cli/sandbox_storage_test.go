@@ -94,26 +94,6 @@ func TestSandboxStorage_SessionOperations(t *testing.T) {
 		require.Equal(t, "/home/user/project/.rwx/sandbox.yml", retrieved.ConfigFile)
 	})
 
-	t.Run("SetSession and GetSession with ScopedToken", func(t *testing.T) {
-		storage := &cli.SandboxStorage{
-			Sandboxes: make(map[string]cli.SandboxSession),
-		}
-
-		session := cli.SandboxSession{
-			RunID:       "run-123",
-			ConfigFile:  "/home/user/project/.rwx/sandbox.yml",
-			ScopedToken: "scoped-token-abc",
-		}
-
-		storage.SetSession("main", "/home/user/project/.rwx/sandbox.yml", session)
-
-		retrieved, found := storage.GetSession("main", "/home/user/project/.rwx/sandbox.yml")
-		require.True(t, found)
-		require.Equal(t, "run-123", retrieved.RunID)
-		require.Equal(t, "/home/user/project/.rwx/sandbox.yml", retrieved.ConfigFile)
-		require.Equal(t, "scoped-token-abc", retrieved.ScopedToken)
-	})
-
 	t.Run("GetSession returns false when not found", func(t *testing.T) {
 		storage := &cli.SandboxStorage{
 			Sandboxes: make(map[string]cli.SandboxSession),
@@ -291,6 +271,42 @@ func setupTestStorageDir(t *testing.T) string {
 }
 
 func TestSandboxStorage_LoadAndSave(t *testing.T) {
+	t.Run("preserves legacy sessions without retaining their credentials", func(t *testing.T) {
+		tmpDir := setupTestStorageDir(t)
+		storageDir := filepath.Join(tmpDir, ".rwx", "sandboxes")
+		require.NoError(t, os.MkdirAll(storageDir, 0o700))
+		path := filepath.Join(storageDir, "sandboxes.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{
+			"version": 1,
+			"sandboxes": {
+				"main:/project/.rwx/sandbox.yml": {
+					"runId": "run-existing",
+					"configFile": "/project/.rwx/sandbox.yml",
+					"runUrl": "https://cloud.rwx.com/org/runs/run-existing",
+					"execCount": 3,
+					"scopedToken": "legacy-credential"
+				}
+			}
+		}`), 0o600))
+
+		storage, err := cli.LoadSandboxStorage()
+		require.NoError(t, err)
+		session, found := storage.GetSession("main", "/project/.rwx/sandbox.yml")
+		require.True(t, found)
+		require.Equal(t, "run-existing", session.RunID)
+		require.Equal(t, "https://cloud.rwx.com/org/runs/run-existing", session.RunURL)
+		require.Equal(t, 3, session.ExecCount)
+
+		require.NoError(t, storage.Save())
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.NotContains(t, string(data), "scopedToken")
+		require.NotContains(t, string(data), "legacy-credential")
+		loaded, err := cli.LoadSandboxStorage()
+		require.NoError(t, err)
+		require.Equal(t, storage.Sandboxes, loaded.Sandboxes)
+	})
+
 	t.Run("returns empty storage when file does not exist", func(t *testing.T) {
 		setupTestStorageDir(t)
 

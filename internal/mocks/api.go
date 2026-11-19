@@ -25,8 +25,7 @@ type API struct {
 	MockDeferredRunStatus                       func(pollingURL string) (api.DeferredRunStatusResult, error)
 	MockAttachDebugSession                      func(api.AttachDebugSessionConfig) (api.DebugSessionSummary, error)
 	MockGetDebugConnectionInfo                  func(api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error)
-	MockGetSandboxConnectionInfo                func(runID, scopedToken string) (api.SandboxConnectionInfo, error)
-	MockCreateSandboxToken                      func(api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error)
+	MockGetSandboxConnectionInfo                func(runID string) (api.SandboxConnectionInfo, error)
 	MockObtainAuthCode                          func(api.ObtainAuthCodeConfig) (*api.ObtainAuthCodeResult, error)
 	MockAcquireToken                            func(tokenUrl string) (*api.AcquireTokenResult, error)
 	MockWhoami                                  func() (*api.WhoamiResult, error)
@@ -96,7 +95,7 @@ type API struct {
 	MockGetRunPromptByTaskKey                         func(string, string) (string, error)
 	MockGetSandboxInitTemplate                        func() (api.SandboxInitTemplateResult, error)
 	MockListSandboxRuns                               func() (*api.ListSandboxRunsResult, error)
-	MockCancelRun                                     func(runID, scopedToken string) error
+	MockCancelRun                                     func(runID string) error
 }
 
 func (c *API) AccessToken() (string, error) {
@@ -163,20 +162,12 @@ func (c *API) GetDebugConnectionInfo(cfg api.GetDebugConnectionInfoConfig) (api.
 	return api.DebugConnectionInfo{}, errors.New("MockGetDebugConnectionInfo was not configured")
 }
 
-func (c *API) GetSandboxConnectionInfo(runID, scopedToken string) (api.SandboxConnectionInfo, error) {
+func (c *API) GetSandboxConnectionInfo(runID string) (api.SandboxConnectionInfo, error) {
 	if c.MockGetSandboxConnectionInfo != nil {
-		return c.MockGetSandboxConnectionInfo(runID, scopedToken)
+		return c.MockGetSandboxConnectionInfo(runID)
 	}
 
 	return api.SandboxConnectionInfo{}, errors.New("MockGetSandboxConnectionInfo was not configured")
-}
-
-func (c *API) CreateSandboxToken(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-	if c.MockCreateSandboxToken != nil {
-		return c.MockCreateSandboxToken(cfg)
-	}
-
-	return nil, errors.New("MockCreateSandboxToken was not configured")
 }
 
 func (c *API) ObtainAuthCode(cfg api.ObtainAuthCodeConfig) (*api.ObtainAuthCodeResult, error) {
@@ -682,9 +673,9 @@ func (c *API) ListSandboxRuns(_ io.Writer) (*api.ListSandboxRunsResult, error) {
 	return nil, errors.New("MockListSandboxRuns was not configured")
 }
 
-func (c *API) CancelRun(runID, scopedToken string) error {
+func (c *API) CancelRun(runID string) error {
 	if c.MockCancelRun != nil {
-		return c.MockCancelRun(runID, scopedToken)
+		return c.MockCancelRun(runID)
 	}
 
 	return errors.New("MockCancelRun was not configured")

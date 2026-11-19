@@ -1855,7 +1855,7 @@ func TestAPIClient_GetSandboxConnectionInfo(t *testing.T) {
 
 		c := api.NewClientWithRoundTrip(roundTrip)
 
-		result, err := c.GetSandboxConnectionInfo("run-123", "")
+		result, err := c.GetSandboxConnectionInfo("run-123")
 		require.NoError(t, err)
 		require.True(t, result.Sandboxable)
 		require.Equal(t, "192.168.1.1:22", result.Address)
@@ -1885,7 +1885,7 @@ func TestAPIClient_GetSandboxConnectionInfo(t *testing.T) {
 
 		c := api.NewClientWithRoundTrip(roundTrip)
 
-		result, err := c.GetSandboxConnectionInfo("run-456", "")
+		result, err := c.GetSandboxConnectionInfo("run-456")
 		require.NoError(t, err)
 		require.False(t, result.Sandboxable)
 		require.NotNil(t, result.Polling.BackoffMs)
@@ -1903,7 +1903,7 @@ func TestAPIClient_GetSandboxConnectionInfo(t *testing.T) {
 
 		c := api.NewClientWithRoundTrip(roundTrip)
 
-		_, err := c.GetSandboxConnectionInfo("nonexistent", "")
+		_, err := c.GetSandboxConnectionInfo("nonexistent")
 		require.Error(t, err)
 	})
 
@@ -1918,7 +1918,7 @@ func TestAPIClient_GetSandboxConnectionInfo(t *testing.T) {
 
 		c := api.NewClientWithRoundTrip(roundTrip)
 
-		_, err := c.GetSandboxConnectionInfo("ended-run", "")
+		_, err := c.GetSandboxConnectionInfo("ended-run")
 		require.Error(t, err)
 	})
 
@@ -1928,12 +1928,12 @@ func TestAPIClient_GetSandboxConnectionInfo(t *testing.T) {
 			return nil, nil
 		})
 
-		_, err := c.GetSandboxConnectionInfo("", "")
+		_, err := c.GetSandboxConnectionInfo("")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "missing runID")
 	})
 
-	t.Run("sets Authorization header when scoped token is provided", func(t *testing.T) {
+	t.Run("leaves authentication to the transport", func(t *testing.T) {
 		backoffMs := 1000
 		body := struct {
 			Sandboxable bool              `json:"sandboxable"`
@@ -1947,7 +1947,7 @@ func TestAPIClient_GetSandboxConnectionInfo(t *testing.T) {
 		roundTrip := func(req *http.Request) (*http.Response, error) {
 			require.Equal(t, "/mint/api/sandbox_connection_info", req.URL.Path)
 			require.Equal(t, "run-123", req.URL.Query().Get("sandbox_key"))
-			require.Equal(t, "Bearer scoped-token-abc", req.Header.Get("Authorization"))
+			require.Empty(t, req.Header.Get("Authorization"))
 			return &http.Response{
 				Status:     "200 OK",
 				StatusCode: 200,
@@ -1957,7 +1957,7 @@ func TestAPIClient_GetSandboxConnectionInfo(t *testing.T) {
 
 		c := api.NewClientWithRoundTrip(roundTrip)
 
-		result, err := c.GetSandboxConnectionInfo("run-123", "scoped-token-abc")
+		result, err := c.GetSandboxConnectionInfo("run-123")
 		require.NoError(t, err)
 		require.True(t, result.Sandboxable)
 	})
@@ -2191,67 +2191,6 @@ func TestAPIClient_GetDebugConnectionInfo(t *testing.T) {
 				require.ErrorIs(t, err, tt.sentinel)
 			})
 		}
-	})
-}
-
-func TestAPIClient_CreateSandboxToken(t *testing.T) {
-	t.Run("creates a sandbox token successfully", func(t *testing.T) {
-		body := struct {
-			Token     string `json:"token"`
-			ExpiresAt string `json:"expires_at"`
-			RunID     string `json:"run_id"`
-		}{
-			Token:     "scoped-token-xyz",
-			ExpiresAt: "2024-12-31T23:59:59Z",
-			RunID:     "run-123",
-		}
-		bodyBytes, _ := json.Marshal(body)
-
-		roundTrip := func(req *http.Request) (*http.Response, error) {
-			require.Equal(t, "/mint/api/sandbox_tokens", req.URL.Path)
-			require.Equal(t, http.MethodPost, req.Method)
-			require.Equal(t, "application/json", req.Header.Get("Content-Type"))
-
-			// Verify request body
-			var reqBody api.CreateSandboxTokenConfig
-			err := json.NewDecoder(req.Body).Decode(&reqBody)
-			require.NoError(t, err)
-			require.Equal(t, "run-123", reqBody.RunID)
-
-			return &http.Response{
-				Status:     "201 Created",
-				StatusCode: 201,
-				Body:       io.NopCloser(bytes.NewReader(bodyBytes)),
-			}, nil
-		}
-
-		c := api.NewClientWithRoundTrip(roundTrip)
-
-		result, err := c.CreateSandboxToken(api.CreateSandboxTokenConfig{
-			RunID: "run-123",
-		})
-		require.NoError(t, err)
-		require.Equal(t, "scoped-token-xyz", result.Token)
-		require.Equal(t, "2024-12-31T23:59:59Z", result.ExpiresAt)
-		require.Equal(t, "run-123", result.RunID)
-	})
-
-	t.Run("returns error on failure", func(t *testing.T) {
-		roundTrip := func(req *http.Request) (*http.Response, error) {
-			return &http.Response{
-				Status:     "403 Forbidden",
-				StatusCode: 403,
-				Body:       io.NopCloser(bytes.NewReader([]byte(`{"error": "Not authorized to create token for this run"}`))),
-			}, nil
-		}
-
-		c := api.NewClientWithRoundTrip(roundTrip)
-
-		_, err := c.CreateSandboxToken(api.CreateSandboxTokenConfig{
-			RunID: "run-123",
-		})
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "Not authorized")
 	})
 }
 

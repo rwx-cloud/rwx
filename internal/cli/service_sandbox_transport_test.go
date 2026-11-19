@@ -98,7 +98,7 @@ func newTransportSandbox(t *testing.T) *transportSandbox {
 	sandbox.setup.mockAPI.MockAccessToken = func() (string, error) {
 		return "test-token", nil
 	}
-	sandbox.setup.mockAPI.MockGetSandboxConnectionInfo = func(string, string) (api.SandboxConnectionInfo, error) {
+	sandbox.setup.mockAPI.MockGetSandboxConnectionInfo = func(string) (api.SandboxConnectionInfo, error) {
 		return sandbox.connectionInfo, nil
 	}
 	sandbox.setup.service.NewSSHClient = func() cli.SSHClient {

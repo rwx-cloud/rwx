@@ -770,14 +770,3 @@ type ListRunsConfig struct {
 	// of the request and is ignored by queryParams.
 	RetryProgress io.Writer
 }
-
-type CreateSandboxTokenConfig struct {
-	RunID            string `json:"run_id"`
-	ExpiresInSeconds int    `json:"expires_in_seconds,omitempty"`
-}
-
-type CreateSandboxTokenResult struct {
-	Token     string `json:"token"`
-	ExpiresAt string `json:"expires_at"`
-	RunID     string `json:"run_id"`
-}

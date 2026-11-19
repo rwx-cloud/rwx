@@ -60,7 +60,7 @@ func TestService_CheckExistingSandbox_DoesNotCloseInactiveTunnels(t *testing.T) 
 			ConfigFile: configFile,
 		},
 	})
-	setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, scopedToken string) (api.SandboxConnectionInfo, error) {
+	setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 		return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
 	}
 	tunnelCleanupCalled := false
@@ -226,14 +226,12 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"main:" + setup.absConfig(".rwx/sandbox.yml"): {
-				RunID:       "run-active",
-				ConfigFile:  setup.absConfig(".rwx/sandbox.yml"),
-				ScopedToken: "token-active",
+				RunID:      "run-active",
+				ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
 			},
 			"main:" + setup.absConfig(".rwx/other.yml"): {
-				RunID:       "run-expired",
-				ConfigFile:  setup.absConfig(".rwx/other.yml"),
-				ScopedToken: "token-expired",
+				RunID:      "run-expired",
+				ConfigFile: setup.absConfig(".rwx/other.yml"),
 			},
 		})
 
@@ -246,7 +244,7 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 		}
 
 		// Fallback check confirms the expired run is gone
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, scopedToken string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			if runID == "run-expired" {
 				return api.SandboxConnectionInfo{}, errors.ErrGone
 			}
@@ -272,9 +270,8 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"main:" + setup.absConfig(".rwx/sandbox.yml"): {
-				RunID:       "run-local",
-				ConfigFile:  setup.absConfig(".rwx/sandbox.yml"),
-				ScopedToken: "token-local",
+				RunID:      "run-local",
+				ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
 			},
 		})
 
@@ -331,9 +328,8 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"main:" + setup.absConfig(".rwx/sandbox.yml"): {
-				RunID:       "run-local",
-				ConfigFile:  setup.absConfig(".rwx/sandbox.yml"),
-				ScopedToken: "my-scoped-token",
+				RunID:      "run-local",
+				ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
 			},
 		})
 
@@ -355,13 +351,11 @@ func TestService_ListSandboxes_BulkAPI(t *testing.T) {
 		require.Len(t, result.Sandboxes, 1)
 		require.Equal(t, "run-local", result.Sandboxes[0].RunID)
 
-		// Verify the scoped token was preserved
 		storage, err := cli.LoadSandboxStorage()
 		require.NoError(t, err)
 		session, found := storage.GetSession("main", setup.absConfig(".rwx/sandbox.yml"))
 		require.True(t, found)
 		require.Equal(t, "run-local", session.RunID)
-		require.Equal(t, "my-scoped-token", session.ScopedToken)
 	})
 }
 
@@ -370,14 +364,12 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"main:" + setup.absConfig(".rwx/sandbox.yml"): {
-				RunID:       "run-active",
-				ConfigFile:  setup.absConfig(".rwx/sandbox.yml"),
-				ScopedToken: "token-active",
+				RunID:      "run-active",
+				ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
 			},
 			"main:" + setup.absConfig(".rwx/other.yml"): {
-				RunID:       "run-expired",
-				ConfigFile:  setup.absConfig(".rwx/other.yml"),
-				ScopedToken: "token-expired",
+				RunID:      "run-expired",
+				ConfigFile: setup.absConfig(".rwx/other.yml"),
 			},
 		})
 
@@ -391,7 +383,7 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		}
 
 		// Fallback check confirms expired run is gone
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, scopedToken string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			if runID == "run-expired" {
 				return api.SandboxConnectionInfo{}, errors.ErrGone
 			}
@@ -429,19 +421,16 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"main:" + setup.absConfig(".rwx/active.yml"): {
-				RunID:       "run-active",
-				ConfigFile:  setup.absConfig(".rwx/active.yml"),
-				ScopedToken: "token-active",
+				RunID:      "run-active",
+				ConfigFile: setup.absConfig(".rwx/active.yml"),
 			},
 			"main:" + setup.absConfig(".rwx/notfound.yml"): {
-				RunID:       "run-notfound",
-				ConfigFile:  setup.absConfig(".rwx/notfound.yml"),
-				ScopedToken: "token-notfound",
+				RunID:      "run-notfound",
+				ConfigFile: setup.absConfig(".rwx/notfound.yml"),
 			},
 			"main:" + setup.absConfig(".rwx/gone.yml"): {
-				RunID:       "run-gone",
-				ConfigFile:  setup.absConfig(".rwx/gone.yml"),
-				ScopedToken: "token-gone",
+				RunID:      "run-gone",
+				ConfigFile: setup.absConfig(".rwx/gone.yml"),
 			},
 		})
 
@@ -455,7 +444,7 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		}
 
 		// Fallback checks confirm both missing runs are gone
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, scopedToken string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			switch runID {
 			case "run-notfound":
 				return api.SandboxConnectionInfo{}, errors.ErrNotFound
@@ -482,9 +471,8 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"main:" + setup.absConfig(".rwx/sandbox.yml"): {
-				RunID:       "run-initializing",
-				ConfigFile:  setup.absConfig(".rwx/sandbox.yml"),
-				ScopedToken: "token-init",
+				RunID:      "run-initializing",
+				ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
 			},
 		})
 
@@ -494,7 +482,7 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		}
 
 		// Fallback check shows the run is still alive
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, scopedToken string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Polling: api.PollingResult{Completed: false},
 			}, nil
@@ -517,9 +505,8 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"main:" + setup.absConfig(".rwx/sandbox.yml"): {
-				RunID:       "run-cancelled",
-				ConfigFile:  setup.absConfig(".rwx/sandbox.yml"),
-				ScopedToken: "token-cancel",
+				RunID:      "run-cancelled",
+				ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
 			},
 		})
 
@@ -528,7 +515,7 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		}
 
 		// Fallback returns an error (e.g. 400 "run has been cancelled")
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, scopedToken string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{}, fmt.Errorf("run has been cancelled")
 		}
 
@@ -546,9 +533,8 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		setup := setupTest(t)
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"main:" + setup.absConfig(".rwx/sandbox.yml"): {
-				RunID:       "run-ready",
-				ConfigFile:  setup.absConfig(".rwx/sandbox.yml"),
-				ScopedToken: "token-ready",
+				RunID:      "run-ready",
+				ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
 			},
 		})
 
@@ -558,7 +544,7 @@ func TestService_ListSandboxes_PrunesExpired(t *testing.T) {
 		}
 
 		// Ready sandbox: Sandboxable=true, Polling.Completed=true
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, scopedToken string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable: true,
 				Polling:     api.PollingResult{Completed: true},
@@ -612,7 +598,7 @@ func TestService_ExecSandbox(t *testing.T) {
 		}
 
 		// Mock sandbox connection info
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			require.Equal(t, runID, id)
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
@@ -668,7 +654,7 @@ func TestService_ExecSandbox(t *testing.T) {
 			}, nil
 		}
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -715,7 +701,7 @@ func TestService_ExecSandbox(t *testing.T) {
 		address := "192.168.1.1:22"
 		var executedCommands []string
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -754,7 +740,7 @@ func TestService_ExecSandbox(t *testing.T) {
 
 		runID := "run-expired"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable: false,
 				Polling:     api.PollingResult{Completed: true}, // Run has ended
@@ -777,7 +763,7 @@ func TestService_ExecSandbox(t *testing.T) {
 
 		runID := "run-setup-failed"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable: false,
 				Polling:     api.PollingResult{Completed: true},
@@ -808,7 +794,7 @@ func TestService_ExecSandbox(t *testing.T) {
 		calls := atomic.Int32{}
 		backoff := 0
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			if calls.Add(1) == 1 {
 				return api.SandboxConnectionInfo{
 					Sandboxable: false,
@@ -841,7 +827,7 @@ func TestService_ExecSandbox(t *testing.T) {
 	t.Run("gracefully degrades when GetRunPrompt fails on polling completion", func(t *testing.T) {
 		setup := setupTest(t)
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable: false,
 				Polling:     api.PollingResult{Completed: true},
@@ -866,7 +852,7 @@ func TestService_ExecSandbox(t *testing.T) {
 	t.Run("uses timed_out FailureReason for natural error message", func(t *testing.T) {
 		setup := setupTest(t)
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:   false,
 				Polling:       api.PollingResult{Completed: true},
@@ -892,7 +878,7 @@ func TestService_ExecSandbox(t *testing.T) {
 	t.Run("uses cancelled FailureReason for natural error message", func(t *testing.T) {
 		setup := setupTest(t)
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:   false,
 				Polling:       api.PollingResult{Completed: true},
@@ -918,7 +904,7 @@ func TestService_ExecSandbox(t *testing.T) {
 	t.Run("uses failed FailureReason for natural error message", func(t *testing.T) {
 		setup := setupTest(t)
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:   false,
 				Polling:       api.PollingResult{Completed: true},
@@ -950,7 +936,7 @@ func TestService_ExecSandbox(t *testing.T) {
 		calls := atomic.Int32{}
 		var executedCommands []string
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			require.Equal(t, runID, id)
 			if calls.Add(1) == 1 {
 				return api.SandboxConnectionInfo{
@@ -998,7 +984,7 @@ func TestService_ExecSandbox(t *testing.T) {
 		runID := "run-timeout"
 		address := "192.168.1.1:43215"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -1028,7 +1014,7 @@ func TestService_ExecSandbox(t *testing.T) {
 		runID := "run-ssh-fail"
 		address := "192.168.1.1:43215"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -1057,7 +1043,7 @@ func TestService_ExecSandbox(t *testing.T) {
 func TestService_ExecSandbox_ConnectionOwnership(t *testing.T) {
 	setup := setupTest(t)
 	setup.recordSSHClients()
-	setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+	setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 		return api.SandboxConnectionInfo{
 			Sandboxable: true, Address: id + ".example:22",
 			PrivateUserKey: sandboxPrivateTestKey, PublicHostKey: sandboxPublicTestKey,
@@ -1103,7 +1089,7 @@ func TestService_SyncSandbox(t *testing.T) {
 	t.Run("explicit WSS does not fall back when discovery has no endpoint", func(t *testing.T) {
 		setup := setupTest(t)
 		setup.service.SandboxTransport = "wss"
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(string, string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:43215",
@@ -1142,7 +1128,7 @@ func TestService_SyncSandbox(t *testing.T) {
 			return vcs.DirtyPatches{Unstaged: localPatch, Files: []string{"file.txt"}}, nil
 		}
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			require.Equal(t, runID, id)
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
@@ -1204,7 +1190,7 @@ func TestService_SyncSandbox(t *testing.T) {
 		setup := setupTest(t)
 
 		runID := "run-sync-output"
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -1240,7 +1226,7 @@ func TestService_ExecSandbox_RunsGitFromPath(t *testing.T) {
 	setup.mockAPI.MockRunStatus = func(cfg api.RunStatusConfig) (api.RunStatusResult, error) {
 		return api.RunStatusResult{RunID: runID, Polling: api.PollingResult{Completed: false}}, nil
 	}
-	setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+	setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 		return api.SandboxConnectionInfo{
 			Sandboxable:    true,
 			Address:        "192.168.1.1:22",
@@ -1310,7 +1296,7 @@ func TestService_BackgroundSandbox(t *testing.T) {
 	setupBackground := func(t *testing.T) (*testSetup, *[]string) {
 		t.Helper()
 		setup := setupTest(t)
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -1374,8 +1360,8 @@ func TestService_BackgroundSandbox(t *testing.T) {
 		setup.recordSSHClients()
 		setup.service.SandboxTransport = "wss"
 		discover := setup.mockAPI.MockGetSandboxConnectionInfo
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
-			info, err := discover(id, token)
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
+			info, err := discover(id)
 			info.WebSocketURL = "wss://sandbox.example/ssh"
 			return info, err
 		}
@@ -1831,7 +1817,7 @@ func TestService_TunnelSandbox(t *testing.T) {
 		t.Helper()
 		setup := setupTest(t)
 		setup.mockVCS.MockGetHeadError = fmt.Errorf("git should not be consulted")
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -2016,7 +2002,7 @@ func TestService_LogsSandboxBackground(t *testing.T) {
 	setupLogs := func(t *testing.T, processResponse string) (*testSetup, *[]string, *int) {
 		t.Helper()
 		setup := setupTest(t)
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -2375,7 +2361,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		setup.mockVCS.MockGetHeadError = fmt.Errorf("not a git repository")
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -2410,7 +2396,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		patchApplied := false
 		var appliedPatch []byte
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -2464,7 +2450,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		syncPatchApplied := false
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -2521,7 +2507,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		address := "192.168.1.1:22"
 		createdSyncRef := false
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -2586,7 +2572,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		syncPatchApplied := false
 		commandExecuted := false
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -2657,7 +2643,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		runID := "run-apply-fail-123"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -2707,7 +2693,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		var stdinCommandOrder []string
 		pulledPatchApplied := false
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -2850,7 +2836,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -3005,7 +2991,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -3082,7 +3068,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		setup.mockVCS.MockGetHead = localHead
 		setup.mockVCS.MockGetBranch = "feature/checkout-fail-lfs"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -3134,7 +3120,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		setup.mockVCS.MockGetHead = localHead
 		setup.mockVCS.MockGetBranch = "feature/checkout-fail-transport"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -3207,13 +3193,10 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 				RunURL: "https://cloud.rwx.com/runs/run-new",
 			}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "new-token"}, nil
-		}
 		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
 			return &api.PackageVersionsResult{}, nil
 		}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -3304,13 +3287,10 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 				RunURL: "https://cloud.rwx.com/runs/run-new",
 			}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "new-token"}, nil
-		}
 		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
 			return &api.PackageVersionsResult{}, nil
 		}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -3373,9 +3353,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			cli.SessionKey("feature/start-first-exec", configFile): {
-				RunID:       "run-started",
-				ConfigFile:  configFile,
-				ScopedToken: "start-token",
+				RunID:      "run-started",
+				ConfigFile: configFile,
 			},
 		})
 
@@ -3389,9 +3368,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			}, nil
 		}
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			require.Equal(t, "run-started", runID)
-			require.Equal(t, "start-token", token)
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -3463,7 +3441,6 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			cli.SessionKey("feature/reused-exec", configFile): {
 				RunID:         "run-reused",
 				ConfigFile:    configFile,
-				ScopedToken:   "reused-token",
 				ExecCount:     3,
 				ResetNagShown: true,
 			},
@@ -3479,9 +3456,8 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			}, nil
 		}
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			require.Equal(t, "run-reused", runID)
-			require.Equal(t, "reused-token", token)
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -3565,13 +3541,10 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 				RunURL: "https://cloud.rwx.com/runs/run-new",
 			}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "new-token"}, nil
-		}
 		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
 			return &api.PackageVersionsResult{}, nil
 		}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -3642,7 +3615,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -3699,7 +3672,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return vcs.DirtyPatches{}, nil
 		}
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -3753,7 +3726,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return fmt.Errorf("remote rejected push")
 		}
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -3802,7 +3775,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 			return nil
 		}
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -3843,7 +3816,7 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		runID := "run-no-git-123"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -3889,9 +3862,9 @@ func TestService_ExecSandbox_Sync(t *testing.T) {
 		runID := "run-no-git-dir-123"
 		address := "192.168.1.1:22"
 
-		seedSandboxStorage(t, setup.tmp, runID, "scoped-token-no-git")
+		seedSandboxStorage(t, setup.tmp, runID)
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -3947,7 +3920,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		runID := "run-pull-123"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -3998,7 +3971,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		runID := "run-pull-nonzero-123"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -4062,7 +4035,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		var stdoutOnlyCommands []string
 		var pullDiffCommand string
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -4151,7 +4124,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		var addCommand string
 		var resetCommand string
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -4214,7 +4187,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		runID := "run-pull-local-changes"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -4261,7 +4234,7 @@ func TestService_ExecSandbox_Pull(t *testing.T) {
 		runID := "run-pull-err-123"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -4325,7 +4298,7 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 		runID := "run-reject-123"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -4390,7 +4363,7 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 		rwxDir := filepath.Join(setup.tmp, ".rwx", "sandboxes")
 		require.NoError(t, os.MkdirAll(rwxDir, 0755))
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -4456,7 +4429,7 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 		rwxDir := filepath.Join(setup.tmp, ".rwx", "sandboxes")
 		require.NoError(t, os.MkdirAll(rwxDir, 0755))
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -4522,7 +4495,7 @@ func TestService_ExecSandbox_PullPatchFailureRecovery(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(setup.tmp, "src"), 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(setup.tmp, "src", "main.go.rej"), []byte("old reject"), 0644))
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -4606,10 +4579,6 @@ func TestService_StartSandbox(t *testing.T) {
 				RunURL: "https://cloud.rwx.com/mint/runs/run-123",
 			}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "test-token"}, nil
-		}
-
 		_, err = setup.service.StartSandbox(cli.StartSandboxConfig{
 			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
 			Json:       true,
@@ -4659,10 +4628,6 @@ func TestService_StartSandbox(t *testing.T) {
 				RunURL: "https://cloud.rwx.com/mint/runs/run-init-123",
 			}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "test-token"}, nil
-		}
-
 		result, err := setup.service.StartSandbox(cli.StartSandboxConfig{
 			ConfigFile:     setup.absConfig(".rwx/sandbox.yml"),
 			Json:           true,
@@ -4706,10 +4671,6 @@ func TestService_StartSandbox_StorageLock(t *testing.T) {
 				RunURL: "https://cloud.rwx.com/mint/runs/run-lock-test",
 			}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "test-token"}, nil
-		}
-
 		// Pre-acquire the lock and pass it to StartSandbox
 		lock, err := cli.LockSandboxStorage()
 		require.NoError(t, err)
@@ -4812,13 +4773,10 @@ func TestService_ExecSandbox_ConcurrentAutoCreate(t *testing.T) {
 				RunURL: fmt.Sprintf("https://cloud.rwx.com/mint/runs/%s", runID),
 			}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "test-token"}, nil
-		}
 		setup.mockAPI.MockListSandboxRuns = func() (*api.ListSandboxRunsResult, error) {
 			return &api.ListSandboxRunsResult{Runs: []api.RunSummary{}}, nil
 		}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -4920,10 +4878,7 @@ func TestService_ExecSandbox_DoesNotListRuns(t *testing.T) {
 	setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 		return &api.InitiateRunResult{RunID: "run-new", RunURL: "https://cloud.rwx.com/mint/runs/run-new"}, nil
 	}
-	setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-		return &api.CreateSandboxTokenResult{Token: "new-token"}, nil
-	}
-	setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+	setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 		return api.SandboxConnectionInfo{
 			Sandboxable:    true,
 			Address:        "192.168.1.1:22",
@@ -4952,7 +4907,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 	// The session must be reused, not pruned as expired.
 
 	mockReadySandbox := func(setup *testSetup) {
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -4978,14 +4933,13 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		configFile := setup.absConfig(".rwx/sandbox.yml")
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"main:" + configFile: {
-				RunID:       staleRunID,
-				ConfigFile:  configFile,
-				ScopedToken: "token-stale",
+				RunID:      staleRunID,
+				ConfigFile: configFile,
 			},
 		})
 
 		connCalls := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			if connCalls.Add(1) == 1 {
 				require.Equal(t, staleRunID, id)
 				return api.SandboxConnectionInfo{
@@ -5017,9 +4971,6 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		setup.mockAPI.MockInitiateRun = func(api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			return &api.InitiateRunResult{RunID: "run-fresh", RunURL: "https://cloud.rwx.com/mint/runs/run-fresh"}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "token-fresh"}, nil
-		}
 		setup.mockSSH.MockConnect = func(string, ssh.ClientConfig) error { return nil }
 		setup.mockSSH.MockExecuteCommand = func(string) (int, error) { return 0, nil }
 		setup.mockVCS.MockGeneratePatch = func([]string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
@@ -5036,9 +4987,8 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		runID := "run-ready-config"
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"detached:" + configFile: {
-				RunID:       runID,
-				ConfigFile:  configFile,
-				ScopedToken: "token-ready",
+				RunID:      runID,
+				ConfigFile: configFile,
 			},
 		})
 
@@ -5067,9 +5017,8 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		runID := "run-ready-branch"
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			"detached:" + configFile: {
-				RunID:       runID,
-				ConfigFile:  configFile,
-				ScopedToken: "token-ready",
+				RunID:      runID,
+				ConfigFile: configFile,
 			},
 		})
 
@@ -5078,7 +5027,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 		originalModTime := time.Unix(123, 0)
 		require.NoError(t, os.Chtimes(storagePath, originalModTime, originalModTime))
 		connectionInfoCalls := 0
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			connectionInfoCalls++
 			if connectionInfoCalls == 2 {
 				info, statErr := os.Stat(storagePath)
@@ -5139,7 +5088,7 @@ func TestService_ExecSandbox_SessionReuse(t *testing.T) {
 			},
 		})
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			if id == "run-expired" {
 				return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
 			}
@@ -5284,12 +5233,8 @@ func TestService_ExecSandbox_InitParams(t *testing.T) {
 				RunURL: "https://cloud.rwx.com/mint/runs/run-lazy-123",
 			}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "test-token"}, nil
-		}
-
 		address := "192.168.1.1:22"
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -5349,11 +5294,11 @@ func TestService_StopSandbox(t *testing.T) {
 
 	t.Run("calls CancelRun for active but not yet sandboxable run", func(t *testing.T) {
 		setup := setupTest(t)
-		seedSandboxStorage(t, setup.tmp, "run-initializing", "scoped-token-123")
+		seedSandboxStorage(t, setup.tmp, "run-initializing")
 
 		cancelCalled := false
 		connInfoCalls := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			if connInfoCalls.Add(1) == 1 {
 				return api.SandboxConnectionInfo{
 					Sandboxable: false,
@@ -5362,9 +5307,8 @@ func TestService_StopSandbox(t *testing.T) {
 			}
 			return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
 		}
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			require.Equal(t, "run-initializing", runID)
-			require.Equal(t, "scoped-token-123", scopedToken)
 			cancelCalled = true
 			return nil
 		}
@@ -5386,10 +5330,10 @@ func TestService_StopSandbox(t *testing.T) {
 
 	t.Run("logs warning when CancelRun fails but still succeeds", func(t *testing.T) {
 		setup := setupTest(t)
-		seedSandboxStorage(t, setup.tmp, "run-cancel-fail", "token-456")
+		seedSandboxStorage(t, setup.tmp, "run-cancel-fail")
 
 		connInfoCalls := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			if connInfoCalls.Add(1) == 1 {
 				return api.SandboxConnectionInfo{
 					Sandboxable: false,
@@ -5398,7 +5342,7 @@ func TestService_StopSandbox(t *testing.T) {
 			}
 			return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
 		}
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			return errors.New("server error")
 		}
 
@@ -5415,10 +5359,10 @@ func TestService_StopSandbox(t *testing.T) {
 
 	t.Run("does not call CancelRun for sandboxable run", func(t *testing.T) {
 		setup := setupTest(t)
-		seedSandboxStorage(t, setup.tmp, "run-sandboxable", "token-789")
+		seedSandboxStorage(t, setup.tmp, "run-sandboxable")
 
 		connInfoCalls := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			if connInfoCalls.Add(1) == 1 {
 				return api.SandboxConnectionInfo{
 					Sandboxable:    true,
@@ -5435,7 +5379,7 @@ func TestService_StopSandbox(t *testing.T) {
 		setup.mockSSH.MockExecuteCommand = func(cmd string) (int, error) {
 			return 0, nil
 		}
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			t.Fatal("CancelRun should not be called for sandboxable runs")
 			return nil
 		}
@@ -5452,10 +5396,10 @@ func TestService_StopSandbox(t *testing.T) {
 
 	t.Run("calls CancelRun when SSH connection fails for sandboxable run", func(t *testing.T) {
 		setup := setupTest(t)
-		seedSandboxStorage(t, setup.tmp, "run-ssh-fail", "token-ssh")
+		seedSandboxStorage(t, setup.tmp, "run-ssh-fail")
 
 		connInfoCalls := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			if connInfoCalls.Add(1) == 1 {
 				return api.SandboxConnectionInfo{
 					Sandboxable:    true,
@@ -5470,9 +5414,8 @@ func TestService_StopSandbox(t *testing.T) {
 			return errors.New("connection timed out")
 		}
 		cancelCalled := false
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			require.Equal(t, "run-ssh-fail", runID)
-			require.Equal(t, "token-ssh", scopedToken)
 			cancelCalled = true
 			return nil
 		}
@@ -5494,15 +5437,15 @@ func TestService_StopSandbox(t *testing.T) {
 
 	t.Run("does not call CancelRun for completed run", func(t *testing.T) {
 		setup := setupTest(t)
-		seedSandboxStorage(t, setup.tmp, "run-completed", "token-done")
+		seedSandboxStorage(t, setup.tmp, "run-completed")
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable: false,
 				Polling:     api.PollingResult{Completed: true},
 			}, nil
 		}
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			t.Fatal("CancelRun should not be called for completed runs")
 			return nil
 		}
@@ -5521,10 +5464,10 @@ func TestService_StopSandbox(t *testing.T) {
 func TestService_StopSandbox_WaitsForCompletion(t *testing.T) {
 	t.Run("polls until server confirms completion", func(t *testing.T) {
 		setup := setupTest(t)
-		seedSandboxStorage(t, setup.tmp, "run-poll", "token-poll")
+		seedSandboxStorage(t, setup.tmp, "run-poll")
 
 		callCount := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			n := callCount.Add(1)
 			if n == 1 {
 				// First call: stop check — sandbox is still active
@@ -5544,7 +5487,7 @@ func TestService_StopSandbox_WaitsForCompletion(t *testing.T) {
 				Polling: api.PollingResult{Completed: true},
 			}, nil
 		}
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			return nil
 		}
 
@@ -5561,10 +5504,10 @@ func TestService_StopSandbox_WaitsForCompletion(t *testing.T) {
 
 	t.Run("stops polling when server returns an error", func(t *testing.T) {
 		setup := setupTest(t)
-		seedSandboxStorage(t, setup.tmp, "run-err", "token-err")
+		seedSandboxStorage(t, setup.tmp, "run-err")
 
 		callCount := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			n := callCount.Add(1)
 			if n == 1 {
 				// First call: stop check
@@ -5576,7 +5519,7 @@ func TestService_StopSandbox_WaitsForCompletion(t *testing.T) {
 			// Second call: run is gone
 			return api.SandboxConnectionInfo{}, errors.New("not found")
 		}
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			return nil
 		}
 
@@ -5592,11 +5535,11 @@ func TestService_StopSandbox_WaitsForCompletion(t *testing.T) {
 
 	t.Run("respects server-provided backoff", func(t *testing.T) {
 		setup := setupTest(t)
-		seedSandboxStorage(t, setup.tmp, "run-backoff", "token-backoff")
+		seedSandboxStorage(t, setup.tmp, "run-backoff")
 
 		var pollTimes []time.Time
 		callCount := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			n := callCount.Add(1)
 			if n == 1 {
 				// First call: stop check
@@ -5616,7 +5559,7 @@ func TestService_StopSandbox_WaitsForCompletion(t *testing.T) {
 				Polling: api.PollingResult{Completed: true},
 			}, nil
 		}
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			return nil
 		}
 
@@ -5634,10 +5577,10 @@ func TestService_StopSandbox_WaitsForCompletion(t *testing.T) {
 
 	t.Run("does not poll for already-completed sandbox", func(t *testing.T) {
 		setup := setupTest(t)
-		seedSandboxStorage(t, setup.tmp, "run-done", "token-done")
+		seedSandboxStorage(t, setup.tmp, "run-done")
 
 		callCount := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			callCount.Add(1)
 			return api.SandboxConnectionInfo{
 				Sandboxable: false,
@@ -5675,9 +5618,6 @@ func TestService_ResetSandbox(t *testing.T) {
 				RunURL: "https://cloud.rwx.com/runs/run-new",
 			}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "token"}, nil
-		}
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{}, nil
 		}
@@ -5688,7 +5628,7 @@ func TestService_ResetSandbox(t *testing.T) {
 
 	// seedResetStorage initializes a git repo on "main" and writes a sandbox session
 	// keyed by branch+configFile so ResetSandbox can find it via GetCurrentBranch.
-	seedResetStorage := func(t *testing.T, setup *testSetup, runID, scopedToken string) {
+	seedResetStorage := func(t *testing.T, setup *testSetup, runID string) {
 		t.Helper()
 
 		// The .rwx directory is placed at the repository root, so the temp dir
@@ -5709,9 +5649,8 @@ func TestService_ResetSandbox(t *testing.T) {
 			Version: 1,
 			Sandboxes: map[string]cli.SandboxSession{
 				key: {
-					RunID:       runID,
-					ConfigFile:  configFile,
-					ScopedToken: scopedToken,
+					RunID:      runID,
+					ConfigFile: configFile,
 				},
 			},
 		}
@@ -5723,11 +5662,11 @@ func TestService_ResetSandbox(t *testing.T) {
 	t.Run("calls CancelRun for active but not yet sandboxable run", func(t *testing.T) {
 		setup := setupTest(t)
 		setupResetMocks(setup)
-		seedResetStorage(t, setup, "run-initializing", "scoped-token-123")
+		seedResetStorage(t, setup, "run-initializing")
 
 		cancelCalled := false
 		connInfoCalls := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			if connInfoCalls.Add(1) == 1 {
 				return api.SandboxConnectionInfo{
 					Sandboxable: false,
@@ -5736,9 +5675,8 @@ func TestService_ResetSandbox(t *testing.T) {
 			}
 			return api.SandboxConnectionInfo{Polling: api.PollingResult{Completed: true}}, nil
 		}
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			require.Equal(t, "run-initializing", runID)
-			require.Equal(t, "scoped-token-123", scopedToken)
 			cancelCalled = true
 			return nil
 		}
@@ -5761,10 +5699,10 @@ func TestService_ResetSandbox(t *testing.T) {
 	t.Run("calls CancelRun when SSH connection fails for sandboxable run", func(t *testing.T) {
 		setup := setupTest(t)
 		setupResetMocks(setup)
-		seedResetStorage(t, setup, "run-ssh-fail", "token-ssh")
+		seedResetStorage(t, setup, "run-ssh-fail")
 
 		connInfoCalls := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			if connInfoCalls.Add(1) == 1 {
 				return api.SandboxConnectionInfo{
 					Sandboxable:    true,
@@ -5779,9 +5717,8 @@ func TestService_ResetSandbox(t *testing.T) {
 			return errors.New("connection timed out")
 		}
 		cancelCalled := false
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			require.Equal(t, "run-ssh-fail", runID)
-			require.Equal(t, "token-ssh", scopedToken)
 			cancelCalled = true
 			return nil
 		}
@@ -5804,15 +5741,15 @@ func TestService_ResetSandbox(t *testing.T) {
 	t.Run("does not call CancelRun for completed run", func(t *testing.T) {
 		setup := setupTest(t)
 		setupResetMocks(setup)
-		seedResetStorage(t, setup, "run-completed", "token-done")
+		seedResetStorage(t, setup, "run-completed")
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable: false,
 				Polling:     api.PollingResult{Completed: true},
 			}, nil
 		}
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			t.Fatal("CancelRun should not be called for completed runs")
 			return nil
 		}
@@ -5833,7 +5770,7 @@ func TestService_ResetSandbox(t *testing.T) {
 }
 
 // seedSandboxStorage writes a sandbox session into storage within the test's temp HOME directory.
-func seedSandboxStorage(t *testing.T, tmpHome, runID, scopedToken string) {
+func seedSandboxStorage(t *testing.T, tmpHome, runID string) {
 	t.Helper()
 
 	storageDir := filepath.Join(tmpHome, ".rwx", "sandboxes")
@@ -5844,9 +5781,8 @@ func seedSandboxStorage(t *testing.T, tmpHome, runID, scopedToken string) {
 		Version: 1,
 		Sandboxes: map[string]cli.SandboxSession{
 			"test-key": {
-				RunID:       runID,
-				ConfigFile:  configFile,
-				ScopedToken: scopedToken,
+				RunID:      runID,
+				ConfigFile: configFile,
 			},
 		},
 	}
@@ -5863,7 +5799,7 @@ func TestService_ExecSandbox_RunURL(t *testing.T) {
 		runID := "run-no-url"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -5902,15 +5838,11 @@ func TestService_StartSandbox_RunURL(t *testing.T) {
 
 		runID := "run-reattach-no-url"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable: true,
 				Polling:     api.PollingResult{Completed: false},
 			}, nil
-		}
-
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "test-token"}, nil
 		}
 
 		result, err := setup.service.StartSandbox(cli.StartSandboxConfig{
@@ -5959,10 +5891,6 @@ func TestService_StartSandbox_RunURL(t *testing.T) {
 				RunURL: "https://cloud.rwx.com/mint/my-org/runs/run-server-url",
 			}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "test-token"}, nil
-		}
-
 		result, err := setup.service.StartSandbox(cli.StartSandboxConfig{
 			ConfigFile: setup.absConfig(".rwx/sandbox.yml"),
 			Json:       true,
@@ -5982,7 +5910,7 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 		runID := "run-lock-order"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -6032,7 +5960,7 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 		runID := "run-lock-sync-fail"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -6085,7 +6013,7 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 		runID := "run-lock-fail"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -6129,7 +6057,7 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 		runID := "run-lock-clean"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -6216,7 +6144,7 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 		runID := "run-lock-nonzero"
 		address := "192.168.1.1:22"
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        address,
@@ -6263,7 +6191,7 @@ func TestService_ExecSandbox_Lock(t *testing.T) {
 func TestService_ExecSandbox_DefinitionDrift(t *testing.T) {
 	driftExecSetup := func(t *testing.T, setup *testSetup, runID string) {
 		t.Helper()
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -6372,17 +6300,16 @@ func TestService_ExecSandbox_DefinitionDrift(t *testing.T) {
 func TestService_ExecSandbox_Reset(t *testing.T) {
 	// seedExecResetStorage creates the config file and seeds a session under the
 	// branch key the mocked VCS client reports.
-	seedExecResetStorage := func(t *testing.T, setup *testSetup, runID, scopedToken string, execCount int) string {
+	seedExecResetStorage := func(t *testing.T, setup *testSetup, runID string, execCount int) string {
 		t.Helper()
 		configFile := setup.absConfig(".rwx/sandbox.yml")
 		require.NoError(t, os.WriteFile(configFile, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
 		key := cli.SessionKey("main", configFile)
 		seedSandboxStorageMulti(t, setup.tmp, map[string]cli.SandboxSession{
 			key: {
-				RunID:       runID,
-				ConfigFile:  configFile,
-				ScopedToken: scopedToken,
-				ExecCount:   execCount,
+				RunID:      runID,
+				ConfigFile: configFile,
+				ExecCount:  execCount,
 			},
 		})
 		return configFile
@@ -6401,9 +6328,6 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 				RunURL: "https://cloud.rwx.com/runs/run-new",
 			}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "new-token"}, nil
-		}
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{}, nil
 		}
@@ -6414,11 +6338,11 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 
 	t.Run("stops existing sandbox via SSH and creates fresh sandbox", func(t *testing.T) {
 		setup := setupTest(t)
-		configFile := seedExecResetStorage(t, setup, "run-existing", "scoped-token", 2)
+		configFile := seedExecResetStorage(t, setup, "run-existing", 2)
 		setupNewSandboxMocks(setup)
 
 		oldConnCalls := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			if runID == "run-existing" {
 				n := oldConnCalls.Add(1)
 				if n >= 3 {
@@ -6476,11 +6400,11 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 
 	t.Run("cancels via API when existing sandbox is not yet sandboxable", func(t *testing.T) {
 		setup := setupTest(t)
-		configFile := seedExecResetStorage(t, setup, "run-initializing", "scoped-token", 0)
+		configFile := seedExecResetStorage(t, setup, "run-initializing", 0)
 		setupNewSandboxMocks(setup)
 
 		oldConnCalls := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			if runID == "run-initializing" {
 				n := oldConnCalls.Add(1)
 				if n >= 3 {
@@ -6500,9 +6424,8 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 		}
 
 		cancelCalled := false
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			require.Equal(t, "run-initializing", runID)
-			require.Equal(t, "scoped-token", scopedToken)
 			cancelCalled = true
 			return nil
 		}
@@ -6527,11 +6450,11 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 
 	t.Run("cancels via API when SSH fails for sandboxable existing sandbox", func(t *testing.T) {
 		setup := setupTest(t)
-		configFile := seedExecResetStorage(t, setup, "run-ssh-fail", "token-ssh", 0)
+		configFile := seedExecResetStorage(t, setup, "run-ssh-fail", 0)
 		setupNewSandboxMocks(setup)
 
 		oldConnCalls := atomic.Int32{}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			if runID == "run-ssh-fail" {
 				n := oldConnCalls.Add(1)
 				if n >= 3 {
@@ -6553,9 +6476,8 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 		}
 
 		cancelCalled := false
-		setup.mockAPI.MockCancelRun = func(runID, scopedToken string) error {
+		setup.mockAPI.MockCancelRun = func(runID string) error {
 			require.Equal(t, "run-ssh-fail", runID)
-			require.Equal(t, "token-ssh", scopedToken)
 			cancelCalled = true
 			return nil
 		}
@@ -6590,7 +6512,7 @@ func TestService_ExecSandbox_Reset(t *testing.T) {
 		require.NoError(t, os.WriteFile(configFile, []byte("tasks:\n  - key: sandbox\n    run: rwx-sandbox\n"), 0o644))
 		setupNewSandboxMocks(setup)
 
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -6628,7 +6550,6 @@ func TestService_ExecSandbox_ReconnectionHint(t *testing.T) {
 			key: {
 				RunID:         runID,
 				ConfigFile:    configFile,
-				ScopedToken:   "scoped-token",
 				ExecCount:     execCount,
 				ResetNagShown: resetNagShown,
 			},
@@ -6639,7 +6560,7 @@ func TestService_ExecSandbox_ReconnectionHint(t *testing.T) {
 	// setupExecMocks configures standard SSH and connection info mocks for a
 	// successful exec against an existing sandbox.
 	setupExecMocks := func(setup *testSetup) {
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
@@ -6732,16 +6653,13 @@ func TestService_ExecSandbox_ReconnectionHint(t *testing.T) {
 		setup.mockAPI.MockInitiateRun = func(cfg api.InitiateRunConfig) (*api.InitiateRunResult, error) {
 			return &api.InitiateRunResult{RunID: "run-brand-new", RunURL: "https://cloud.rwx.com/runs/run-brand-new"}, nil
 		}
-		setup.mockAPI.MockCreateSandboxToken = func(cfg api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error) {
-			return &api.CreateSandboxTokenResult{Token: "token"}, nil
-		}
 		setup.mockAPI.MockGetDefaultBase = func() (api.DefaultBaseResult, error) {
 			return api.DefaultBaseResult{}, nil
 		}
 		setup.mockAPI.MockGetPackageVersions = func() (*api.PackageVersionsResult, error) {
 			return &api.PackageVersionsResult{}, nil
 		}
-		setup.mockAPI.MockGetSandboxConnectionInfo = func(id, token string) (api.SandboxConnectionInfo, error) {
+		setup.mockAPI.MockGetSandboxConnectionInfo = func(id string) (api.SandboxConnectionInfo, error) {
 			return api.SandboxConnectionInfo{
 				Sandboxable:    true,
 				Address:        "192.168.1.1:22",
