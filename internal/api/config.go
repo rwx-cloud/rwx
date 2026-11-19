@@ -625,13 +625,14 @@ type ArtifactDownloadsResult struct {
 }
 
 type RunStatusConfig struct {
-	RunID          string
-	TaskKey        string
-	BranchName     string
-	RepositoryName string
-	DefinitionPath string
-	CommitSha      string
-	FailFast       bool
+	OrganizationSlug string
+	RunID            string
+	TaskKey          string
+	BranchName       string
+	RepositoryName   string
+	DefinitionPath   string
+	CommitSha        string
+	FailFast         bool
 }
 
 type RunDetailsConfig struct {
@@ -754,6 +755,7 @@ type ListRunsResult struct {
 // structured 400 (with the valid values and a suggested correction) on a bad
 // value, so the CLI keeps no copy of the set that could drift out of sync.
 type ListRunsConfig struct {
+	OrganizationSlug  string
 	RepositoryNames   []string
 	Branches          []string
 	CommitShas        []string

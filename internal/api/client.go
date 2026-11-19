@@ -1831,6 +1831,9 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 		if cfg.CommitSha != "" {
 			params.Set("commit_sha", cfg.CommitSha)
 		}
+		if cfg.OrganizationSlug != "" {
+			params.Set("organization_slug", cfg.OrganizationSlug)
+		}
 		endpoint = "/mint/api/results/latest?" + params.Encode()
 	}
 	result := RunStatusResult{}

@@ -16,14 +16,15 @@ import (
 )
 
 var (
-	ResultsWait       bool
-	ResultsFailFast   bool
-	ResultsOpen       bool
-	ResultsBranch     string
-	ResultsRepo       string
-	ResultsDefinition string
-	ResultsCommit     string
-	ResultsTaskKey    string
+	ResultsWait         bool
+	ResultsFailFast     bool
+	ResultsOpen         bool
+	ResultsBranch       string
+	ResultsRepo         string
+	ResultsDefinition   string
+	ResultsCommit       string
+	ResultsTaskKey      string
+	ResultsOrganization string
 
 	resultsCmd = &cobra.Command{
 		GroupID: "outputs",
@@ -50,13 +51,14 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 			} else {
 				var err error
 				runID, err = service.ResolveRunIDFromGitContext(cli.ResolveRunIDConfig{
-					BranchName:     ResultsBranch,
-					RepositoryName: ResultsRepo,
-					DefinitionPath: ResultsDefinition,
-					CommitSha:      ResultsCommit,
+					OrganizationSlug: ResultsOrganization,
+					BranchName:       ResultsBranch,
+					RepositoryName:   ResultsRepo,
+					DefinitionPath:   ResultsDefinition,
+					CommitSha:        ResultsCommit,
 				})
 				if err != nil {
-					return HandleAmbiguousDefinitionPathError(err, ResultsBranch, ResultsRepo)
+					return HandleAmbiguousDefinitionPathError(err, ResultsBranch, ResultsRepo, ResultsOrganization)
 				}
 				runIDFromGit = true
 			}
@@ -184,6 +186,7 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 )
 
 func init() {
+	resultsCmd.Flags().StringVar(&ResultsOrganization, "organization", "", "RWX organization slug for run discovery (requires an owner/repo repository)")
 	resultsCmd.Flags().BoolVar(&ResultsOpen, "open", false, "open the run in a browser")
 	resultsCmd.Flags().BoolVar(&ResultsWait, "wait", false, "poll for the run to complete and report the result status")
 	resultsCmd.Flags().BoolVar(&ResultsFailFast, "fail-fast", false, "stop waiting when failures are available (only has an effect when used with --wait)")
@@ -213,12 +216,15 @@ func CommitDriftNote(client vcs.Client, runCommit string) string {
 	return vcs.CommitMismatchNote(last, runCommit)
 }
 
-func HandleAmbiguousDefinitionPathError(err error, branch, repo string) error {
+func HandleAmbiguousDefinitionPathError(err error, branch, repo string, organization ...string) error {
 	var ambiguousErr *api.AmbiguousDefinitionPathError
 	if errors.As(err, &ambiguousErr) {
 		msg := ambiguousErr.Error()
 		for _, path := range ambiguousErr.MatchingDefinitionPaths {
 			cmd := "rwx results"
+			if len(organization) > 0 && organization[0] != "" {
+				cmd += " --organization " + organization[0]
+			}
 			if branch != "" {
 				cmd += " --branch " + branch
 			}

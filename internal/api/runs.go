@@ -73,6 +73,9 @@ func (e *RateLimitedError) Error() string {
 func (c ListRunsConfig) queryParams() url.Values {
 	params := url.Values{}
 
+	if c.OrganizationSlug != "" {
+		params.Set("organization_slug", c.OrganizationSlug)
+	}
 	setFilterParam(params, "repository_name", "repository_names[]", c.RepositoryNames)
 	setFilterParam(params, "branch", "branch_names[]", c.Branches)
 	setFilterParam(params, "commit_sha", "commit_shas[]", c.CommitShas)

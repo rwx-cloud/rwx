@@ -25,6 +25,7 @@ var (
 	RunsListMine              bool
 	RunsListLimit             int
 	RunsListCursor            string
+	RunsListOrganization      string
 
 	runsListCmd = &cobra.Command{
 		Use:     "list [flags]",
@@ -53,6 +54,7 @@ For a given run's full payload, run 'rwx results <id> --json'.`,
 			}
 
 			result, err := service.ListRuns(cli.ListRunsConfig{
+				OrganizationSlug:  RunsListOrganization,
 				RepositoryNames:   RunsListRepositories,
 				Branches:          RunsListBranches,
 				CommitShas:        RunsListCommits,
@@ -92,6 +94,7 @@ For a given run's full payload, run 'rwx results <id> --json'.`,
 )
 
 func init() {
+	runsListCmd.Flags().StringVar(&RunsListOrganization, "organization", "", "RWX organization slug (requires owner/repo repositories; defaults to the Git origin)")
 	// All filters are repeatable. StringSliceVar (not StringArrayVar) accepts both
 	// repeated flags (--branch a --branch b) and a comma-separated value
 	// (--branch a,b); a single value is sent in the scalar query-param form.
