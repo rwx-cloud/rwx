@@ -193,6 +193,35 @@ type LFSChangedFilesMetadata struct {
 	Count int
 }
 
+type PatchSource string
+
+const (
+	LocalChanges PatchSource = "local changes"
+	Uncommitted  PatchSource = "uncommitted changes"
+	Unpushed     PatchSource = "unpushed commits"
+	Mixed        PatchSource = "unpushed commits and uncommitted changes"
+)
+
+// ClassifyPatch expects commands that list changes on either side of the last
+// local commit. Its result is only used if there actually is a patch.
+func ClassifyPatch(committed, working *exec.Cmd) PatchSource {
+	files, err := committed.Output()
+	if err != nil {
+		return LocalChanges
+	}
+	if len(files) == 0 {
+		return Uncommitted
+	}
+	files, err = working.Output()
+	if err != nil {
+		return LocalChanges
+	}
+	if len(files) == 0 {
+		return Unpushed
+	}
+	return Mixed
+}
+
 type PatchFile struct {
 	Written         bool
 	Path            string

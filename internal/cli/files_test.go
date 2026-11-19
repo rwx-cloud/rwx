@@ -33,9 +33,9 @@ func TestReadRwxDirectoryEntries_SizeLimit(t *testing.T) {
 
 		_, err = cli.RwxDirectoryEntries(rwxDir)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "uploads the contents of the .rwx directory as well as a diff of your local git changes")
+		require.Contains(t, err.Error(), "The .rwx directory is 1.0 MiB and the git patch for local changes is 5.0 MiB")
 		require.Contains(t, err.Error(), "greater than the 5 MiB combined limit")
-		require.Contains(t, err.Error(), "stash your changes or commit and push")
+		require.Contains(t, err.Error(), "Push any unpushed commits")
 	})
 
 	t.Run("returns generic error when non-patch content exceeds 5MiB", func(t *testing.T) {

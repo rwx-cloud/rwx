@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/rwx-cloud/rwx/internal/vcs"
+	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 )
 
 type VCS struct {
@@ -19,6 +20,7 @@ type VCS struct {
 	MockGetCommit              string
 	MockGetCommitError         error
 	MockGetOriginUrl           string
+	MockPatchSource            vcstypes.PatchSource
 	MockGeneratePatchFile      vcs.PatchFile
 	MockGeneratePatchFileError error
 	MockGeneratePatchFileFunc  func(destDir string, pathspec []string) (vcs.PatchFile, error)
@@ -59,6 +61,10 @@ func (c *VCS) GetCommit() (string, error) {
 
 func (c *VCS) GetOriginUrl() string {
 	return c.MockGetOriginUrl
+}
+
+func (c *VCS) PatchSource(base string, pathspec []string) vcstypes.PatchSource {
+	return c.MockPatchSource
 }
 
 func (c *VCS) GeneratePatchFile(destDir string, pathspec []string) (vcs.PatchFile, error) {

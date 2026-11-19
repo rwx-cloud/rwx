@@ -47,6 +47,8 @@ type Client interface {
 	// commit, as under jj, where an empty @ is skipped.
 	GetLastCommit() (string, error)
 	GetOriginUrl() string
+	// PatchSource describes where a nonempty patch against base would come from.
+	PatchSource(base string, pathspec []string) vcstypes.PatchSource
 	GeneratePatchFile(destDir string, pathspec []string) (PatchFile, error)
 	GeneratePatch(pathspec []string) ([]byte, *LFSChangedFilesMetadata, error)
 	GenerateDirtyPatches() (DirtyPatches, error)
