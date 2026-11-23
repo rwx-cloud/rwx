@@ -1,0 +1,80 @@
+on:
+  cli:
+    init:
+      ref: ${{ event.git.sha }}
+
+base:
+  image: ubuntu:26.04
+  config: rwx/base 1.2.2
+
+tasks:
+  - key: code
+    call: git/clone 2.4.1
+    with:
+      repository: https://github.com/rwx-cloud/rwx.git
+      ref: ${{ init.ref }}
+
+  - key: build-def
+    use: code
+    run: cp .rwx/build.yml "$RWX_ARTIFACTS/build-yml"
+
+  - key: build-rwx-cli
+    call: ${{ tasks.build-def.artifacts.build-yml }}
+    init:
+      ref: ${{ init.ref }}
+
+  - key: rwx-cli
+    run: sudo install "$CLI_BINARY" /usr/local/bin
+    env:
+      CLI_BINARY: ${{ tasks.build-rwx-cli.tasks.build.artifacts.rwx }}
+
+  - key: test-tool-cache-lifecycle
+    use: rwx-cli
+    run: |
+      set -euo pipefail
+
+      rwx vaults tool-caches list --vault rwx-cli-development --json | jq -e '.ToolCaches | type == "array"' >/dev/null
+
+      vault_name="rwx-cli-tool-cache-${RWX_TASK_ID}-${RWX_TASK_ATTEMPT_NUMBER}"
+      vault_id=""
+      cleanup() {
+        if [ -n "$vault_id" ]; then
+          rwx vaults delete "$vault_id" --yes >/dev/null
+        fi
+      }
+      trap cleanup EXIT
+
+      created=$(rwx vaults create --name "$vault_name" --unlocked --json)
+      vault_id=$(echo "$created" | jq -er '.ID | select(length > 0)')
+      rwx vaults tool-caches list --vault "$vault_id" --json | jq -e '.ToolCaches == []' >/dev/null
+
+      populate_def=$(mktemp --suffix=.yml)
+      sed "s/TOOL_CACHE_VAULT/$vault_name/g" "$POPULATE_DEF" > "$populate_def"
+      populated=$(rwx run "$populate_def" --init cache-name=cli-e2e-cache --wait --json)
+      echo "$populated" | jq -er '.RunURL' > "$RWX_LINKS/Populate tool cache"
+      echo "$populated" | jq -e '.ResultStatus == "succeeded"' >/dev/null
+
+      listed=$(rwx vaults tool-caches list --vault "$vault_name" --json)
+      echo "$listed" | jq -e '
+        (.ToolCaches | length == 1) and
+        (.ToolCaches[0] | .Name == "cli-e2e-cache" and .Populated == true and
+          (.InstallationID | length > 0) and (.OS | length > 0) and (.Arch | length > 0) and
+          .LastWrittenAt != null and .Expiry != null)
+      ' >/dev/null
+      cache_id=$(echo "$listed" | jq -er '.ToolCaches[0].ID')
+
+      evicted=$(rwx vaults tool-caches evict "$cache_id" --vault "$vault_id" --yes --json)
+      echo "$evicted" | jq -e --arg id "$cache_id" '
+        .ID == $id and .Name == "cli-e2e-cache" and .Populated == false and
+        .LastEvictedAt != null and .Expiry != null
+      ' >/dev/null
+
+      listed=$(rwx vaults tool-caches list --vault "$vault_name" --json)
+      echo "$listed" | jq -e --argjson evicted "$evicted" '.ToolCaches == [$evicted]' >/dev/null
+
+      repeated=$(rwx vaults tool-caches evict "$cache_id" --vault "$vault_name" --yes --json)
+      echo "$repeated" | jq -e --arg id "$cache_id" '.ID == $id and .Populated == false and .LastEvictedAt != null' >/dev/null
+      echo "Tool cache listing and eviction passed against the live Cloud API."
+    env:
+      POPULATE_DEF: ${{ run.dir }}/integration/tool-caches-test/populate.yml
+      RWX_ACCESS_TOKEN: ${{ vaults.rwx-cli-development.service-accounts.rwx-cli-ci.token }}

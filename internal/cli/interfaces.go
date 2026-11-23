@@ -29,6 +29,8 @@ type APIClient interface {
 	SetSecretsInVault(api.SetSecretsInVaultConfig) (*api.SetSecretsInVaultResult, error)
 	CreateVault(api.CreateVaultConfig) (*api.CreateVaultResult, error)
 	ListVaults() (*api.ListVaultsResult, error)
+	ListVaultToolCaches(api.ListVaultToolCachesConfig) (*api.ListVaultToolCachesResult, error)
+	EvictVaultToolCache(api.EvictVaultToolCacheConfig) (*api.EvictVaultToolCacheResult, error)
 	ShowVault(api.ShowVaultConfig) (*api.ShowVaultResult, error)
 	UpdateVault(api.UpdateVaultConfig) (*api.UpdateVaultResult, error)
 	DeleteVault(api.DeleteVaultConfig) (*api.DeleteVaultResult, error)
