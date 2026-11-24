@@ -47,14 +47,12 @@ type CancelRunResult struct {
 	RunID string
 }
 
-// CancelRun cancels a run the caller identifies by ID. It sends no scoped token,
-// so the API client authenticates with the user's access token.
 func (s Service) CancelRun(cfg CancelRunConfig) (*CancelRunResult, error) {
 	if cfg.RunID == "" {
 		return nil, errors.New("a run ID is required")
 	}
 
-	if err := s.APIClient.CancelRun(cfg.RunID, ""); err != nil {
+	if err := s.APIClient.CancelRun(cfg.RunID); err != nil {
 		return nil, err
 	}
 

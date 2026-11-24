@@ -168,7 +168,7 @@ func TestSandboxCommandsSelectDefinition(t *testing.T) {
 				stopAfterSelection := errors.New("stop after sandbox selection")
 				checks := 0
 				mockAPI := &mocks.API{}
-				mockAPI.MockGetSandboxConnectionInfo = func(runID, token string) (api.SandboxConnectionInfo, error) {
+				mockAPI.MockGetSandboxConnectionInfo = func(runID string) (api.SandboxConnectionInfo, error) {
 					checks++
 					if scenario == "omitted definition" || scenario == "ambiguous" {
 						require.Contains(t, []string{"run-default", "run-custom"}, runID)

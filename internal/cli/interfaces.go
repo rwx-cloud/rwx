@@ -16,8 +16,7 @@ type APIClient interface {
 	GetSkillLatestVersion() (string, error)
 	AttachDebugSession(api.AttachDebugSessionConfig) (api.DebugSessionSummary, error)
 	GetDebugConnectionInfo(api.GetDebugConnectionInfoConfig) (api.DebugConnectionInfo, error)
-	GetSandboxConnectionInfo(runID, scopedToken string) (api.SandboxConnectionInfo, error)
-	CreateSandboxToken(api.CreateSandboxTokenConfig) (*api.CreateSandboxTokenResult, error)
+	GetSandboxConnectionInfo(runID string) (api.SandboxConnectionInfo, error)
 	GetDispatch(api.GetDispatchConfig) (*api.GetDispatchResult, error)
 	InitiateRun(api.InitiateRunConfig) (*api.InitiateRunResult, error)
 	DeferredRunStatus(pollingURL string) (api.DeferredRunStatusResult, error)
@@ -95,7 +94,7 @@ type APIClient interface {
 	GetRunPromptByTaskKey(runID, taskKey string) (string, error)
 	GetSandboxInitTemplate() (api.SandboxInitTemplateResult, error)
 	ListSandboxRuns(retryProgress io.Writer) (*api.ListSandboxRunsResult, error)
-	CancelRun(runID, scopedToken string) error
+	CancelRun(runID string) error
 }
 
 var _ APIClient = api.Client{}
