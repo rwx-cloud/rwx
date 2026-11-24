@@ -10,11 +10,14 @@ var (
 		GroupID: "setup",
 		Use:     "mcp",
 		Short:   "MCP (Model Context Protocol) related commands",
+		Long:    mcp.DeprecationNotice,
+		Hidden:  true,
 	}
 
 	mcpServeCmd = &cobra.Command{
 		Use:   "serve",
 		Short: "Start an MCP server",
+		Long:  mcp.DeprecationNotice,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			config := mcp.ServeConfig{
 				AccessToken:        AccessToken,

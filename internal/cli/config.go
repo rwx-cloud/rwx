@@ -4,6 +4,7 @@ import (
 	"io"
 
 	"github.com/rwx-cloud/rwx/internal/accesstoken"
+	"github.com/rwx-cloud/rwx/internal/config"
 	"github.com/rwx-cloud/rwx/internal/docker"
 	"github.com/rwx-cloud/rwx/internal/docs"
 	"github.com/rwx-cloud/rwx/internal/docstoken"
@@ -16,25 +17,28 @@ import (
 )
 
 type Config struct {
-	APIClient            APIClient
-	SSHClient            SSHClient
-	SSHTunnelManager     rwxssh.TunnelManager
-	VCSClient            vcs.Client
-	DockerCLI            docker.Client
-	DocsClient           docs.Client
-	DocsTokenBackend     docstoken.Backend
-	ReleasesClient       releases.Client
-	AccessTokenBackend   accesstoken.Backend
-	VersionsBackend      versions.Backend
-	SkillVersionsBackend versions.Backend
-	TelemetryCollector   *telemetry.Collector
-	ChoicePicker         ChoicePicker
-	Stdin                io.Reader
-	StdinIsTTY           bool
-	Stdout               io.Writer
-	StdoutIsTTY          bool
-	Stderr               io.Writer
-	StderrIsTTY          bool
+	APIClient             APIClient
+	NewSSHClient          func() SSHClient
+	SandboxTransport      string
+	TransportPreferences  config.Backend
+	ResetSandboxTransport bool
+	SSHTunnelManager      rwxssh.TunnelManager
+	VCSClient             vcs.Client
+	DockerCLI             docker.Client
+	DocsClient            docs.Client
+	DocsTokenBackend      docstoken.Backend
+	ReleasesClient        releases.Client
+	AccessTokenBackend    accesstoken.Backend
+	VersionsBackend       versions.Backend
+	SkillVersionsBackend  versions.Backend
+	TelemetryCollector    *telemetry.Collector
+	ChoicePicker          ChoicePicker
+	Stdin                 io.Reader
+	StdinIsTTY            bool
+	Stdout                io.Writer
+	StdoutIsTTY           bool
+	Stderr                io.Writer
+	StderrIsTTY           bool
 
 	HideLatestVersionMessage bool
 }
@@ -44,7 +48,7 @@ func (c Config) Validate() error {
 		return errors.New("missing RWX client")
 	}
 
-	if c.SSHClient == nil {
+	if c.NewSSHClient == nil {
 		return errors.New("missing SSH client constructor")
 	}
 

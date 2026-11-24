@@ -13,6 +13,7 @@ var (
 		GroupID: "setup",
 		Use:     "lsp",
 		Short:   "LSP (Language Server Protocol) related commands",
+		Hidden:  true,
 	}
 
 	lspServeCmd = &cobra.Command{

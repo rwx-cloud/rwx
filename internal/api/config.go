@@ -172,11 +172,12 @@ type SetSecretsInVaultResult struct {
 }
 
 type CreateVaultConfig struct {
-	Name                  string                      `json:"name"`
-	Unlocked              bool                        `json:"unlocked"`
-	RepositoryPermissions []CreateVaultRepoPermission `json:"repository_permissions"`
-	ApprovalsEnabled      *bool                       `json:"approvals_enabled,omitempty"`
-	RequiredApprovals     *int                        `json:"required_approvals,omitempty"`
+	Name                     string                      `json:"name"`
+	Unlocked                 bool                        `json:"unlocked"`
+	RepositoryPermissions    []CreateVaultRepoPermission `json:"repository_permissions"`
+	ApprovalsEnabled         *bool                       `json:"approvals_enabled,omitempty"`
+	RequiredApprovals        *int                        `json:"required_approvals,omitempty"`
+	OpenSourceReposCanAccess *bool                       `json:"open_source_repos_can_access,omitempty"`
 }
 
 type CreateVaultRepoPermission struct {
@@ -193,13 +194,14 @@ type ListVaultsResult struct {
 }
 
 type Vault struct {
-	ID                    string                      `json:"id"`
-	Name                  string                      `json:"name"`
-	LockStatus            string                      `json:"lock_status"`
-	RepositoryPermissions []CreateVaultRepoPermission `json:"repository_permissions"`
-	OidcSubject           string                      `json:"oidc_subject"`
-	ApprovalsEnabled      bool                        `json:"approvals_enabled"`
-	RequiredApprovals     int                         `json:"required_approvals"`
+	ID                       string                      `json:"id"`
+	Name                     string                      `json:"name"`
+	LockStatus               string                      `json:"lock_status"`
+	RepositoryPermissions    []CreateVaultRepoPermission `json:"repository_permissions"`
+	OidcSubject              string                      `json:"oidc_subject"`
+	ApprovalsEnabled         bool                        `json:"approvals_enabled"`
+	RequiredApprovals        int                         `json:"required_approvals"`
+	OpenSourceReposCanAccess bool                        `json:"open_source_repos_can_access"`
 }
 
 type ShowVaultConfig struct {
@@ -211,11 +213,12 @@ type ShowVaultResult struct {
 }
 
 type UpdateVaultConfig struct {
-	VaultID           string  `json:"-"`
-	Name              *string `json:"name,omitempty"`
-	Unlocked          *bool   `json:"unlocked,omitempty"`
-	ApprovalsEnabled  *bool   `json:"approvals_enabled,omitempty"`
-	RequiredApprovals *int    `json:"required_approvals,omitempty"`
+	VaultID                  string  `json:"-"`
+	Name                     *string `json:"name,omitempty"`
+	Unlocked                 *bool   `json:"unlocked,omitempty"`
+	ApprovalsEnabled         *bool   `json:"approvals_enabled,omitempty"`
+	RequiredApprovals        *int    `json:"required_approvals,omitempty"`
+	OpenSourceReposCanAccess *bool   `json:"open_source_repos_can_access,omitempty"`
 }
 
 type UpdateVaultResult struct {

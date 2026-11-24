@@ -10,6 +10,7 @@ import (
 )
 
 type APIClient interface {
+	AccessToken() (string, error)
 	GetSkillContent() (string, error)
 	GetSkillSnapshot() (*api.SkillSnapshot, error)
 	GetSkillLatestVersion() (string, error)
@@ -99,7 +100,7 @@ var _ APIClient = api.Client{}
 
 type SSHClient interface {
 	Close() error
-	Connect(addr string, cfg gossh.ClientConfig) error
+	Connect(addr string, cfg gossh.ClientConfig, transport ssh.Transport) error
 	InteractiveSession() error
 	ExecuteCommand(command string) (int, error)
 	ExecuteCommandWithStdin(command string, stdin io.Reader) (int, error)

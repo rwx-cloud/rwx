@@ -149,3 +149,12 @@ index abc..def 100644
 		require.Nil(t, parseNewFilePaths(patch))
 	})
 }
+
+func TestSandboxWorktreeRootCommand(t *testing.T) {
+	t.Run("finds git on the PATH rather than at a fixed location", func(t *testing.T) {
+		cmd := sandboxWorktreeRootCommand("git status")
+
+		require.Contains(t, cmd, "$(git rev-parse --show-toplevel)")
+		require.NotContains(t, cmd, "/usr/bin/git")
+	})
+}

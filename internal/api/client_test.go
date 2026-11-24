@@ -12,10 +12,80 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rwx-cloud/rwx/internal/accesstoken"
 	"github.com/rwx-cloud/rwx/internal/api"
+	"github.com/rwx-cloud/rwx/internal/config"
 	internalErrors "github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAPIClient_AccessTokenMatchesRequestAuthentication(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Received-Authorization", r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	fileBackend, err := config.NewFileBackend([]string{t.TempDir()})
+	require.NoError(t, err)
+
+	backend := accesstoken.NewFileBackend(fileBackend)
+	require.NoError(t, backend.Set("saved-token"))
+
+	t.Run("explicit token overrides saved token", func(t *testing.T) {
+		client, err := api.NewClient(api.Config{
+			Host:               strings.TrimPrefix(server.URL, "http://"),
+			AccessToken:        "explicit-token",
+			AccessTokenBackend: backend,
+		})
+		require.NoError(t, err)
+
+		token, err := client.AccessToken()
+		require.NoError(t, err)
+		require.Equal(t, "explicit-token", token)
+
+		request, err := http.NewRequest(http.MethodGet, server.URL, nil)
+		require.NoError(t, err)
+
+		response, err := client.RoundTrip(request)
+		require.NoError(t, err)
+		defer response.Body.Close()
+
+		require.Equal(t, "Bearer explicit-token", response.Header.Get("Received-Authorization"))
+	})
+
+	t.Run("saved token is resolved on each use", func(t *testing.T) {
+		client, err := api.NewClient(api.Config{
+			Host:               strings.TrimPrefix(server.URL, "http://"),
+			AccessTokenBackend: backend,
+		})
+		require.NoError(t, err)
+
+		token, err := client.AccessToken()
+		require.NoError(t, err)
+		require.Equal(t, "saved-token", token)
+
+		request, err := http.NewRequest(http.MethodGet, server.URL, nil)
+		require.NoError(t, err)
+
+		response, err := client.RoundTrip(request)
+		require.NoError(t, err)
+		require.NoError(t, response.Body.Close())
+		require.Equal(t, "Bearer saved-token", response.Header.Get("Received-Authorization"))
+
+		require.NoError(t, backend.Set("updated-saved-token"))
+
+		token, err = client.AccessToken()
+		require.NoError(t, err)
+		require.Equal(t, "updated-saved-token", token)
+
+		response, err = client.RoundTrip(request)
+		require.NoError(t, err)
+		defer response.Body.Close()
+
+		require.Equal(t, "Bearer updated-saved-token", response.Header.Get("Received-Authorization"))
+	})
+}
 
 func TestAPIClient_GetSkillSnapshot(t *testing.T) {
 	t.Run("parses the atomic skill snapshot", func(t *testing.T) {

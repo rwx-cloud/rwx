@@ -49,6 +49,13 @@ var (
 				return errors.New("--format and --json cannot be used together")
 			}
 
+			if sandboxTransport != "" && sandboxTransport != "auto" && sandboxTransport != "ssh" && sandboxTransport != "wss" {
+				return errors.New("--transport must be auto, ssh or wss")
+			}
+			if sandboxResetTransport && sandboxTransport != "" && sandboxTransport != "auto" {
+				return errors.New("--reset-transport requires --transport auto")
+			}
+
 			fileBackend, err := internalconfig.NewFileBackend([]string{
 				filepath.Join("~", ".config", "rwx"),
 				filepath.Join("~", ".mint"),
@@ -87,24 +94,27 @@ var (
 			}
 
 			service, err = cli.NewService(cli.Config{
-				APIClient:            c,
-				SSHClient:            new(ssh.Client),
-				SSHTunnelManager:     ssh.NewTunnelManager(),
-				VCSClient:            vcs.New(dir),
-				DockerCLI:            dockerCli,
-				DocsClient:           docs.Client{Host: docsHost, Scheme: docsScheme},
-				DocsTokenBackend:     docsTokenBackend,
-				ReleasesClient:       releases.Client{},
-				AccessTokenBackend:   accessTokenBackend,
-				VersionsBackend:      versionsBackend,
-				SkillVersionsBackend: skillVersionsBackend,
-				TelemetryCollector:   telemetryCollector,
-				Stdin:                os.Stdin,
-				StdinIsTTY:           term.IsTerminal(int(os.Stdin.Fd())),
-				Stdout:               os.Stdout,
-				StdoutIsTTY:          term.IsTerminal(int(os.Stdout.Fd())),
-				Stderr:               os.Stderr,
-				StderrIsTTY:          term.IsTerminal(int(os.Stderr.Fd())),
+				APIClient:             c,
+				NewSSHClient:          func() cli.SSHClient { return new(ssh.Client) },
+				SandboxTransport:      sandboxTransport,
+				TransportPreferences:  fileBackend,
+				ResetSandboxTransport: sandboxResetTransport,
+				SSHTunnelManager:      ssh.NewTunnelManager(),
+				VCSClient:             vcs.New(dir),
+				DockerCLI:             dockerCli,
+				DocsClient:            docs.Client{Host: docsHost, Scheme: docsScheme},
+				DocsTokenBackend:      docsTokenBackend,
+				ReleasesClient:        releases.Client{},
+				AccessTokenBackend:    accessTokenBackend,
+				VersionsBackend:       versionsBackend,
+				SkillVersionsBackend:  skillVersionsBackend,
+				TelemetryCollector:    telemetryCollector,
+				Stdin:                 os.Stdin,
+				StdinIsTTY:            term.IsTerminal(int(os.Stdin.Fd())),
+				Stdout:                os.Stdout,
+				StdoutIsTTY:           term.IsTerminal(int(os.Stdout.Fd())),
+				Stderr:                os.Stderr,
+				StderrIsTTY:           term.IsTerminal(int(os.Stderr.Fd())),
 
 				HideLatestVersionMessage: cmd == upgradeCmd,
 			})

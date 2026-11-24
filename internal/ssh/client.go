@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"time"
 
 	"github.com/rwx-cloud/rwx/internal/errors"
 
@@ -16,9 +17,36 @@ type Client struct {
 	*ssh.Client
 }
 
-func (c *Client) Connect(address string, config ssh.ClientConfig) (err error) {
-	c.Client, err = ssh.Dial("tcp", address, &config)
-	return
+func (c *Client) Connect(address string, config ssh.ClientConfig, transport Transport) error {
+	started := time.Now()
+	stream, err := transport.Dial()
+	if err != nil {
+		return err
+	}
+
+	if config.Timeout > 0 {
+		if err := stream.SetDeadline(started.Add(config.Timeout)); err != nil {
+			_ = stream.Close()
+			return err
+		}
+	}
+
+	conn, channels, requests, err := ssh.NewClientConn(stream, address, &config)
+	if err != nil {
+		_ = stream.Close()
+		return err
+	}
+
+	if config.Timeout > 0 {
+		if err := stream.SetDeadline(time.Time{}); err != nil {
+			_ = conn.Close()
+			return err
+		}
+	}
+
+	c.Client = ssh.NewClient(conn, channels, requests)
+
+	return nil
 }
 
 func (c *Client) Close() error {

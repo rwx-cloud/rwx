@@ -9,6 +9,8 @@ import (
 	"github.com/rwx-cloud/rwx/internal/versions"
 )
 
+const DeprecationNotice = "The local RWX MCP server (rwx mcp serve) is deprecated. Hosted MCP setup: https://www.rwx.com/docs/mcp."
+
 type ServeConfig struct {
 	AccessToken        string
 	Host               string
@@ -57,7 +59,9 @@ func (s *Server) Run(ctx context.Context, transport mcp.Transport) error {
 func (s *Server) addTools() {
 	mcp.AddTool(s.ms, &mcp.Tool{
 		Name: "get_run_test_failures",
-		Description: `Get the list of failed tests for the given run(s).
+		Description: DeprecationNotice + `
+
+Get the list of failed tests for the given run(s).
 
 Run URLs or IDs are for RWX (not other CI providers) and can be found from:
 - RWX URLs like: https://cloud.rwx.com/mint/my-org/runs/90bf40a00be843ed89cc1d9c8535f0ca

@@ -9,8 +9,10 @@ import (
 
 	"github.com/rwx-cloud/rwx/internal/cli"
 	"github.com/rwx-cloud/rwx/internal/mocks"
+	rwxssh "github.com/rwx-cloud/rwx/internal/ssh"
 	"github.com/rwx-cloud/rwx/internal/telemetry"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 type testSetup struct {
@@ -25,8 +27,41 @@ type testSetup struct {
 	mockStdin  *bytes.Buffer
 	mockStdout *strings.Builder
 	mockStderr *strings.Builder
+	sshClients []*recordingSSHClient
 	tmp        string
 	originalWd string
+}
+
+type recordingSSHClient struct {
+	*mocks.SSH
+	transport    rwxssh.Transport
+	connectCount int
+	closeCount   int
+	commands     []string
+}
+
+func (c *recordingSSHClient) Connect(address string, config ssh.ClientConfig, transport rwxssh.Transport) error {
+	c.transport = transport
+	c.connectCount++
+	return c.SSH.Connect(address, config, transport)
+}
+
+func (c *recordingSSHClient) Close() error {
+	c.closeCount++
+	return nil
+}
+
+func (c *recordingSSHClient) ExecuteCommand(command string) (int, error) {
+	c.commands = append(c.commands, command)
+	return c.SSH.ExecuteCommand(command)
+}
+
+func (s *testSetup) recordSSHClients() {
+	s.service.NewSSHClient = func() cli.SSHClient {
+		client := &recordingSSHClient{SSH: s.mockSSH}
+		s.sshClients = append(s.sshClients, client)
+		return client
+	}
 }
 
 type choicePickerStub struct {
@@ -88,7 +123,7 @@ func setupTest(t *testing.T) *testSetup {
 
 	setup.config = cli.Config{
 		APIClient:          setup.mockAPI,
-		SSHClient:          setup.mockSSH,
+		NewSSHClient:       func() cli.SSHClient { return setup.mockSSH },
 		SSHTunnelManager:   setup.mockTunnel,
 		VCSClient:          setup.mockVCS,
 		DockerCLI:          setup.mockDocker,
