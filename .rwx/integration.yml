@@ -87,3 +87,8 @@ tasks:
     call: ${{ run.dir }}/integration/vaults-test.yml
     init:
       ref: ${{ init.commit-sha }}
+
+  - key: run-rwx-tool-caches-test
+    call: ${{ run.dir }}/integration/tool-caches-test.yml
+    init:
+      ref: ${{ init.commit-sha }}
