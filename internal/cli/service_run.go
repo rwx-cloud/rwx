@@ -15,6 +15,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/vcs"
+	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 )
 
 // runDefinitionOutsideRwxDir reports whether the resolved run definition file
@@ -245,14 +246,19 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		fmt.Fprintf(s.Stderr, "Configured CLI trigger with git init params in %q\n\n", relativeRunDefinitionPath)
 	}
 
+	var pathspec []string
+	patchSource := vcstypes.LocalChanges
+	if patchable {
+		pathspec = runPatchPathspec(s.VCSClient.GetTopLevel(), runDefinitionPath, relativeRunDefinitionPath)
+		// Inspect before writing .patches so the patch itself isn't a local edit.
+		patchSource = s.VCSClient.PatchSource(sha, pathspec)
+	}
 	for _, gitParam := range resolveResult.GitParams {
 		if _, exists := cfg.InitParameters[gitParam]; exists {
 			if patchable {
-				patch, _, patchErr := s.VCSClient.GeneratePatch(
-					runPatchPathspec(s.VCSClient.GetTopLevel(), runDefinitionPath, relativeRunDefinitionPath),
-				)
+				patch, _, patchErr := s.VCSClient.GeneratePatch(pathspec)
 				if patchErr == nil && len(patch) > 0 {
-					fmt.Fprintf(s.Stderr, "Skipping the git patch for uncommitted changes because %q was explicitly specified\n\n", gitParam)
+					fmt.Fprintf(s.Stderr, "Skipping the git patch for %s because %q was explicitly specified\n\n", patchSource, gitParam)
 				}
 			}
 			patchable = false
@@ -262,10 +268,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 
 	if patchable {
 		var patchErr error
-		patchFile, patchErr = s.VCSClient.GeneratePatchFile(
-			patchDir,
-			runPatchPathspec(s.VCSClient.GetTopLevel(), runDefinitionPath, relativeRunDefinitionPath),
-		)
+		patchFile, patchErr = s.VCSClient.GeneratePatchFile(patchDir, pathspec)
 		if patchErr != nil {
 			errorMessage = patchErr.Error()
 			fmt.Fprintf(s.Stderr, "Warning: %s\n\n", errorMessage)
@@ -286,7 +289,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 			s.recordTelemetry("run.patch_error", telemetryProps)
 		}
 		if patchFile.LFSChangedFiles.Count > 0 {
-			return nil, runPatchLFSChangesError(patchFile.LFSChangedFiles)
+			return nil, runPatchLFSChangesError(patchFile.LFSChangedFiles, patchSource)
 		}
 	}
 
@@ -302,7 +305,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		}
 		return false
 	}
-	entries, err := readRwxDirectoryEntriesMatching([]string{rwxDirectoryPath}, rwxDirectoryPath, includeUploadEntry)
+	entries, err := readRwxDirectoryEntriesMatching([]string{rwxDirectoryPath}, rwxDirectoryPath, includeUploadEntry, patchSource)
 	if err != nil {
 		if errors.Is(err, errors.ErrFileNotExists) && tempRwxDir == "" {
 			// User explicitly specified a directory that doesn't exist
@@ -329,7 +332,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 		if err != nil {
 			return errors.Wrapf(err, "unable to reload %q", relativeRunDefinitionPath)
 		}
-		rwxDirectoryEntries, err := readRwxDirectoryEntriesMatching([]string{rwxDirectoryPath}, rwxDirectoryPath, includeUploadEntry)
+		rwxDirectoryEntries, err := readRwxDirectoryEntriesMatching([]string{rwxDirectoryPath}, rwxDirectoryPath, includeUploadEntry, patchSource)
 		if err != nil && !errors.Is(err, errors.ErrFileNotExists) {
 			return errors.Wrapf(err, "unable to reload rwx directory %q", rwxDirectoryPath)
 		}
@@ -339,8 +342,7 @@ func (s Service) InitiateRun(cfg InitiateRunConfig) (*api.InitiateRunResult, err
 	}
 
 	if patchFile.Written {
-		fmt.Fprintf(s.Stderr, "Included a git patch for uncommitted changes\n")
-		fmt.Fprintln(s.Stderr, "")
+		fmt.Fprintf(s.Stderr, "Included a git patch for %s\n\n", patchSource)
 	}
 
 	addBaseIfNeeded, err := s.insertDefaultBaseIfMissing(runDefinition)

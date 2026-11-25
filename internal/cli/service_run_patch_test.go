@@ -12,6 +12,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/mocks"
 	"github.com/rwx-cloud/rwx/internal/vcs"
+	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,6 +26,7 @@ type initiateRunResult struct {
 func initiateRun(t *testing.T, patchFile vcs.PatchFile, expectedPatchMetadata api.PatchMetadata, opts ...func(*cli.InitiateRunConfig)) initiateRunResult {
 	s := setupTest(t)
 	s.mockVCS.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+	s.mockVCS.MockPatchSource = vcstypes.Uncommitted
 	s.mockVCS.MockGeneratePatchFile = patchFile
 
 	var receivedRwxDir []api.RwxDirectoryEntry
@@ -490,6 +492,7 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 		t.Run("by default", func(t *testing.T) {
 			s := setupTest(t)
 			s.mockVCS.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
+			s.mockVCS.MockPatchSource = vcstypes.Unpushed
 			s.mockVCS.MockGeneratePatchFile = patchFile
 
 			rwxDir := filepath.Join(s.tmp, ".rwx")
@@ -522,14 +525,14 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 			require.True(t, errors.Is(err, errors.ErrPatch))
 			require.Contains(t, err.Error(), "1 LFS file(s) changed locally and cannot be included in the RWX run patch:")
 			require.Contains(t, err.Error(), "  bar.txt")
-			require.Contains(t, err.Error(), "To recover, commit and push your changes, then retry rwx run.")
+			require.Contains(t, err.Error(), "To recover, push your local commits, then retry rwx run.")
 		})
 
 		t.Run("when init params match git params", func(t *testing.T) {
 			s := setupTest(t)
 			s.mockVCS.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
 			s.mockVCS.MockGeneratePatchFile = patchFile
-			// Uncommitted changes are present, so the skip notice should be shown.
+			s.mockVCS.MockPatchSource = vcstypes.Unpushed
 			s.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 				return []byte("diff"), nil, nil
 			}
@@ -580,14 +583,14 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 				require.False(t, strings.Contains(entry.Path, ".patches"), "expected no .patches entries when init params match git params, found: %s", entry.Path)
 			}
 
-			require.Contains(t, s.mockStderr.String(), `Skipping the git patch for uncommitted changes because "sha" was explicitly specified`)
+			require.Contains(t, s.mockStderr.String(), `Skipping the git patch for unpushed commits because "sha" was explicitly specified`)
 		})
 
 		t.Run("when init params match existing CLI git clone params", func(t *testing.T) {
 			s := setupTest(t)
 			s.mockVCS.MockGetCommit = "3e76c8295cd0ce4decbf7b56253c902ce296cb25"
 			s.mockVCS.MockGeneratePatchFile = patchFile
-			// Uncommitted changes are present, so the skip notice should be shown.
+			s.mockVCS.MockPatchSource = vcstypes.Mixed
 			s.mockVCS.MockGeneratePatch = func(pathspec []string) ([]byte, *vcs.LFSChangedFilesMetadata, error) {
 				return []byte("diff"), nil, nil
 			}
@@ -636,7 +639,7 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 				require.False(t, strings.Contains(entry.Path, ".patches"), "expected no .patches entries when init params match git params, found: %s", entry.Path)
 			}
 
-			require.Contains(t, s.mockStderr.String(), `Skipping the git patch for uncommitted changes because "ref" was explicitly specified`)
+			require.Contains(t, s.mockStderr.String(), `Skipping the git patch for unpushed commits and uncommitted changes because "ref" was explicitly specified`)
 		})
 
 		t.Run("when init params match git params but there are no uncommitted changes", func(t *testing.T) {
@@ -686,7 +689,7 @@ func TestService_InitiatingRunPatch(t *testing.T) {
 			_, err = s.service.InitiateRun(runConfig)
 			require.NoError(t, err)
 
-			require.NotContains(t, s.mockStderr.String(), "Skipping the git patch for uncommitted changes")
+			require.NotContains(t, s.mockStderr.String(), "Skipping the git patch")
 		})
 	})
 }

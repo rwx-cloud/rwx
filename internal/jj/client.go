@@ -425,6 +425,25 @@ func (c *Client) lfsFilesForPaths(st store, files []string) (vcstypes.LFSChanged
 	})
 }
 
+func (c *Client) PatchSource(base string, pathspec []string) vcstypes.PatchSource {
+	// @ holds the working copy; its parent is the last committed tree. Don't
+	// attribute a merge's combined changes to an arbitrary first parent.
+	out, _, err := c.resolve(workingCopy, `commit_id ++ " " ++ parents.map(|p| p.commit_id()).join(" ")`)
+	ids := strings.Fields(out)
+	if err != nil || len(ids) != 2 {
+		return vcstypes.LocalChanges
+	}
+	st, err := c.resolveStore()
+	if err != nil {
+		return vcstypes.LocalChanges
+	}
+	diff := func(from, to string) *exec.Cmd {
+		return c.storeCmdIn(st, withPathspec(vcstypes.PatchDiffArgs("--name-only", from, to), pathspec)...)
+	}
+	head, parent := ids[0], ids[1]
+	return vcstypes.ClassifyPatch(diff(base, parent), diff(parent, head))
+}
+
 func (c *Client) generatePatchData(pathspec []string) (vcstypes.PatchResult, *vcstypes.PatchError) {
 	base, err := c.GetCommit()
 	if base == "" || err != nil {

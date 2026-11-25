@@ -604,6 +604,17 @@ func TestPushRef(t *testing.T) {
 	require.Equal(t, head, pushed)
 }
 
+func TestPatchSource(t *testing.T) {
+	tempDir, base := repoFixture(t, "testdata/GeneratePatchFile-diff-committed")
+	client := &git.Client{Binary: "git", Dir: filepath.Join(tempDir, "repo")}
+	require.Equal(t, vcstypes.Unpushed, client.PatchSource(base, nil))
+
+	require.NoError(t, os.WriteFile(filepath.Join(client.Dir, "new.txt"), []byte("new"), 0o644))
+	require.Equal(t, vcstypes.Mixed, client.PatchSource(base, nil))
+	require.Equal(t, vcstypes.Unpushed, client.PatchSource(base, []string{":/", ":(top,exclude)new.txt"}))
+	require.Equal(t, vcstypes.Uncommitted, client.PatchSource(base, []string{":/", ":(top,exclude)foo.txt"}))
+}
+
 func TestGeneratePatchFile(t *testing.T) {
 	t.Run("does not write a patch file", func(t *testing.T) {
 		t.Run("when git is not installed", func(t *testing.T) {

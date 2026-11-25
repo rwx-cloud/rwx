@@ -12,6 +12,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/api"
 	"github.com/rwx-cloud/rwx/internal/errors"
 	"github.com/rwx-cloud/rwx/internal/fs"
+	"github.com/rwx-cloud/rwx/internal/vcs/vcstypes"
 )
 
 type RwxDirectoryEntry = api.RwxDirectoryEntry
@@ -238,10 +239,10 @@ func rwxDirectoryEntries(dir string) ([]RwxDirectoryEntry, error) {
 }
 
 func readRwxDirectoryEntries(paths []string, relativeTo string) ([]RwxDirectoryEntry, error) {
-	return readRwxDirectoryEntriesMatching(paths, relativeTo, nil)
+	return readRwxDirectoryEntriesMatching(paths, relativeTo, nil, vcstypes.LocalChanges)
 }
 
-func readRwxDirectoryEntriesMatching(paths []string, relativeTo string, include func(RwxDirectoryEntry) bool) ([]RwxDirectoryEntry, error) {
+func readRwxDirectoryEntriesMatching(paths []string, relativeTo string, include func(RwxDirectoryEntry) bool, source vcstypes.PatchSource) ([]RwxDirectoryEntry, error) {
 	entries := make([]RwxDirectoryEntry, 0)
 	var totalSize int
 	var patchSize int
@@ -295,7 +296,14 @@ func readRwxDirectoryEntriesMatching(paths []string, relativeTo string, include 
 		if patchSize > 0 && nonPatchSize <= maxSizeInBytes {
 			dirSizeMib := float64(nonPatchSize) / float64(bytesPerMib)
 			patchSizeMib := float64(patchSize) / float64(bytesPerMib)
-			return nil, fmt.Errorf("When RWX starts a run, it uploads the contents of the .rwx directory as well as a diff of your local git changes. The .rwx directory was %.1f MiB and the git changes are %.1f MiB, which is greater than the %d MiB combined limit. You will need to stash your changes or commit and push to start an RWX run from the CLI", dirSizeMib, patchSizeMib, maxSizeInMib)
+			recovery := "Push any unpushed commits and either stash or commit and push any uncommitted changes."
+			switch source {
+			case vcstypes.Unpushed:
+				recovery = "Push your local commits and retry."
+			case vcstypes.Uncommitted:
+				recovery = "Stash your uncommitted changes or commit and push them, then retry."
+			}
+			return nil, fmt.Errorf("The .rwx directory is %.1f MiB and the git patch for %s is %.1f MiB, greater than the %d MiB combined limit. %s", dirSizeMib, source, patchSizeMib, maxSizeInMib, recovery)
 		}
 		return nil, fmt.Errorf("the size of the these files exceed %dMiB: %s", maxSizeInMib, strings.Join(paths, ", "))
 	}
