@@ -41,3 +41,42 @@ func TestService_GetRunDetails(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestService_ResolveTaskAttempt(t *testing.T) {
+	for _, attempt := range []string{"", "0", "-1", "+1", "01", "1.5", "1e2", " 2", "2\n", "1000000000"} {
+		t.Run("invalid/"+attempt, func(t *testing.T) {
+			setup := setupTest(t)
+			id, err := setup.service.ResolveTaskAttempt("task-original", "", attempt)
+			require.Empty(t, id)
+			require.EqualError(t, err, "--attempt must be a positive integer with at most 9 digits")
+		})
+	}
+	for _, attempt := range []string{"1", "999999999"} {
+		t.Run("valid/"+attempt, func(t *testing.T) {
+			setup := setupTest(t)
+			setup.mockAPI.MockGetRunDetails = func(cfg api.RunDetailsConfig) (map[string]any, error) {
+				require.Equal(t, attempt, cfg.AttemptNumber)
+				return nil, api.ErrNotFound
+			}
+			id, err := setup.service.ResolveTaskAttempt("task-original", "", attempt)
+			require.Empty(t, id)
+			require.ErrorIs(t, err, api.ErrNotFound)
+		})
+	}
+	for name, summary := range map[string]map[string]any{
+		"unsupported":   {},
+		"run":           {"id": "run-123", "tasks": []any{}},
+		"wrong attempt": {"id": "task-latest", "attempt_number": float64(3)},
+		"missing ID":    {"attempt_number": float64(2)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			setup := setupTest(t)
+			setup.mockAPI.MockGetRunDetails = func(cfg api.RunDetailsConfig) (map[string]any, error) {
+				return summary, nil
+			}
+			id, err := setup.service.ResolveTaskAttempt("task-original", "", "2")
+			require.Empty(t, id)
+			require.EqualError(t, err, "requested task attempt was not returned by the API")
+		})
+	}
+}
