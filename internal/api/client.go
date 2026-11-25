@@ -1874,9 +1874,17 @@ func (c Client) RunStatus(cfg RunStatusConfig) (RunStatusResult, error) {
 
 func (c Client) GetRunDetails(cfg RunDetailsConfig) (map[string]any, error) {
 	endpoint := "/mint/api/results/" + url.PathEscape(cfg.RunID)
+	params := url.Values{}
 	if cfg.TaskKey != "" {
-		params := url.Values{}
 		params.Set("task_key", cfg.TaskKey)
+	}
+	if cfg.View != "" {
+		params.Set("view", cfg.View)
+	}
+	if cfg.AttemptNumber != "" {
+		params.Set("attempt_number", cfg.AttemptNumber)
+	}
+	if len(params) > 0 {
 		endpoint += "?" + params.Encode()
 	}
 
@@ -1894,7 +1902,12 @@ func (c Client) GetRunDetails(cfg RunDetailsConfig) (map[string]any, error) {
 	defer resp.Body.Close()
 
 	result := map[string]any{}
-	if err = decodeResponseJSON(resp, &result); err != nil {
+	if cfg.TaskKey != "" && cfg.AttemptNumber != "" {
+		err = decodeTaskKeyResponseJSON(resp, cfg.TaskKey, &result)
+	} else {
+		err = decodeResponseJSON(resp, &result)
+	}
+	if err != nil {
 		return nil, err
 	}
 

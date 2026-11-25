@@ -24,6 +24,7 @@ var (
 	ResultsDefinition string
 	ResultsCommit     string
 	ResultsTaskKey    string
+	ResultsAttempt    string
 
 	resultsCmd = &cobra.Command{
 		GroupID: "outputs",
@@ -42,6 +43,10 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			useJson := useJsonOutput()
 			taskKeySet := cmd.Flags().Changed("task")
+			attemptSet := cmd.Flags().Changed("attempt")
+			if attemptSet && ResultsTaskKey == "" && len(args) == 0 {
+				return errors.New("--attempt requires a task ID or --task")
+			}
 
 			var runID string
 			runIDFromGit := false
@@ -61,9 +66,19 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 				runIDFromGit = true
 			}
 
+			taskKey := ResultsTaskKey
+			if attemptSet {
+				var err error
+				runID, err = service.ResolveTaskAttempt(runID, taskKey, ResultsAttempt)
+				if err != nil {
+					return handleResultsTaskKeyError(err)
+				}
+				taskKey = ""
+			}
+
 			result, err := service.GetRunStatus(cli.GetRunStatusConfig{
 				RunID:    runID,
-				TaskKey:  ResultsTaskKey,
+				TaskKey:  taskKey,
 				Wait:     ResultsWait,
 				FailFast: ResultsFailFast,
 				Json:     useJson,
@@ -77,7 +92,7 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 
 			var promptResult *cli.GetRunPromptResult
 			var promptErr error
-			if taskKeySet {
+			if taskKeySet && !attemptSet {
 				promptResult, promptErr = service.GetRunPromptByTaskKey(runID, ResultsTaskKey)
 				if promptErr != nil {
 					promptErr = handleResultsTaskKeyError(promptErr)
@@ -86,6 +101,9 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 				promptID := result.RunID
 				if result.TaskID != "" {
 					promptID = result.TaskID
+				}
+				if attemptSet {
+					promptID = runID
 				}
 				promptResult, promptErr = service.GetRunPrompt(promptID)
 			}
@@ -122,7 +140,7 @@ list of JSON fields, see https://rwx.com/docs/results or run:
 				// resolved run ID) so a task-scoped lookup stays task-scoped.
 				details, err := service.GetRunDetails(cli.GetRunDetailsConfig{
 					RunID:   runID,
-					TaskKey: ResultsTaskKey,
+					TaskKey: taskKey,
 				})
 				if err != nil {
 					return err
@@ -192,6 +210,7 @@ func init() {
 	resultsCmd.Flags().StringVar(&ResultsDefinition, "definition", "", "get results for a specific definition path")
 	resultsCmd.Flags().StringVar(&ResultsCommit, "commit", "", "get results for a specific commit SHA")
 	resultsCmd.Flags().StringVar(&ResultsTaskKey, "task", "", "task key (e.g., ci.checks.lint); resolves the task by key instead of ID")
+	resultsCmd.Flags().StringVar(&ResultsAttempt, "attempt", "", "task attempt number (requires a task ID or --task)")
 }
 
 func handleResultsTaskKeyError(err error) error {

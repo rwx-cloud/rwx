@@ -14,6 +14,7 @@ var (
 	LogsZip         bool
 	LogsOpen        bool
 	LogsTaskKey     string
+	LogsAttempt     string
 
 	logsCmd = &cobra.Command{
 		GroupID: "outputs",
@@ -65,16 +66,26 @@ var (
 				}
 				cfg.RunID = runID
 				cfg.TaskKey = LogsTaskKey
+			} else {
+				cfg.TaskID = args[0]
+			}
 
-				_, err = service.DownloadLogs(cfg)
+			if cmd.Flags().Changed("attempt") {
+				id := cfg.TaskID
+				if taskKeySet {
+					id = cfg.RunID
+				}
+				cfg.TaskID, err = service.ResolveTaskAttempt(id, cfg.TaskKey, LogsAttempt)
 				if err != nil {
 					return handleTaskKeyError(err)
 				}
-				return nil
+				cfg.RunID = ""
+				cfg.TaskKey = ""
 			}
-
-			cfg.TaskID = args[0]
 			_, err = service.DownloadLogs(cfg)
+			if taskKeySet {
+				return handleTaskKeyError(err)
+			}
 			return err
 		},
 		Short: "Download logs for a task",
@@ -99,6 +110,7 @@ func init() {
 	logsCmd.Flags().BoolVar(&LogsZip, "zip", false, "skip extraction and save raw zip archive")
 	logsCmd.Flags().BoolVar(&LogsOpen, "open", false, "automatically open the downloaded file(s)")
 	logsCmd.Flags().StringVar(&LogsTaskKey, "task", "", "task key (e.g., ci.checks.lint); resolves the task by key instead of ID")
+	logsCmd.Flags().StringVar(&LogsAttempt, "attempt", "", "task attempt number (requires a task ID or --task)")
 }
 
 func logsOutputFlagSet(cmd *cobra.Command) (bool, error) {
