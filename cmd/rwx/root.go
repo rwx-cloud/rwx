@@ -14,6 +14,7 @@ import (
 	"github.com/rwx-cloud/rwx/internal/docs"
 	"github.com/rwx-cloud/rwx/internal/docstoken"
 	"github.com/rwx-cloud/rwx/internal/errors"
+	"github.com/rwx-cloud/rwx/internal/releases"
 	"github.com/rwx-cloud/rwx/internal/retry"
 	"github.com/rwx-cloud/rwx/internal/ssh"
 	"github.com/rwx-cloud/rwx/internal/telemetry"
@@ -103,15 +104,19 @@ var (
 				DockerCLI:             dockerCli,
 				DocsClient:            docs.Client{Host: docsHost, Scheme: docsScheme},
 				DocsTokenBackend:      docsTokenBackend,
+				ReleasesClient:        releases.Client{},
 				AccessTokenBackend:    accessTokenBackend,
 				VersionsBackend:       versionsBackend,
 				SkillVersionsBackend:  skillVersionsBackend,
 				TelemetryCollector:    telemetryCollector,
 				Stdin:                 os.Stdin,
+				StdinIsTTY:            term.IsTerminal(int(os.Stdin.Fd())),
 				Stdout:                os.Stdout,
 				StdoutIsTTY:           term.IsTerminal(int(os.Stdout.Fd())),
 				Stderr:                os.Stderr,
 				StderrIsTTY:           term.IsTerminal(int(os.Stderr.Fd())),
+
+				HideLatestVersionMessage: cmd == upgradeCmd,
 			})
 			if err != nil {
 				return errors.Wrap(err, "unable to initialize CLI")
@@ -252,6 +257,7 @@ func init() {
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(sshCmd)
 	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(upgradeCmd)
 	rootCmd.AddCommand(vaultsCmd)
 	rootCmd.AddCommand(cronsCmd)
 	rootCmd.AddCommand(concurrencyPoolsCmd)
